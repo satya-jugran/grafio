@@ -4,11 +4,14 @@ import { Edge } from './Edge';
 import { GraphIndex } from './Graph/GraphIndex';
 import { GraphTraversal } from './Graph/GraphTraversal';
 import { GraphAdminOps } from './Graph/GraphAdminOps';
+import { GraphTransaction } from './Graph/GraphTransaction';
 import type { TraversalOptions } from './Graph/TraversalOptions';
 import type { IStorageProvider } from './storage/IStorageProvider';
 
 // Re-export for external use
 export type { TraversalOptions } from './Graph/TraversalOptions';
+export { GraphTransaction } from './Graph/GraphTransaction';
+export { TransactionNotActiveError, TransactionFailedError } from './Graph/GraphTransaction';
 
 /**
  * A graph database with pluggable storage backend.
@@ -52,6 +55,22 @@ export class Graph {
   }
 
   /**
+   * Checks if the storage provider supports transactions.
+   * @returns true if transactions are supported, false otherwise
+   */
+  supportsTransactions(): boolean {
+    return this._index._getStore().supportsTransactions();
+  }
+
+  /**
+   * Creates a new transaction for atomic multi-operation updates.
+   * @returns A new GraphTransaction instance
+   */
+  createTransaction(): GraphTransaction {
+    return new GraphTransaction(this._index._getStore());
+  }
+
+  /**
    * Returns all nodes in the graph.
    */
   async getNodes(): Promise<readonly Node[]> {
@@ -85,20 +104,22 @@ export class Graph {
    * Adds a new node to the graph.
    * @param type - The type (label) of the node
    * @param properties - Optional JSON properties
+   * @param transaction - Optional transaction to use for this operation
    * @returns The newly created Node
    */
-  async addNode(type: string, properties: Record<string, unknown> = {}): Promise<Node> {
-    return this._index.addNode(type, properties);
+  async addNode(type: string, properties: Record<string, unknown> = {}, transaction?: GraphTransaction): Promise<Node> {
+    return this._index.addNode(type, properties, transaction);
   }
 
   /**
    * Removes a node from the graph.
    * @param id - Id of the node to remove
    * @param cascade - If true, also removes all incident edges (default: false)
+   * @param transaction - Optional transaction to use for this operation
    * @returns true if the node was removed, false if it didn't exist
    */
-  async removeNode(id: string, cascade: boolean = false): Promise<boolean> {
-    return this._index.removeNode(id, cascade);
+  async removeNode(id: string, cascade: boolean = false, transaction?: GraphTransaction): Promise<boolean> {
+    return this._index.removeNode(id, cascade, transaction);
   }
 
   /**
@@ -136,24 +157,27 @@ export class Graph {
    * @param targetId - Id of the target node
    * @param type - The relationship type
    * @param properties - Optional JSON properties
+   * @param transaction - Optional transaction to use for this operation
    * @returns The newly created Edge
    */
   async addEdge(
     sourceId: string,
     targetId: string,
     type: string,
-    properties: Record<string, unknown> = {}
+    properties: Record<string, unknown> = {},
+    transaction?: GraphTransaction
   ): Promise<Edge> {
-    return this._index.addEdge(sourceId, targetId, type, properties);
+    return this._index.addEdge(sourceId, targetId, type, properties, transaction);
   }
 
   /**
    * Removes an edge from the graph.
    * @param id - Id of the edge to remove
+   * @param transaction - Optional transaction to use for this operation
    * @returns true if the edge was removed, false if it didn't exist
    */
-  async removeEdge(id: string): Promise<boolean> {
-    return this._index.removeEdge(id);
+  async removeEdge(id: string, transaction?: GraphTransaction): Promise<boolean> {
+    return this._index.removeEdge(id, transaction);
   }
 
   /**
@@ -278,8 +302,8 @@ export class Graph {
    * @param key - The property key to add
    * @param value - The property value (must be a primitive)
    */
-  async addNodeProperty(nodeId: string, key: string, value: unknown): Promise<void> {
-    return this._index.addNodeProperty(nodeId, key, value);
+  async addNodeProperty(nodeId: string, key: string, value: unknown, transaction?: GraphTransaction): Promise<void> {
+    return this._index.addNodeProperty(nodeId, key, value, transaction);
   }
 
   /**
@@ -288,8 +312,8 @@ export class Graph {
    * @param key - The property key to update
    * @param value - The new value (must be a primitive)
    */
-  async updateNodeProperty(nodeId: string, key: string, value: unknown): Promise<void> {
-    return this._index.updateNodeProperty(nodeId, key, value);
+  async updateNodeProperty(nodeId: string, key: string, value: unknown, transaction?: GraphTransaction): Promise<void> {
+    return this._index.updateNodeProperty(nodeId, key, value, transaction);
   }
 
   /**
@@ -297,16 +321,16 @@ export class Graph {
    * @param nodeId - The id of the node
    * @param key - The property key to delete
    */
-  async deleteNodeProperty(nodeId: string, key: string): Promise<void> {
-    return this._index.deleteNodeProperty(nodeId, key);
+  async deleteNodeProperty(nodeId: string, key: string, transaction?: GraphTransaction): Promise<void> {
+    return this._index.deleteNodeProperty(nodeId, key, transaction);
   }
 
   /**
    * Clears all properties from a node.
    * @param nodeId - The id of the node
    */
-  async clearNodeProperties(nodeId: string): Promise<void> {
-    return this._index.clearNodeProperties(nodeId);
+  async clearNodeProperties(nodeId: string, transaction?: GraphTransaction): Promise<void> {
+    return this._index.clearNodeProperties(nodeId, transaction);
   }
 
   // ---------------------------------------------------------------------------
@@ -319,8 +343,8 @@ export class Graph {
    * @param key - The property key to add
    * @param value - The property value (must be a primitive)
    */
-  async addEdgeProperty(edgeId: string, key: string, value: unknown): Promise<void> {
-    return this._index.addEdgeProperty(edgeId, key, value);
+  async addEdgeProperty(edgeId: string, key: string, value: unknown, transaction?: GraphTransaction): Promise<void> {
+    return this._index.addEdgeProperty(edgeId, key, value, transaction);
   }
 
   /**
@@ -329,8 +353,8 @@ export class Graph {
    * @param key - The property key to update
    * @param value - The new value (must be a primitive)
    */
-  async updateEdgeProperty(edgeId: string, key: string, value: unknown): Promise<void> {
-    return this._index.updateEdgeProperty(edgeId, key, value);
+  async updateEdgeProperty(edgeId: string, key: string, value: unknown, transaction?: GraphTransaction): Promise<void> {
+    return this._index.updateEdgeProperty(edgeId, key, value, transaction);
   }
 
   /**
@@ -338,16 +362,16 @@ export class Graph {
    * @param edgeId - The id of the edge
    * @param key - The property key to delete
    */
-  async deleteEdgeProperty(edgeId: string, key: string): Promise<void> {
-    return this._index.deleteEdgeProperty(edgeId, key);
+  async deleteEdgeProperty(edgeId: string, key: string, transaction?: GraphTransaction): Promise<void> {
+    return this._index.deleteEdgeProperty(edgeId, key, transaction);
   }
 
   /**
    * Clears all properties from an edge.
    * @param edgeId - The id of the edge
    */
-  async clearEdgeProperties(edgeId: string): Promise<void> {
-    return this._index.clearEdgeProperties(edgeId);
+  async clearEdgeProperties(edgeId: string, transaction?: GraphTransaction): Promise<void> {
+    return this._index.clearEdgeProperties(edgeId, transaction);
   }
 
   /**

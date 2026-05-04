@@ -1,6 +1,17 @@
 import type { NodeData, EdgeData, GraphData } from '../types';
 
 /**
+ * Represents a transaction handle returned by a storage provider.
+ * Contains a unique transaction identifier and optional backend-specific context.
+ */
+export interface ITransactionHandle {
+  /** Unique transaction identifier */
+  id: string;
+  /** Backend-specific context (e.g., MongoDB ClientSession) */
+  context?: unknown;
+}
+
+/**
  * Contract that every storage backend must fulfill.
  *
  * All methods are async (v5.0+) to support both synchronous in-memory providers
@@ -37,25 +48,31 @@ export interface IStorageProvider {
   /**
    * Persist a node.  The node is identified by `node.id`.
    * Must update: node store, type index, property value index.
+   * @param transaction - Optional transaction handle for transactional storage providers
    */
-  insertNode(node: NodeData): Promise<void>;
+  insertNode(node: NodeData, transaction?: ITransactionHandle): Promise<void>;
 
   /**
    * Remove a node by id.
    * Must update: node store, type index, property value index.
    * Does NOT touch edges — the caller (GraphIndex) handles cascade logic.
+   * @param transaction - Optional transaction handle for transactional storage providers
    */
-  deleteNode(id: string): Promise<void>;
+  deleteNode(id: string, transaction?: ITransactionHandle): Promise<void>;
 
   // ---------------------------------------------------------------------------
   // Node queries
   // ---------------------------------------------------------------------------
 
-  /** Returns true if a node with the given id exists. */
-  hasNode(id: string): Promise<boolean>;
+  /**
+   * Returns true if a node with the given id exists.
+   */
+  hasNode(id: string, transaction?: ITransactionHandle): Promise<boolean>;
 
-  /** Returns the NodeData for the given id, or undefined if not found. */
-  getNode(id: string): Promise<NodeData | undefined>;
+  /**
+   * Returns the NodeData for the given id, or undefined if not found.
+   */
+  getNode(id: string, transaction?: ITransactionHandle): Promise<NodeData | undefined>;
 
   /**
    * Returns all stored nodes, optionally limited.
@@ -83,24 +100,30 @@ export interface IStorageProvider {
   /**
    * Persist an edge.  The edge is identified by `edge.id`.
    * Must update: edge store, edge-type index, adjacency indexes (source + target).
+   * @param transaction - Optional transaction handle for transactional storage providers
    */
-  insertEdge(edge: EdgeData): Promise<void>;
+  insertEdge(edge: EdgeData, transaction?: ITransactionHandle): Promise<void>;
 
   /**
    * Remove an edge by id.
    * Must update: edge store, edge-type index, adjacency indexes (source + target).
+   * @param transaction - Optional transaction handle for transactional storage providers
    */
-  deleteEdge(id: string): Promise<void>;
+  deleteEdge(id: string, transaction?: ITransactionHandle): Promise<void>;
 
   // ---------------------------------------------------------------------------
   // Edge queries
   // ---------------------------------------------------------------------------
 
-  /** Returns true if an edge with the given id exists. */
-  hasEdge(id: string): Promise<boolean>;
+  /**
+   * Returns true if an edge with the given id exists.
+   */
+  hasEdge(id: string, transaction?: ITransactionHandle): Promise<boolean>;
 
-  /** Returns the EdgeData for the given id, or undefined if not found. */
-  getEdge(id: string): Promise<EdgeData | undefined>;
+  /**
+   * Returns the EdgeData for the given id, or undefined if not found.
+   */
+  getEdge(id: string, transaction?: ITransactionHandle): Promise<EdgeData | undefined>;
 
   /** Returns all stored edges. */
   getAllEdges(): Promise<EdgeData[]>;
@@ -135,11 +158,12 @@ export interface IStorageProvider {
    * @param id - The id of the node or edge
    * @param key - The property key to add
    * @param value - The property value (must be a primitive)
+   * @param transaction - Optional transaction handle for transactional storage providers
    * @throws NodeNotFoundError/EdgeNotFoundError if the target doesn't exist
    * @throws PropertyAlreadyExistsError if the property key already exists
    * @throws InvalidPropertyError if the value is not a primitive
    */
-  addProperty(target: 'node' | 'edge', id: string, key: string, value: unknown): Promise<void>;
+  addProperty(target: 'node' | 'edge', id: string, key: string, value: unknown, transaction?: ITransactionHandle): Promise<void>;
 
   /**
    * Updates an existing property on a node or edge. Fails if the property doesn't exist.
@@ -147,28 +171,31 @@ export interface IStorageProvider {
    * @param id - The id of the node or edge
    * @param key - The property key to update
    * @param value - The new value (must be a primitive)
+   * @param transaction - Optional transaction handle for transactional storage providers
    * @throws NodeNotFoundError/EdgeNotFoundError if the target doesn't exist
    * @throws PropertyNotFoundError if the property key doesn't exist
    * @throws InvalidPropertyError if the value is not a primitive
    */
-  updateProperty(target: 'node' | 'edge', id: string, key: string, value: unknown): Promise<void>;
+  updateProperty(target: 'node' | 'edge', id: string, key: string, value: unknown, transaction?: ITransactionHandle): Promise<void>;
 
   /**
    * Deletes a property from a node or edge.
    * @param target - Either 'node' or 'edge'
    * @param id - The id of the node or edge
    * @param key - The property key to delete
+   * @param transaction - Optional transaction handle for transactional storage providers
    * @throws NodeNotFoundError/EdgeNotFoundError if the target doesn't exist
    */
-  deleteProperty(target: 'node' | 'edge', id: string, key: string): Promise<void>;
+  deleteProperty(target: 'node' | 'edge', id: string, key: string, transaction?: ITransactionHandle): Promise<void>;
 
   /**
    * Clears all properties from a node or edge.
    * @param target - Either 'node' or 'edge'
    * @param id - The id of the node or edge
+   * @param transaction - Optional transaction handle for transactional storage providers
    * @throws NodeNotFoundError/EdgeNotFoundError if the target doesn't exist
    */
-  clearProperties(target: 'node' | 'edge', id: string): Promise<void>;
+  clearProperties(target: 'node' | 'edge', id: string, transaction?: ITransactionHandle): Promise<void>;
 
   // ---------------------------------------------------------------------------
   // Index management
@@ -217,5 +244,33 @@ export interface IStorageProvider {
    * @throws EdgeAlreadyExistsError if an edge id is already present
    * @throws NodeNotFoundError if an edge references a non-existent node
    */
-  importJSON(data: GraphData): Promise<void>;
+ importJSON(data: GraphData): Promise<void>;
+
+ // ---------------------------------------------------------------------------
+ // Transaction support
+ // ---------------------------------------------------------------------------
+
+ /**
+  * Checks if the storage provider supports transactions.
+  * @returns true if transactions are supported, false otherwise
+  */
+ supportsTransactions(): boolean;
+
+ /**
+  * Starts a new transaction.
+  * @returns A transaction handle that can be used to commit or rollback
+  */
+ beginTransaction(): Promise<ITransactionHandle>;
+
+ /**
+  * Commits the given transaction, making all changes atomic.
+  * @param handle - The transaction handle returned by beginTransaction
+  */
+ commitTransaction(handle: ITransactionHandle): Promise<void>;
+
+ /**
+  * Rolls back the given transaction, discarding all changes.
+  * @param handle - The transaction handle returned by beginTransaction
+  */
+ rollbackTransaction(handle: ITransactionHandle): Promise<void>;
 }

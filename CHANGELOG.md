@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.3.0] - 2026-05-04
+
+### ✨ New Features
+
+1. **Transaction Support**
+   - Added `GraphTransaction` class for managing multi-operation atomic updates
+   - `begin()`, `commit()`, `rollback()` lifecycle methods
+   - `isActive()`, `isFailed()` state tracking
+   - `TransactionNotActiveError` and `TransactionFailedError` error classes
+
+2. **Storage Provider Transaction Interface**
+   - Extended `IStorageProvider` with `ITransactionHandle` interface and transaction methods
+   - `supportsTransactions()`, `beginTransaction()`, `commitTransaction()`, `rollbackTransaction()`
+   - All mutation and query methods now accept optional transaction handle
+
+3. **MongoDB Transaction Implementation**
+   - MongoDB transactions using `ClientSession` with replica set support
+   - All operations pass session to MongoDB for proper transaction isolation
+   - Requires MongoDB 4.0+ with replica set or sharded cluster
+
+4. **InMemory Transaction Implementation**
+   - Copy-on-write snapshot approach for transaction isolation
+   - Snapshots stored by transaction ID for concurrent transaction support
+   - On commit: snapshot cleared, live state retains changes
+   - On rollback: live state restored from snapshot
+
+5. **Graph API Updates**
+   - Added `createTransaction()` method to `Graph` class
+   - Added `supportsTransactions()` method to check provider capability
+   - All mutation methods (`addNode`, `addEdge`, `removeNode`, `removeEdge`) accept optional transaction parameter
+   - All property methods (`addNodeProperty`, `updateNodeProperty`, `deleteNodeProperty`, `clearNodeProperties`, `addEdgeProperty`, `updateEdgeProperty`, `deleteEdgeProperty`, `clearEdgeProperties`) accept optional transaction parameter
+   - Transaction handle passed through to storage provider operations
+
 ## [5.2.0] - 2026-05-03
 
 ### ✨ New Features

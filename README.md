@@ -34,6 +34,11 @@ A lightweight **async-first** TypeScript graph database with **pluggable storage
 - **Deep-frozen properties** — immutability guarantees on node/edge data
 - **Graph factories** — `MongoGraphFactory` and `InMemoryGraphFactory` for controlled instance creation
 
+### Transactions
+- **Atomic multi-operation updates** — group multiple operations into a single atomic unit
+- **Automatic rollback** — discard all changes if an error occurs during the transaction
+- **Copy-on-write snapshots** (in-memory) — isolation without blocking
+- **MongoDB sessions** — native transaction support when using MongoDB backend
 
 ## Installation
 
@@ -175,8 +180,8 @@ Omit `storageProvider` to use the built-in `InMemoryStorageProvider`.
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `addNode(type, properties?)` | `Promise<Node>` | Add a new node with type label |
-| `removeNode(id, cascade?)` | `Promise<boolean>` | Remove node; `cascade=true` removes incident edges |
+| `addNode(type, properties?, transaction?)` | `Promise<Node>` | Add a new node with type label |
+| `removeNode(id, cascade?, transaction?)` | `Promise<boolean>` | Remove node; `cascade=true` removes incident edges |
 | `getNode(id)` | `Promise<Node \| undefined>` | Get node by id |
 | `hasNode(id)` | `Promise<boolean>` | Check if node exists |
 | `getNodes()` | `Promise<readonly Node[]>` | Get all nodes |
@@ -187,18 +192,18 @@ Omit `storageProvider` to use the built-in `InMemoryStorageProvider`.
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `addNodeProperty(nodeId, key, value)` | `Promise<void>` | Add a supported primitive property to a node |
-| `updateNodeProperty(nodeId, key, value)` | `Promise<void>` | Update an existing property on a node |
-| `deleteNodeProperty(nodeId, key)` | `Promise<void>` | Delete a property from a node |
-| `clearNodeProperties(nodeId)` | `Promise<void>` | Remove all properties from a node |
+| `addNodeProperty(nodeId, key, value, transaction?)` | `Promise<void>` | Add a supported primitive property to a node |
+| `updateNodeProperty(nodeId, key, value, transaction?)` | `Promise<void>` | Update an existing property on a node |
+| `deleteNodeProperty(nodeId, key, transaction?)` | `Promise<void>` | Delete a property from a node |
+| `clearNodeProperties(nodeId, transaction?)` | `Promise<void>` | Remove all properties from a node |
 | `createIndex('node', propertyKey, type?)` | `Promise<void>` | Create index on node property, optionally compound with type |
 
 #### Edge Operations
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `addEdge(sourceId, targetId, type, properties?)` | `Promise<Edge>` | Add a directed edge with relationship type |
-| `removeEdge(id)` | `Promise<boolean>` | Remove edge by id |
+| `addEdge(sourceId, targetId, type, properties?, transaction?)` | `Promise<Edge>` | Add a directed edge with relationship type |
+| `removeEdge(id, transaction?)` | `Promise<boolean>` | Remove edge by id |
 | `getEdge(id)` | `Promise<Edge \| undefined>` | Get edge by id |
 | `hasEdge(id)` | `Promise<boolean>` | Check if edge exists |
 | `getEdges()` | `Promise<readonly Edge[]>` | Get all edges |
@@ -208,10 +213,10 @@ Omit `storageProvider` to use the built-in `InMemoryStorageProvider`.
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `addEdgeProperty(edgeId, key, value)` | `Promise<void>` | Add a supported primitive property to an edge |
-| `updateEdgeProperty(edgeId, key, value)` | `Promise<void>` | Update an existing property on an edge |
-| `deleteEdgeProperty(edgeId, key)` | `Promise<void>` | Delete a property from an edge |
-| `clearEdgeProperties(edgeId)` | `Promise<void>` | Remove all properties from an edge |
+| `addEdgeProperty(edgeId, key, value, transaction?)` | `Promise<void>` | Add a supported primitive property to an edge |
+| `updateEdgeProperty(edgeId, key, value, transaction?)` | `Promise<void>` | Update an existing property on an edge |
+| `deleteEdgeProperty(edgeId, key, transaction?)` | `Promise<void>` | Delete a property from an edge |
+| `clearEdgeProperties(edgeId, transaction?)` | `Promise<void>` | Remove all properties from an edge |
 | `createIndex('edge', propertyKey, type?)` | `Promise<void>` | Create index on edge property, optionally compound with type |
 
 #### Navigation
@@ -350,6 +355,33 @@ edge.properties;  // { order: 1 }
 edge.toJSON();    // { id: '...', sourceId: '...', targetId: '...', type: 'CONTAINS', properties: { order: 1 } }
 ```
 
+## Transactions
+
+Transactions allow batching multiple operations into a single atomic unit. All changes can be committed together or rolled back if any operation fails.
+
+```typescript
+import { Graph, GraphTransaction } from 'grafio';
+
+const graph = new Graph();
+const txn = graph.createTransaction();
+await txn.begin();
+
+await graph.addNode('Person', { name: 'Alice' }, txn);
+await graph.addNode('Person', { name: 'Bob' }, txn);
+await graph.addEdge(alice.id, bob.id, 'KNOWS', {}, txn);
+
+await txn.commit();   // Atomically applies all changes
+// or
+await txn.rollback(); // Discards all changes
+```
+
+**Transaction lifecycle:**
+- `begin()` — starts a new transaction
+- `commit()` — applies all changes atomically
+- `rollback()` — discards all changes
+
+**Note:** MongoDB storage provider requires a replica set for transaction support.
+
 ## Error Handling
 
 ```typescript
@@ -399,6 +431,8 @@ Available error classes:
 - `InvalidPropertyError` — thrown when property value is not a supported primitive type
 - `PropertyAlreadyExistsError` — thrown by `addNodeProperty`/`addEdgeProperty` when property already exists
 - `PropertyNotFoundError` — thrown by `updateNodeProperty`/`updateEdgeProperty` when property does not exist
+- `TransactionNotActiveError` — thrown when `commit()` or `rollback()` is called without an active transaction
+- `TransactionFailedError` — thrown when `commit()` is called on a transaction that has been marked as failed
 
 ## Serialization & Persistence
 

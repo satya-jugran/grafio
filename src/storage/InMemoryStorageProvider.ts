@@ -1,5 +1,5 @@
 import type { NodeData, EdgeData, GraphData } from '../types';
-import type { IStorageProvider } from './IStorageProvider';
+import type { IStorageProvider, ITransactionHandle } from './IStorageProvider';
 import {
   NodeAlreadyExistsError,
   EdgeAlreadyExistsError,
@@ -167,7 +167,7 @@ export class InMemoryStorageProvider implements IStorageProvider {
   // Node mutations
   // ---------------------------------------------------------------------------
 
-  async insertNode(node: NodeData): Promise<void> {
+  async insertNode(node: NodeData, _transaction?: ITransactionHandle): Promise<void> {
     this._insertNode(node, false);
   }
 
@@ -189,7 +189,7 @@ export class InMemoryStorageProvider implements IStorageProvider {
     this._indexNodeProperties(stored);
   }
 
-  async deleteNode(id: string): Promise<void> {
+  async deleteNode(id: string, _transaction?: ITransactionHandle): Promise<void> {
     const node = this._nodes.get(id);
     if (!node) return;
 
@@ -210,11 +210,11 @@ export class InMemoryStorageProvider implements IStorageProvider {
   // Node queries
   // ---------------------------------------------------------------------------
 
-  async hasNode(id: string): Promise<boolean> {
+  async hasNode(id: string, _transaction?: ITransactionHandle): Promise<boolean> {
     return this._nodes.has(id);
   }
 
-  async getNode(id: string): Promise<NodeData | undefined> {
+  async getNode(id: string, _transaction?: ITransactionHandle): Promise<NodeData | undefined> {
     const node = this._nodes.get(id);
     return node ? deepClone(node) : undefined;
   }
@@ -257,7 +257,7 @@ export class InMemoryStorageProvider implements IStorageProvider {
   // Edge mutations
   // ---------------------------------------------------------------------------
 
-  async insertEdge(edge: EdgeData): Promise<void> {
+  async insertEdge(edge: EdgeData, _transaction?: ITransactionHandle): Promise<void> {
     this._insertEdge(edge, false);
   }
 
@@ -287,7 +287,7 @@ export class InMemoryStorageProvider implements IStorageProvider {
     this._edgesByType.get(edge.type)!.add(edge.id);
   }
 
-  async deleteEdge(id: string): Promise<void> {
+  async deleteEdge(id: string, _transaction?: ITransactionHandle): Promise<void> {
     const edge = this._edges.get(id);
     if (!edge) return;
 
@@ -318,11 +318,11 @@ export class InMemoryStorageProvider implements IStorageProvider {
   // Edge queries
   // ---------------------------------------------------------------------------
 
-  async hasEdge(id: string): Promise<boolean> {
+  async hasEdge(id: string, _transaction?: ITransactionHandle): Promise<boolean> {
     return this._edges.has(id);
   }
 
-  async getEdge(id: string): Promise<EdgeData | undefined> {
+  async getEdge(id: string, _transaction?: ITransactionHandle): Promise<EdgeData | undefined> {
     const edge = this._edges.get(id);
     return edge ? deepClone(edge) : undefined;
   }
@@ -427,7 +427,7 @@ export class InMemoryStorageProvider implements IStorageProvider {
    * @throws PropertyAlreadyExistsError if the property key already exists
    * @throws InvalidPropertyError if the value is not a primitive
    */
-  async addProperty(target: 'node' | 'edge', id: string, key: string, value: unknown): Promise<void> {
+  async addProperty(target: 'node' | 'edge', id: string, key: string, value: unknown, _transaction?: ITransactionHandle): Promise<void> {
     if (!isPrimitive(value)) {
       throw new InvalidPropertyError(key, value);
     }
@@ -460,7 +460,7 @@ export class InMemoryStorageProvider implements IStorageProvider {
    * @throws PropertyNotFoundError if the property key doesn't exist
    * @throws InvalidPropertyError if the value is not a primitive
    */
-  async updateProperty(target: 'node' | 'edge', id: string, key: string, value: unknown): Promise<void> {
+  async updateProperty(target: 'node' | 'edge', id: string, key: string, value: unknown, _transaction?: ITransactionHandle): Promise<void> {
     if (!isPrimitive(value)) {
       throw new InvalidPropertyError(key, value);
     }
@@ -495,7 +495,7 @@ export class InMemoryStorageProvider implements IStorageProvider {
    * Deletes a property from a node or edge.
    * @throws NodeNotFoundError/EdgeNotFoundError if the target doesn't exist
    */
-  async deleteProperty(target: 'node' | 'edge', id: string, key: string): Promise<void> {
+  async deleteProperty(target: 'node' | 'edge', id: string, key: string, _transaction?: ITransactionHandle): Promise<void> {
     const record = target === 'node' ? this._nodes.get(id) : this._edges.get(id);
     if (!record) {
       if (target === 'node') {
@@ -519,7 +519,7 @@ export class InMemoryStorageProvider implements IStorageProvider {
    * Clears all properties from a node or edge.
    * @throws NodeNotFoundError/EdgeNotFoundError if the target doesn't exist
    */
-  async clearProperties(target: 'node' | 'edge', id: string): Promise<void> {
+  async clearProperties(target: 'node' | 'edge', id: string, _transaction?: ITransactionHandle): Promise<void> {
     const record = target === 'node' ? this._nodes.get(id) : this._edges.get(id);
     if (!record) {
       if (target === 'node') {
@@ -582,5 +582,182 @@ export class InMemoryStorageProvider implements IStorageProvider {
       // _insertEdge throws EdgeAlreadyExistsError on duplicate ids
       this._insertEdge(edgeData, true);
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Transaction support
+  // ---------------------------------------------------------------------------
+
+  /**
+   * In-memory transactions use copy-on-write with snapshots.
+   * Snapshots are stored by transaction ID to support concurrent transactions.
+   */
+  private _snapshots = new Map<string, {
+    nodes: Map<string, NodeData>;
+    edges: Map<string, EdgeData>;
+    nodesByType: Map<string, Set<string>>;
+    edgesByType: Map<string, Set<string>>;
+    edgesBySource: Map<string, Set<string>>;
+    edgesByTarget: Map<string, Set<string>>;
+    nodesByProperty: Map<string, Map<string, Set<string>>>;
+    edgesByProperty: Map<string, Map<string, Set<string>>>;
+  }>();
+
+  /**
+   * Returns true - InMemoryStorageProvider supports transactions.
+   */
+  supportsTransactions(): boolean {
+    return true;
+  }
+
+  /**
+   * Starts a new transaction by taking a deep snapshot of all internal state.
+   * Operations during the transaction modify live state directly.
+   * On commit, we simply clear the snapshot (live state already has changes).
+   * On rollback, we restore live state from the snapshot.
+   */
+  async beginTransaction(): Promise<ITransactionHandle> {
+    const txnId = `txn-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
+    // Deep clone all internal state for the rollback snapshot
+    const nodesSnapshot = new Map<string, NodeData>();
+    for (const [id, node] of this._nodes) {
+      nodesSnapshot.set(id, deepClone(node));
+    }
+
+    const edgesSnapshot = new Map<string, EdgeData>();
+    for (const [id, edge] of this._edges) {
+      edgesSnapshot.set(id, deepClone(edge));
+    }
+
+    const nodesByTypeSnapshot = new Map<string, Set<string>>();
+    for (const [type, ids] of this._nodesByType) {
+      nodesByTypeSnapshot.set(type, new Set(ids));
+    }
+
+    const edgesByTypeSnapshot = new Map<string, Set<string>>();
+    for (const [type, ids] of this._edgesByType) {
+      edgesByTypeSnapshot.set(type, new Set(ids));
+    }
+
+    const edgesBySourceSnapshot = new Map<string, Set<string>>();
+    for (const [nodeId, edgeIds] of this._edgesBySource) {
+      edgesBySourceSnapshot.set(nodeId, new Set(edgeIds));
+    }
+
+    const edgesByTargetSnapshot = new Map<string, Set<string>>();
+    for (const [nodeId, edgeIds] of this._edgesByTarget) {
+      edgesByTargetSnapshot.set(nodeId, new Set(edgeIds));
+    }
+
+    const nodesByPropertySnapshot = new Map<string, Map<string, Set<string>>>();
+    for (const [key, valueMap] of this._nodesByProperty) {
+      const valueMapSnapshot = new Map<string, Set<string>>();
+      for (const [serialized, idSet] of valueMap) {
+        valueMapSnapshot.set(serialized, new Set(idSet));
+      }
+      nodesByPropertySnapshot.set(key, valueMapSnapshot);
+    }
+
+    const edgesByPropertySnapshot = new Map<string, Map<string, Set<string>>>();
+    for (const [key, valueMap] of this._edgesByProperty) {
+      const valueMapSnapshot = new Map<string, Set<string>>();
+      for (const [serialized, idSet] of valueMap) {
+        valueMapSnapshot.set(serialized, new Set(idSet));
+      }
+      edgesByPropertySnapshot.set(key, valueMapSnapshot);
+    }
+
+    this._snapshots.set(txnId, {
+      nodes: nodesSnapshot,
+      edges: edgesSnapshot,
+      nodesByType: nodesByTypeSnapshot,
+      edgesByType: edgesByTypeSnapshot,
+      edgesBySource: edgesBySourceSnapshot,
+      edgesByTarget: edgesByTargetSnapshot,
+      nodesByProperty: nodesByPropertySnapshot,
+      edgesByProperty: edgesByPropertySnapshot,
+    });
+
+    return {
+      id: txnId,
+      context: undefined,
+    };
+  }
+
+  /**
+   * Commits the transaction. Since operations modify live state directly,
+   * we just need to clear the snapshot.
+   */
+  async commitTransaction(handle: ITransactionHandle): Promise<void> {
+    if (!this._snapshots.has(handle.id)) {
+      throw new Error('No active transaction to commit');
+    }
+
+    // Live state already has all the changes from the transaction,
+    // so we just need to clear the snapshot
+    this._snapshots.delete(handle.id);
+  }
+
+  /**
+   * Rolls back the transaction by restoring live state from the snapshot.
+   */
+  async rollbackTransaction(handle: ITransactionHandle): Promise<void> {
+    const snapshot = this._snapshots.get(handle.id);
+    if (!snapshot) {
+      // No active transaction to rollback
+      return;
+    }
+
+    // Restore all live state from snapshot
+    this._nodes.clear();
+    for (const [id, node] of snapshot.nodes) {
+      this._nodes.set(id, node);
+    }
+
+    this._edges.clear();
+    for (const [id, edge] of snapshot.edges) {
+      this._edges.set(id, edge);
+    }
+
+    this._nodesByType.clear();
+    for (const [type, ids] of snapshot.nodesByType) {
+      this._nodesByType.set(type, new Set(ids));
+    }
+
+    this._edgesByType.clear();
+    for (const [type, ids] of snapshot.edgesByType) {
+      this._edgesByType.set(type, new Set(ids));
+    }
+
+    this._edgesBySource.clear();
+    for (const [nodeId, edgeIds] of snapshot.edgesBySource) {
+      this._edgesBySource.set(nodeId, new Set(edgeIds));
+    }
+
+    this._edgesByTarget.clear();
+    for (const [nodeId, edgeIds] of snapshot.edgesByTarget) {
+      this._edgesByTarget.set(nodeId, new Set(edgeIds));
+    }
+
+    this._nodesByProperty.clear();
+    for (const [key, valueMap] of snapshot.nodesByProperty) {
+      const valueMapCopy = new Map<string, Set<string>>();
+      for (const [serialized, idSet] of valueMap) {
+        valueMapCopy.set(serialized, new Set(idSet));
+      }
+      this._nodesByProperty.set(key, valueMapCopy);
+    }
+
+    this._edgesByProperty.clear();
+    for (const [key, valueMap] of snapshot.edgesByProperty) {
+      const valueMapCopy = new Map<string, Set<string>>();
+      for (const [serialized, idSet] of valueMap) {
+        valueMapCopy.set(serialized, new Set(idSet));
+      }
+      this._edgesByProperty.set(key, valueMapCopy);
+    }
+
+    this._snapshots.delete(handle.id);
   }
 }
