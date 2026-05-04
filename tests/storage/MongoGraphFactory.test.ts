@@ -24,10 +24,11 @@ describe('MongoGraphFactory', () => {
   });
 
   beforeEach(async () => {
-    // Clear all graphs by clearing both known graph partitions
+    // Clear all graphs by clearing all known graph partitions
     const graphA = factory.forGraph('graph-a');
     const graphB = factory.forGraph('graph-b');
-    await Promise.all([graphA.clear(), graphB.clear()]);
+    const graphDefault = factory.forGraph('default');
+    await Promise.all([graphA.clear(), graphB.clear(), graphDefault.clear()]);
   });
 
   it('forGraph() should return a Graph instance', () => {
@@ -88,5 +89,77 @@ describe('MongoGraphFactory', () => {
 
     expect(nodeA?.properties.name).toBe('Dan');
     expect(nodeB?.properties.name).toBe('Eve');
+  });
+
+  describe('fromGraphData()', () => {
+    it('should import graph data and return a Graph instance', async () => {
+      const data = {
+        nodes: [
+          { id: 'n1', type: 'Person', properties: { name: 'Alice' } },
+          { id: 'n2', type: 'Person', properties: { name: 'Bob' } },
+        ],
+        edges: [
+          { id: 'e1', sourceId: 'n1', targetId: 'n2', type: 'KNOWS', properties: {} },
+        ],
+      };
+
+      const graph = await factory.fromGraphData(data, 'import-test');
+
+      const nodes = await graph.getNodes();
+      expect(nodes).toHaveLength(2);
+      expect(nodes[0].properties.name).toBe('Alice');
+      expect(nodes[1].properties.name).toBe('Bob');
+
+      const edges = await graph.getEdges();
+      expect(edges).toHaveLength(1);
+      expect(edges[0].type).toBe('KNOWS');
+    });
+
+    it('should use default graphId when not specified', async () => {
+      const data = {
+        nodes: [
+          { id: 'n1', type: 'Person', properties: { name: 'Carol' } },
+        ],
+        edges: [],
+      };
+
+      const graph = await factory.fromGraphData(data);
+
+      const nodes = await graph.getNodes();
+      expect(nodes).toHaveLength(1);
+      expect(nodes[0].properties.name).toBe('Carol');
+    });
+
+    it('should filter out data when graphId does not match', async () => {
+      const data = {
+        graphId: 'other-graph',
+        nodes: [
+          { id: 'n1', type: 'Person', properties: { name: 'ShouldNotImport' } },
+        ],
+        edges: [],
+      };
+
+      const graph = await factory.fromGraphData(data, 'my-graph');
+
+      const nodes = await graph.getNodes();
+      expect(nodes).toHaveLength(0);
+    });
+
+    it('should import data when graphId matches', async () => {
+      const data = {
+        graphId: 'my-graph',
+        nodes: [
+          { id: 'n1', type: 'Person', properties: { name: 'ShouldImport' } },
+        ],
+        edges: [],
+      };
+
+      const graph = await factory.fromGraphData(data, 'my-graph');
+
+      const nodes = await graph.getNodes();
+      expect(nodes).toHaveLength(1);
+      expect(nodes[0].properties.name).toBe('ShouldImport');
+    });
+
   });
 });

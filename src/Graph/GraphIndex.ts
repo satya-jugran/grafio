@@ -10,6 +10,7 @@ import {
 import { isFlatRecord, isPrimitive } from '../utils';
 import type { IStorageProvider } from '../storage/IStorageProvider';
 import { InMemoryStorageProvider } from '../storage/InMemoryStorageProvider';
+import { GraphTransaction } from './GraphTransaction';
 
 /**
  * Internal class that manages graph operations.
@@ -70,7 +71,7 @@ export class GraphIndex {
    * @throws InvalidPropertyError if properties contain non-supported primitive values
    * @throws NodeAlreadyExistsError if a node with this id already exists
    */
-  async addNode(type: string, properties: Record<string, unknown> = {}): Promise<Node> {
+  async addNode(type: string, properties: Record<string, unknown> = {}, transaction?: GraphTransaction): Promise<Node> {
     // Validate properties are flat primitives
     if (!isFlatRecord(properties)) {
       const invalidEntry = Object.entries(properties).find(([, value]) => {
@@ -83,39 +84,52 @@ export class GraphIndex {
       }
     }
 
+    const handle = transaction?._getHandle();
     const node = new Node(type, properties);
-    if (await this._store.hasNode(node.id)) {
-      throw new NodeAlreadyExistsError(node.id);
+    try {
+      if (await this._store.hasNode(node.id, handle)) {
+        throw new NodeAlreadyExistsError(node.id);
+      }
+      await this._store.insertNode(node.toJSON(), handle);
+    } catch (error) {
+      transaction?.markFailed();
+      throw error;
     }
-    await this._store.insertNode(node.toJSON());
     return node;
   }
 
   /**
    * Removes a node from the graph.
    * @param cascade - If true, also removes all incident edges (default: false)
+   * @param transaction - Optional transaction to use for this operation
    * @throws NodeHasEdgesError if cascade is false and the node has incident edges
    */
-  async removeNode(id: string, cascade: boolean = false): Promise<boolean> {
-    if (!await this._store.hasNode(id)) return false;
+  async removeNode(id: string, cascade: boolean = false, transaction?: GraphTransaction): Promise<boolean> {
+    const handle = transaction?._getHandle();
+    try {
+      if (!await this._store.hasNode(id, handle)) return false;
 
-    const [outgoing, incoming] = await Promise.all([
-      this._store.getEdgesBySource(id),
-      this._store.getEdgesByTarget(id),
-    ]);
+      const [outgoing, incoming] = await Promise.all([
+        this._store.getEdgesBySource(id, undefined, handle),
+        this._store.getEdgesByTarget(id, undefined, handle),
+      ]);
 
-    if (cascade) {
-      for (const edge of [...outgoing, ...incoming]) {
-        await this._store.deleteEdge(edge.id);
+      if (cascade) {
+        for (const edge of [...outgoing, ...incoming]) {
+          await this._store.deleteEdge(edge.id, handle);
+        }
+      } else {
+        const incidentCount = outgoing.length + incoming.length;
+        if (incidentCount > 0) {
+          throw new NodeHasEdgesError(id, incidentCount);
+        }
       }
-    } else {
-      const incidentCount = outgoing.length + incoming.length;
-      if (incidentCount > 0) {
-        throw new NodeHasEdgesError(id, incidentCount);
-      }
+
+      await this._store.deleteNode(id, handle);
+    } catch (error) {
+      transaction?.markFailed();
+      throw error;
     }
-
-    await this._store.deleteNode(id);
     return true;
   }
 
@@ -151,7 +165,8 @@ export class GraphIndex {
     sourceId: string,
     targetId: string,
     type: string,
-    properties: Record<string, unknown> = {}
+    properties: Record<string, unknown> = {},
+    transaction?: GraphTransaction
   ): Promise<Edge> {
     // Validate properties are flat primitives
     if (!isFlatRecord(properties)) {
@@ -165,27 +180,40 @@ export class GraphIndex {
       }
     }
 
-    const [sourceExists, targetExists] = await Promise.all([
-      this._store.hasNode(sourceId),
-      this._store.hasNode(targetId),
-    ]);
-    if (!sourceExists) throw new NodeNotFoundError(sourceId);
-    if (!targetExists) throw new NodeNotFoundError(targetId);
-
     const edge = new Edge(sourceId, targetId, type, properties);
-    if (await this._store.hasEdge(edge.id)) throw new EdgeAlreadyExistsError(edge.id);
+    const handle = transaction?._getHandle();
+    try {
+      const [sourceExists, targetExists] = await Promise.all([
+        this._store.hasNode(sourceId, handle),
+        this._store.hasNode(targetId, handle),
+      ]);
+      if (!sourceExists) throw new NodeNotFoundError(sourceId);
+      if (!targetExists) throw new NodeNotFoundError(targetId);
 
-    await this._store.insertEdge(edge.toJSON());
+      if (await this._store.hasEdge(edge.id, handle)) throw new EdgeAlreadyExistsError(edge.id);
+
+      await this._store.insertEdge(edge.toJSON(), handle);
+    } catch (error) {
+      transaction?.markFailed();
+      throw error;
+    }
     return edge;
   }
 
   /**
    * Removes an edge from the graph.
+   * @param transaction - Optional transaction to use for this operation
    * @returns true if removed, false if not found
    */
-  async removeEdge(id: string): Promise<boolean> {
-    if (!await this._store.hasEdge(id)) return false;
-    await this._store.deleteEdge(id);
+  async removeEdge(id: string, transaction?: GraphTransaction): Promise<boolean> {
+    const handle = transaction?._getHandle();
+    try {
+      if (!await this._store.hasEdge(id, handle)) return false;
+      await this._store.deleteEdge(id, handle);
+    } catch (error) {
+      transaction?.markFailed();
+      throw error;
+    }
     return true;
   }
 
@@ -330,36 +358,60 @@ export class GraphIndex {
    * Adds a property to a node. Fails if the property key already exists.
    * @throws InvalidPropertyError if the value is not a primitive
    */
-  async addNodeProperty(nodeId: string, key: string, value: unknown): Promise<void> {
+  async addNodeProperty(nodeId: string, key: string, value: unknown, transaction?: GraphTransaction): Promise<void> {
     if (!isPrimitive(value)) {
       throw new InvalidPropertyError(key, value);
     }
-    await this._store.addProperty('node', nodeId, key, value);
+    const handle = transaction?._getHandle();
+    try {
+      await this._store.addProperty('node', nodeId, key, value, handle);
+    } catch (error) {
+      transaction?.markFailed();
+      throw error;
+    }
   }
 
   /**
    * Updates an existing property on a node. Fails if the property doesn't exist.
    * @throws InvalidPropertyError if the value is not a primitive
    */
-  async updateNodeProperty(nodeId: string, key: string, value: unknown): Promise<void> {
+  async updateNodeProperty(nodeId: string, key: string, value: unknown, transaction?: GraphTransaction): Promise<void> {
     if (!isPrimitive(value)) {
       throw new InvalidPropertyError(key, value);
     }
-    await this._store.updateProperty('node', nodeId, key, value);
+    const handle = transaction?._getHandle();
+    try {
+      await this._store.updateProperty('node', nodeId, key, value, handle);
+    } catch (error) {
+      transaction?.markFailed();
+      throw error;
+    }
   }
 
   /**
    * Deletes a property from a node.
    */
-  async deleteNodeProperty(nodeId: string, key: string): Promise<void> {
-    await this._store.deleteProperty('node', nodeId, key);
+  async deleteNodeProperty(nodeId: string, key: string, transaction?: GraphTransaction): Promise<void> {
+    const handle = transaction?._getHandle();
+    try {
+      await this._store.deleteProperty('node', nodeId, key, handle);
+    } catch (error) {
+      transaction?.markFailed();
+      throw error;
+    }
   }
 
   /**
    * Clears all properties from a node.
    */
-  async clearNodeProperties(nodeId: string): Promise<void> {
-    await this._store.clearProperties('node', nodeId);
+  async clearNodeProperties(nodeId: string, transaction?: GraphTransaction): Promise<void> {
+    const handle = transaction?._getHandle();
+    try {
+      await this._store.clearProperties('node', nodeId, handle);
+    } catch (error) {
+      transaction?.markFailed();
+      throw error;
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -370,36 +422,60 @@ export class GraphIndex {
    * Adds a property to an edge. Fails if the property key already exists.
    * @throws InvalidPropertyError if the value is not a primitive
    */
-  async addEdgeProperty(edgeId: string, key: string, value: unknown): Promise<void> {
+  async addEdgeProperty(edgeId: string, key: string, value: unknown, transaction?: GraphTransaction): Promise<void> {
     if (!isPrimitive(value)) {
       throw new InvalidPropertyError(key, value);
     }
-    await this._store.addProperty('edge', edgeId, key, value);
+    const handle = transaction?._getHandle();
+    try {
+      await this._store.addProperty('edge', edgeId, key, value, handle);
+    } catch (error) {
+      transaction?.markFailed();
+      throw error;
+    }
   }
 
   /**
    * Updates an existing property on an edge. Fails if the property doesn't exist.
    * @throws InvalidPropertyError if the value is not a primitive
    */
-  async updateEdgeProperty(edgeId: string, key: string, value: unknown): Promise<void> {
+  async updateEdgeProperty(edgeId: string, key: string, value: unknown, transaction?: GraphTransaction): Promise<void> {
     if (!isPrimitive(value)) {
       throw new InvalidPropertyError(key, value);
     }
-    await this._store.updateProperty('edge', edgeId, key, value);
+    const handle = transaction?._getHandle();
+    try {
+      await this._store.updateProperty('edge', edgeId, key, value, handle);
+    } catch (error) {
+      transaction?.markFailed();
+      throw error;
+    }
   }
 
   /**
    * Deletes a property from an edge.
    */
-  async deleteEdgeProperty(edgeId: string, key: string): Promise<void> {
-    await this._store.deleteProperty('edge', edgeId, key);
+  async deleteEdgeProperty(edgeId: string, key: string, transaction?: GraphTransaction): Promise<void> {
+    const handle = transaction?._getHandle();
+    try {
+      await this._store.deleteProperty('edge', edgeId, key, handle);
+    } catch (error) {
+      transaction?.markFailed();
+      throw error;
+    }
   }
 
   /**
    * Clears all properties from an edge.
    */
-  async clearEdgeProperties(edgeId: string): Promise<void> {
-    await this._store.clearProperties('edge', edgeId);
+  async clearEdgeProperties(edgeId: string, transaction?: GraphTransaction): Promise<void> {
+    const handle = transaction?._getHandle();
+    try {
+      await this._store.clearProperties('edge', edgeId, handle);
+    } catch (error) {
+      transaction?.markFailed();
+      throw error;
+    }
   }
 
   // ---------------------------------------------------------------------------

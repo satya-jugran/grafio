@@ -4,6 +4,7 @@ export { Node } from './Node';
 export { Edge } from './Edge';
 export { GraphToMermaid } from './Graph/GraphToMermaid';
 export { GraphAdminOps } from './Graph/GraphAdminOps';
+export { GraphTransaction } from './Graph/GraphTransaction';
 
 // Type definitions
 export type { NodeData } from './types';
@@ -14,6 +15,7 @@ export type { MermaidOptions } from './Graph/GraphToMermaid';
 
 // Storage abstraction
 export type { IStorageProvider } from './storage/IStorageProvider';
+export type { ITransactionHandle } from './storage/IStorageProvider';
 export { InMemoryStorageProvider } from './storage/InMemoryStorageProvider';
 export type { InMemoryStorageProviderOptions } from './storage/InMemoryStorageProvider';
 export { MongoStorageProvider } from './storage/MongoStorageProvider';
@@ -36,3 +38,4 @@ export {
   PropertyNotFoundError,
   TraversalLimitExceededError,
 } from './errors';
+export { TransactionNotActiveError, TransactionFailedError } from './Graph/GraphTransaction';

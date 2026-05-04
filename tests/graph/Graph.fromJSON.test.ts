@@ -4,6 +4,7 @@ import {
   NodeAlreadyExistsError,
   EdgeAlreadyExistsError,
   NodeNotFoundError,
+  InvalidPropertyError,
 } from '../../src/errors';
 
 describe('Graph.importJSON() validation', () => {
@@ -75,5 +76,103 @@ describe('Graph.importJSON() validation', () => {
     const graph = await Graph.importJSON(data);
     await expect(graph.getNodes()).resolves.toHaveLength(2);
     await expect(graph.getEdges()).resolves.toHaveLength(1);
+  });
+
+  describe('isFlatRecord validation for nodes', () => {
+    it('should throw InvalidPropertyError when node has nested object property', async () => {
+      const data = {
+        nodes: [
+          { id: 'node1', type: 'Test', properties: { name: 'A', meta: { key: 'value' } } },
+        ],
+        edges: [],
+      };
+      await expect(Graph.importJSON(data)).rejects.toThrow(InvalidPropertyError);
+    });
+
+    it('should throw InvalidPropertyError when node has array property', async () => {
+      const data = {
+        nodes: [
+          { id: 'node1', type: 'Test', properties: { tags: ['a', 'b'] } },
+        ],
+        edges: [],
+      };
+      await expect(Graph.importJSON(data)).rejects.toThrow(InvalidPropertyError);
+    });
+
+    it('should throw InvalidPropertyError when node has function property', async () => {
+      const data = {
+        nodes: [
+          { id: 'node1', type: 'Test', properties: { callback: () => {} } },
+        ],
+        edges: [],
+      };
+      await expect(Graph.importJSON(data)).rejects.toThrow(InvalidPropertyError);
+    });
+
+    it('should accept node with all primitive properties', async () => {
+      const data = {
+        nodes: [
+          { id: 'node1', type: 'Test', properties: { name: 'A', age: 30, active: true, score: 99.5 } },
+        ],
+        edges: [],
+      };
+      const graph = await Graph.importJSON(data);
+      await expect(graph.getNodes()).resolves.toHaveLength(1);
+    });
+  });
+
+  describe('isFlatRecord validation for edges', () => {
+    it('should throw InvalidPropertyError when edge has nested object property', async () => {
+      const data = {
+        nodes: [
+          { id: 'node1', type: 'Test', properties: { name: 'A' } },
+          { id: 'node2', type: 'Test', properties: { name: 'B' } },
+        ],
+        edges: [
+          { id: 'edge1', sourceId: 'node1', targetId: 'node2', type: 'LINKS', properties: { meta: { key: 'value' } } },
+        ],
+      };
+      await expect(Graph.importJSON(data)).rejects.toThrow(InvalidPropertyError);
+    });
+
+    it('should throw InvalidPropertyError when edge has array property', async () => {
+      const data = {
+        nodes: [
+          { id: 'node1', type: 'Test', properties: { name: 'A' } },
+          { id: 'node2', type: 'Test', properties: { name: 'B' } },
+        ],
+        edges: [
+          { id: 'edge1', sourceId: 'node1', targetId: 'node2', type: 'LINKS', properties: { values: [1, 2, 3] } },
+        ],
+      };
+      await expect(Graph.importJSON(data)).rejects.toThrow(InvalidPropertyError);
+    });
+
+    it('should throw InvalidPropertyError when edge has function property', async () => {
+      const data = {
+        nodes: [
+          { id: 'node1', type: 'Test', properties: { name: 'A' } },
+          { id: 'node2', type: 'Test', properties: { name: 'B' } },
+        ],
+        edges: [
+          { id: 'edge1', sourceId: 'node1', targetId: 'node2', type: 'LINKS', properties: { handler: () => {} } },
+        ],
+      };
+      await expect(Graph.importJSON(data)).rejects.toThrow(InvalidPropertyError);
+    });
+
+    it('should accept edge with all primitive properties', async () => {
+      const data = {
+        nodes: [
+          { id: 'node1', type: 'Test', properties: { name: 'A' } },
+          { id: 'node2', type: 'Test', properties: { name: 'B' } },
+        ],
+        edges: [
+          { id: 'edge1', sourceId: 'node1', targetId: 'node2', type: 'LINKS', properties: { weight: 1.5, active: true, label: 'test' } },
+        ],
+      };
+      const graph = await Graph.importJSON(data);
+      await expect(graph.getEdges()).resolves.toHaveLength(1);
+    });
   });
 });

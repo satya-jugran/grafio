@@ -1,4 +1,6 @@
+import { MongoClient } from 'mongodb';
 import type {
+  ClientSession,
   Collection,
   Db,
   Document,
@@ -7,7 +9,7 @@ import type {
 } from 'mongodb';
 
 import type { NodeData, EdgeData, GraphData } from '../types';
-import type { IStorageProvider } from './IStorageProvider';
+import type { IStorageProvider, ITransactionHandle } from './IStorageProvider';
 import {
   NodeAlreadyExistsError,
   EdgeAlreadyExistsError,
@@ -116,6 +118,7 @@ export class MongoStorageProvider implements IStorageProvider {
   private readonly _edges: Collection<EdgeDoc>;
   private readonly _graphId: string;
   private readonly _batchSize: number;
+  private readonly _client: MongoClient | null = null;
 
   /**
    * @param db   - An already-connected Mongo `Db` instance.
@@ -132,6 +135,12 @@ export class MongoStorageProvider implements IStorageProvider {
       throw new Error(`batchSize must be a positive integer, got: ${opts.batchSize}`);
     }
     this._batchSize = opts.batchSize ?? 1000;
+
+    // Try to get the client from the db
+    // MongoClient is needed to create sessions for transactions
+    if ('client' in db && db.client instanceof MongoClient) {
+      this._client = db.client;
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -148,11 +157,11 @@ export class MongoStorageProvider implements IStorageProvider {
   async ensureIndexes(): Promise<void> {
     // Node indexes — compound unique index on (graphId, id) ensures element id uniqueness per graph
     await this._nodes.createIndex({ graphId: 1, id: 1 }, { unique: true, name: 'node_graph_id_unique' });
-    await this._nodes.createIndex({ graphId: 1, type: 1 },              { name: 'node_graph_type' });
+    await this._nodes.createIndex({ graphId: 1, type: 1 }, { name: 'node_graph_type' });
 
     // Edge indexes
     await this._edges.createIndex({ graphId: 1, id: 1 }, { unique: true, name: 'edge_graph_id_unique' });
-    await this._edges.createIndex({ graphId: 1, type: 1 },              { name: 'edge_graph_type' });
+    await this._edges.createIndex({ graphId: 1, type: 1 }, { name: 'edge_graph_type' });
     await this._edges.createIndex({ graphId: 1, sourceId: 1, type: 1 }, { name: 'edge_graph_source_type' });
     await this._edges.createIndex({ graphId: 1, targetId: 1, type: 1 }, { name: 'edge_graph_target_type' });
   }
@@ -172,38 +181,42 @@ export class MongoStorageProvider implements IStorageProvider {
   // Node mutations
   // ---------------------------------------------------------------------------
 
-  async insertNode(node: NodeData): Promise<void> {
+  async insertNode(node: NodeData, transaction?: ITransactionHandle): Promise<void> {
+    const session = transaction?.context as ClientSession | undefined;
     try {
       await this._nodes.insertOne({
         id: node.id,
         graphId: this._graphId,
         type: node.type,
         properties: node.properties,
-      } as NodeDoc);
+      } as NodeDoc, { session });
     } catch (e: unknown) {
       if (this._isDuplicateKeyError(e)) throw new NodeAlreadyExistsError(node.id);
       throw e;
     }
   }
 
-  async deleteNode(id: string): Promise<void> {
-    await this._nodes.deleteOne({ graphId: this._graphId, id });
+  async deleteNode(id: string, transaction?: ITransactionHandle): Promise<void> {
+    const session = transaction?.context as ClientSession | undefined;
+    await this._nodes.deleteOne({ graphId: this._graphId, id }, { session });
   }
 
   // ---------------------------------------------------------------------------
   // Node queries
   // ---------------------------------------------------------------------------
 
-  async hasNode(id: string): Promise<boolean> {
+  async hasNode(id: string, transaction?: ITransactionHandle): Promise<boolean> {
+    const session = transaction?.context as ClientSession | undefined;
     const doc = await this._nodes.findOne(
       { graphId: this._graphId, id },
-      { projection: { _id: 1 } },
+      { projection: { _id: 1 }, session },
     );
     return doc !== null;
   }
 
-  async getNode(id: string): Promise<NodeData | undefined> {
-    const doc = await this._nodes.findOne({ graphId: this._graphId, id });
+  async getNode(id: string, transaction?: ITransactionHandle): Promise<NodeData | undefined> {
+    const session = transaction?.context as ClientSession | undefined;
+    const doc = await this._nodes.findOne({ graphId: this._graphId, id }, { session });
     return doc ? this._docToNode(doc) : undefined;
   }
 
@@ -239,7 +252,8 @@ export class MongoStorageProvider implements IStorageProvider {
   // Edge mutations
   // ---------------------------------------------------------------------------
 
-  async insertEdge(edge: EdgeData): Promise<void> {
+  async insertEdge(edge: EdgeData, transaction?: ITransactionHandle): Promise<void> {
+    const session = transaction?.context as ClientSession | undefined;
     try {
       await this._edges.insertOne({
         id: edge.id,
@@ -248,31 +262,34 @@ export class MongoStorageProvider implements IStorageProvider {
         targetId: edge.targetId,
         type: edge.type,
         properties: edge.properties,
-      } as EdgeDoc);
+      } as EdgeDoc, { session });
     } catch (e: unknown) {
       if (this._isDuplicateKeyError(e)) throw new EdgeAlreadyExistsError(edge.id);
       throw e;
     }
   }
 
-  async deleteEdge(id: string): Promise<void> {
-    await this._edges.deleteOne({ graphId: this._graphId, id });
+  async deleteEdge(id: string, transaction?: ITransactionHandle): Promise<void> {
+    const session = transaction?.context as ClientSession | undefined;
+    await this._edges.deleteOne({ graphId: this._graphId, id }, { session });
   }
 
   // ---------------------------------------------------------------------------
   // Edge queries
   // ---------------------------------------------------------------------------
 
-  async hasEdge(id: string): Promise<boolean> {
+  async hasEdge(id: string, transaction?: ITransactionHandle): Promise<boolean> {
+    const session = transaction?.context as ClientSession | undefined;
     const doc = await this._edges.findOne(
       { graphId: this._graphId, id },
-      { projection: { _id: 1 } },
+      { projection: { _id: 1 }, session },
     );
     return doc !== null;
   }
 
-  async getEdge(id: string): Promise<EdgeData | undefined> {
-    const doc = await this._edges.findOne({ graphId: this._graphId, id });
+  async getEdge(id: string, transaction?: ITransactionHandle): Promise<EdgeData | undefined> {
+    const session = transaction?.context as ClientSession | undefined;
+    const doc = await this._edges.findOne({ graphId: this._graphId, id }, { session });
     return doc ? this._docToEdge(doc) : undefined;
   }
 
@@ -291,17 +308,19 @@ export class MongoStorageProvider implements IStorageProvider {
     return docs.map(d => this._docToEdge(d));
   }
 
-  async getEdgesBySource(nodeId: string, type?: string): Promise<EdgeData[]> {
+  async getEdgesBySource(nodeId: string, type?: string, transaction?: ITransactionHandle): Promise<EdgeData[]> {
+    const session = transaction?.context as ClientSession | undefined;
     const filter: Filter<EdgeDoc> = { graphId: this._graphId, sourceId: nodeId };
     if (type) filter.type = type;
-    const docs = await this._edges.find(filter).toArray();
+    const docs = await this._edges.find(filter, { session }).toArray();
     return docs.map(d => this._docToEdge(d));
   }
 
-  async getEdgesByTarget(nodeId: string, type?: string): Promise<EdgeData[]> {
+  async getEdgesByTarget(nodeId: string, type?: string, transaction?: ITransactionHandle): Promise<EdgeData[]> {
+    const session = transaction?.context as ClientSession | undefined;
     const filter: Filter<EdgeDoc> = { graphId: this._graphId, targetId: nodeId };
     if (type) filter.type = type;
-    const docs = await this._edges.find(filter).toArray();
+    const docs = await this._edges.find(filter, { session }).toArray();
     return docs.map(d => this._docToEdge(d));
   }
 
@@ -425,7 +444,7 @@ export class MongoStorageProvider implements IStorageProvider {
     if (target === 'node') {
       // Always lead with graphId to support partitioned queries efficiently
       const indexFields: Record<string, 1> = { graphId: 1, [`properties.${propertyKey}`]: 1 };
-      
+
       // If type is specified, create compound index on (graphId, type, propertyKey)
       if (type && type !== '*') {
         indexFields['type'] = 1;
@@ -442,7 +461,7 @@ export class MongoStorageProvider implements IStorageProvider {
     } else {
       // Always lead with graphId to support partitioned queries efficiently
       const indexFields: Record<string, 1> = { graphId: 1, [`properties.${propertyKey}`]: 1 };
-      
+
       // If type is specified, create compound index on (graphId, type, propertyKey)
       if (type && type !== '*') {
         indexFields['type'] = 1;
@@ -469,22 +488,24 @@ export class MongoStorageProvider implements IStorageProvider {
    * @throws PropertyAlreadyExistsError if the property key already exists
    * @throws InvalidPropertyError if the value is not a primitive
    */
-  async addProperty(target: 'node' | 'edge', id: string, key: string, value: unknown): Promise<void> {
+  async addProperty(target: 'node' | 'edge', id: string, key: string, value: unknown, transaction?: ITransactionHandle): Promise<void> {
     if (!isPrimitive(value)) {
       throw new InvalidPropertyError(key, value);
     }
 
+    const session = transaction?.context as ClientSession | undefined;
     const collection = target === 'node' ? this._nodes : this._edges;
 
     // Atomic: only succeeds if the property does NOT already exist
     const result = await collection.updateOne(
       { graphId: this._graphId, id, [`properties.${key}`]: { $exists: false } },
-      { $set: { [`properties.${key}`]: value } }
+      { $set: { [`properties.${key}`]: value } },
+      { session }
     );
 
     if (result.matchedCount === 0) {
       // Check if record exists to differentiate between "record missing" vs "property exists"
-      const record = target === 'node' ? await this.getNode(id) : await this.getEdge(id);
+      const record = target === 'node' ? await this.getNode(id, transaction) : await this.getEdge(id, transaction);
       if (!record) {
         throw target === 'node' ? new NodeNotFoundError(id) : new EdgeNotFoundError(id);
       }
@@ -498,22 +519,24 @@ export class MongoStorageProvider implements IStorageProvider {
    * @throws PropertyNotFoundError if the property key doesn't exist
    * @throws InvalidPropertyError if the value is not a primitive
    */
-  async updateProperty(target: 'node' | 'edge', id: string, key: string, value: unknown): Promise<void> {
+  async updateProperty(target: 'node' | 'edge', id: string, key: string, value: unknown, transaction?: ITransactionHandle): Promise<void> {
     if (!isPrimitive(value)) {
       throw new InvalidPropertyError(key, value);
     }
 
+    const session = transaction?.context as ClientSession | undefined;
     const collection = target === 'node' ? this._nodes : this._edges;
 
     // Atomic update: only succeeds if the property already exists
     const result = await collection.updateOne(
       { graphId: this._graphId, id, [`properties.${key}`]: { $exists: true } },
-      { $set: { [`properties.${key}`]: value } }
+      { $set: { [`properties.${key}`]: value } },
+      { session }
     );
 
     if (result.matchedCount === 0) {
       // Determine whether it was the record or the property that didn't exist
-      const record = target === 'node' ? await this.getNode(id) : await this.getEdge(id);
+      const record = target === 'node' ? await this.getNode(id, transaction) : await this.getEdge(id, transaction);
       if (!record) {
         throw target === 'node' ? new NodeNotFoundError(id) : new EdgeNotFoundError(id);
       }
@@ -525,10 +548,11 @@ export class MongoStorageProvider implements IStorageProvider {
    * Deletes a property from a node or edge.
    * @throws NodeNotFoundError/EdgeNotFoundError if the target doesn't exist
    */
-  async deleteProperty(target: 'node' | 'edge', id: string, key: string): Promise<void> {
+  async deleteProperty(target: 'node' | 'edge', id: string, key: string, transaction?: ITransactionHandle): Promise<void> {
+    const session = transaction?.context as ClientSession | undefined;
     const collection = target === 'node' ? this._nodes : this._edges;
-    const record = target === 'node' ? await this.getNode(id) : await this.getEdge(id);
-    
+    const record = target === 'node' ? await this.getNode(id, transaction) : await this.getEdge(id, transaction);
+
     if (!record) {
       if (target === 'node') {
         throw new NodeNotFoundError(id);
@@ -539,7 +563,8 @@ export class MongoStorageProvider implements IStorageProvider {
 
     await collection.updateOne(
       { graphId: this._graphId, id },
-      { $unset: { [`properties.${key}`]: '' } }
+      { $unset: { [`properties.${key}`]: '' } },
+      { session }
     );
   }
 
@@ -547,10 +572,11 @@ export class MongoStorageProvider implements IStorageProvider {
    * Clears all properties from a node or edge.
    * @throws NodeNotFoundError/EdgeNotFoundError if the target doesn't exist
    */
-  async clearProperties(target: 'node' | 'edge', id: string): Promise<void> {
+  async clearProperties(target: 'node' | 'edge', id: string, transaction?: ITransactionHandle): Promise<void> {
+    const session = transaction?.context as ClientSession | undefined;
     const collection = target === 'node' ? this._nodes : this._edges;
-    const record = target === 'node' ? await this.getNode(id) : await this.getEdge(id);
-    
+    const record = target === 'node' ? await this.getNode(id, transaction) : await this.getEdge(id, transaction);
+
     if (!record) {
       if (target === 'node') {
         throw new NodeNotFoundError(id);
@@ -567,8 +593,77 @@ export class MongoStorageProvider implements IStorageProvider {
     if (Object.keys(updateObj).length > 0) {
       await collection.updateOne(
         { graphId: this._graphId, id },
-        { $unset: updateObj }
+        { $unset: updateObj },
+        { session }
       );
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Private helpers
+  // ---------------------------------------------------------------------------
+
+  // ---------------------------------------------------------------------------
+  // Transaction support
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Returns true if the MongoDB client supports transactions.
+   * Requires MongoDB 4.0+ and a replica set or sharded cluster.
+   */
+  supportsTransactions(): boolean {
+    return this._client !== null;
+  }
+
+  /**
+   * Starts a new MongoDB transaction using a ClientSession.
+   * Note: MongoDB transactions require a replica set. This will start a transaction
+   * on the session, but actual atomicity requires passing the session to all operations.
+   */
+  async beginTransaction(): Promise<ITransactionHandle> {
+    if (!this._client) {
+      throw new Error('MongoDB client not available for transactions. Ensure the Db instance has access to a MongoClient.');
+    }
+
+    const session = this._client.startSession();
+    session.startTransaction(); // Start the transaction on the session
+
+    return {
+      id: `txn-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+      context: session,
+    };
+  }
+
+  /**
+   * Commits the MongoDB transaction.
+   * @throws Error if no transaction is active
+   */
+  async commitTransaction(handle: ITransactionHandle): Promise<void> {
+    const session = handle.context as ClientSession;
+    if (!session.inTransaction()) {
+      throw new Error('No active transaction to commit');
+    }
+    try {
+      await session.commitTransaction();
+    } finally {
+      session.endSession();
+    }
+  }
+
+  /**
+   * Aborts the MongoDB transaction.
+   * This is safe to call even if there's no active transaction (will be a no-op after session ends).
+   */
+  async rollbackTransaction(handle: ITransactionHandle): Promise<void> {
+    const session = handle.context as ClientSession;
+    if (session.inTransaction()) {
+      try {
+        await session.abortTransaction();
+      } finally {
+        session.endSession();
+      }
+    } else {
+      session.endSession();
     }
   }
 
