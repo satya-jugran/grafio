@@ -1,7 +1,7 @@
 {
-  "name": "simple-graphdb",
+  "name": "grafio",
   "version": "5.2.0",
-  "description": "A lightweight async-first TypeScript graph database with pluggable storage architecture. Supports multiple isolated graphs via graphId partitioning. Ships with a zero-dependency in-memory provider; optional MongoDB backend for persistence. Includes BFS/DFS traversal, type/property filtering, topological sort, DAG detection, and Mermaid export.",
+  "description": "A graph database with pluggable storage architecture. Supports multiple isolated graphs via graphId partitioning. Ships with a zero-dependency in-memory provider; optional MongoDB backend for persistence. Includes BFS/DFS traversal, type/property filtering, topological sort, DAG detection, and Mermaid export.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
@@ -42,7 +42,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/satya-jugran/simple-graphdb"
+    "url": "https://github.com/satya-jugran/grafio"
   },
   "devDependencies": {
     "@types/jest": "^29.5.0",

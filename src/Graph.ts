@@ -30,7 +30,7 @@ export type { TraversalOptions } from './Graph/TraversalOptions';
  * @example
  * // MongoDB-backed graph
  * import { MongoClient } from 'mongodb';
- * import { Graph, MongoStorageProvider } from 'simple-graphdb';
+ * import { Graph, MongoStorageProvider } from 'grafio';
  * const client = new MongoClient('mongodb://localhost:27017');
  * await client.connect();
  * const provider = new MongoStorageProvider(client.db('graph'));

@@ -148,7 +148,7 @@ export function printReport(
     return s.padEnd(innerWidth);
   };
 
-  const title = ` simple-graphdb  PERFORMANCE REPORT  [Scale: ${scaleLabel} | ${formatNum(nodeCount)} nodes / ${formatNum(edgeCount)} edges] `;
+  const title = ` grafio  PERFORMANCE REPORT  [Scale: ${scaleLabel} | ${formatNum(nodeCount)} nodes / ${formatNum(edgeCount)} edges] `;
   const footprintLine = ` Heap footprint: ${formatBytes(heapFootprintBytes)}  |  RSS: ${formatBytes(process.memoryUsage().rss)}  |  GC: ${gcAvailable ? 'yes (--expose-gc)' : 'no — add --expose-gc for accuracy'} `;
 
   console.log('╔' + '═'.repeat(innerWidth) + '╗');

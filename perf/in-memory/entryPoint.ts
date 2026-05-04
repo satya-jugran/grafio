@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * simple-graphdb  ·  In-Memory Performance Test Runner
+ * grafio  ·  In-Memory Performance Test Runner
  *
  * Run with:
  *   npm run perf:in-memory
@@ -31,7 +31,7 @@ const SCALES: ScaleConfig[] = [
 async function main(): Promise<void> {
   console.log('\n');
   console.log('╔══════════════════════════════════════════════════════════════════════════════╗');
-  console.log('║          simple-graphdb  ·  In-Memory Performance Test Suite                 ║');
+  console.log('║          grafio  ·  In-Memory Performance Test Suite                         ║');
   console.log('║          Benchmarks: Write · Read · Navigation · Traversal · Analysis        ║');
   console.log('╚══════════════════════════════════════════════════════════════════════════════╝');
 

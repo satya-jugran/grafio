@@ -238,7 +238,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
    - Node labels show type and id; edges show relationship types
    - Example usage:
      ```typescript
-     import { Graph, GraphToMermaid } from 'simple-graphdb';
+     import { Graph, GraphToMermaid } from 'grafio';
      
      const graph = new Graph();
      const alice = graph.addNode('Person', { name: 'Alice' });

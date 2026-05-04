@@ -1,4 +1,4 @@
-# simple-graphdb
+# grafio
 
 A lightweight **async-first** TypeScript graph database with **pluggable storage architecture**. Supports **multiple isolated graphs** via `graphId` partitioning. Ships with a zero-dependency in-memory provider; optional MongoDB backend for persistence. Includes BFS/DFS traversal, type/property filtering, topological sort, DAG detection, and Mermaid export.
 
@@ -38,7 +38,7 @@ A lightweight **async-first** TypeScript graph database with **pluggable storage
 ## Installation
 
 ```bash
-npm install simple-graphdb
+npm install grafio
 
 # MongoDB backend (optional)
 npm install mongodb
@@ -47,7 +47,7 @@ npm install mongodb
 ## Quick Start
 
 ```typescript
-import { Graph } from 'simple-graphdb';
+import { Graph } from 'grafio';
 
 // Create a new graph (uses InMemoryStorageProvider by default)
 const graph = new Graph();
@@ -99,7 +99,7 @@ const order = await graph.topologicalSort(); // [authorId, courseId, chapterId]
 
 ```typescript
 import { MongoClient } from 'mongodb';
-import { MongoGraphFactory } from 'simple-graphdb';
+import { MongoGraphFactory } from 'grafio';
 
 // Connect to MongoDB
 const client = new MongoClient('mongodb://localhost:27017');
@@ -129,7 +129,7 @@ For fine-grained control over collection names, construct the provider directly:
 
 ```typescript
 import { MongoClient } from 'mongodb';
-import { Graph, MongoStorageProvider } from 'simple-graphdb';
+import { Graph, MongoStorageProvider } from 'grafio';
 
 const client = new MongoClient('mongodb://localhost:27017');
 await client.connect();
@@ -274,7 +274,7 @@ await graph.traverse(['id1', 'id2'], ['id3', 'id4']);
 Convert your graph to Mermaid flowchart syntax for visualization:
 
 ```typescript
-import { Graph, GraphToMermaid } from 'simple-graphdb';
+import { Graph, GraphToMermaid } from 'grafio';
 
 const graph = new Graph();
 const alice = await graph.addNode('Person', { name: 'Alice' });
@@ -353,7 +353,7 @@ edge.toJSON();    // { id: '...', sourceId: '...', targetId: '...', type: 'CONTA
 ## Error Handling
 
 ```typescript
-import { Graph, NodeAlreadyExistsError, NodeNotFoundError, NodeHasEdgesError } from 'simple-graphdb';
+import { Graph, NodeAlreadyExistsError, NodeNotFoundError, NodeHasEdgesError } from 'grafio';
 
 const graph = new Graph();
 const alice = await graph.addNode('Person', { name: 'Alice' });
@@ -403,7 +403,7 @@ Available error classes:
 ## Serialization & Persistence
 
 ```typescript
-import { Graph } from 'simple-graphdb';
+import { Graph } from 'grafio';
 import fs from 'fs/promises';
 
 const graph = new Graph();
@@ -442,7 +442,7 @@ await graph.hasEdge(edge.id); // false
 All storage backends implement the `IStorageProvider` interface:
 
 ```typescript
-import type { IStorageProvider } from 'simple-graphdb';
+import type { IStorageProvider } from 'grafio';
 
 class MyCustomProvider implements IStorageProvider {
   async insertNode(node: NodeData): Promise<void> { /* ... */ }

@@ -76,13 +76,13 @@ export interface MongoStorageProviderOptions {
 }
 
 /**
- * MongoDB-backed storage provider for `simple-graphdb`.
+ * MongoDB-backed storage provider for `grafio`.
  *
  * ## Setup
  * ```typescript
  * import { MongoClient } from 'mongodb';
- * import { Graph } from 'simple-graphdb';
- * import { MongoStorageProvider } from 'simple-graphdb/storage/MongoStorageProvider';
+ * import { Graph } from 'grafio';
+ * import { MongoStorageProvider } from 'grafio/storage/MongoStorageProvider';
  *
  * const client = new MongoClient('mongodb://localhost:27017');
  * await client.connect();

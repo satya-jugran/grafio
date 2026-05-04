@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * simple-graphdb  ·  MongoDB Performance Test Runner
+ * grafio  ·  MongoDB Performance Test Runner
  *
  * Run with:
  *   npm run perf:mongodb
@@ -37,7 +37,7 @@ const SCALES: ScaleConfig[] = [
 // Default connection string. Override via MONGODB_URI env variable.
 
 const DEFAULT_URI = 'mongodb://localhost:27017';
-const DEFAULT_DB = 'simple-graphdb-perf';
+const DEFAULT_DB = 'grafio-perf';
 
 interface MongoConfig {
   uri: string;
@@ -57,8 +57,8 @@ async function main(): Promise<void> {
 
   console.log('\n');
   console.log('╔══════════════════════════════════════════════════════════════════════════════╗');
-  console.log('║          simple-graphdb  ·  MongoDB Performance Test Suite                  ║');
-  console.log('║          Benchmarks: Write · Read · Navigation · Traversal                  ║');
+  console.log('║          grafio  ·  MongoDB Performance Test Suite                           ║');
+  console.log('║          Benchmarks: Write · Read · Navigation · Traversal                   ║');
   console.log('╚══════════════════════════════════════════════════════════════════════════════╝');
   console.log(`\n  MongoDB URI:  ${config.uri}`);
   console.log(`  Database:    ${config.dbName}`);
