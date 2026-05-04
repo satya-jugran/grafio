@@ -357,7 +357,7 @@ edge.toJSON();    // { id: '...', sourceId: '...', targetId: '...', type: 'CONTA
 
 ## Transactions
 
-Transactions allow batching multiple operations into a single atomic unit. All changes can be committed together or rolled back if any operation fails.
+Transactions allow batching multiple operations into a single atomic unit. All changes are committed together on success, or discarded on explicit rollback.
 
 ```typescript
 import { Graph, GraphTransaction } from 'grafio';
@@ -366,19 +366,25 @@ const graph = new Graph();
 const txn = graph.createTransaction();
 await txn.begin();
 
-await graph.addNode('Person', { name: 'Alice' }, txn);
-await graph.addNode('Person', { name: 'Bob' }, txn);
-await graph.addEdge(alice.id, bob.id, 'KNOWS', {}, txn);
-
-await txn.commit();   // Atomically applies all changes
-// or
-await txn.rollback(); // Discards all changes
+try {
+  const alice = await graph.addNode('Person', { name: 'Alice' }, txn);
+  const bob = await graph.addNode('Person', { name: 'Bob' }, txn);
+  await graph.addEdge(alice.id, bob.id, 'KNOWS', {}, txn);
+  await txn.commit();
+} catch (error) {
+  if (txn.isActive()) {
+    await txn.rollback();  // Caller must explicitly rollback on failure
+  }
+  throw error;
+}
 ```
 
 **Transaction lifecycle:**
 - `begin()` — starts a new transaction
-- `commit()` — applies all changes atomically
+- `commit()` — applies all changes atomically (throws if transaction failed)
 - `rollback()` — discards all changes
+- `isFailed()` — returns true if a storage operation failed within the transaction
+- `isActive()` — returns true if transaction is active and not failed
 
 **Note:** MongoDB storage provider requires a replica set for transaction support.
 

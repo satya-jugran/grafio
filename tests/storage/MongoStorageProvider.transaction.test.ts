@@ -146,11 +146,17 @@ describe('MongoStorageProvider Transaction Support', () => {
       const alice = await graph.addNode('Person', { name: 'Alice' }, txn);
       const bob = await graph.addNode('Person', { name: 'Bob' }, txn);
       
-      // Try to create a circular reference which might be invalid depending on graph rules
-      // For now just rollback manually to test
-      await graph.addEdge(alice.id, bob.id, 'KNOWS', {}, txn);
+      // Add an edge that references a non-existent node to cause a failure
+      // This should mark the transaction as failed
+      try {
+        await graph.addEdge(alice.id, 'non-existent-node', 'KNOWS', {}, txn);
+      } catch (error) {
+        // Expected - the transaction should now be marked as failed
+        expect(txn.isFailed()).toBe(true);
+      }
       
-      await txn.rollback();
+      // Attempting to commit should throw TransactionFailedError
+      await expect(txn.commit()).rejects.toThrow('Transaction has failed');
       
       // All changes should be rolled back
       expect(await graph.getNodes()).toHaveLength(0);
