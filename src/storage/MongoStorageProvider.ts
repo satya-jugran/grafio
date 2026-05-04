@@ -505,7 +505,7 @@ export class MongoStorageProvider implements IStorageProvider {
 
     if (result.matchedCount === 0) {
       // Check if record exists to differentiate between "record missing" vs "property exists"
-      const record = target === 'node' ? await this.getNode(id) : await this.getEdge(id);
+      const record = target === 'node' ? await this.getNode(id, transaction) : await this.getEdge(id, transaction);
       if (!record) {
         throw target === 'node' ? new NodeNotFoundError(id) : new EdgeNotFoundError(id);
       }
@@ -536,7 +536,7 @@ export class MongoStorageProvider implements IStorageProvider {
 
     if (result.matchedCount === 0) {
       // Determine whether it was the record or the property that didn't exist
-      const record = target === 'node' ? await this.getNode(id) : await this.getEdge(id);
+      const record = target === 'node' ? await this.getNode(id, transaction) : await this.getEdge(id, transaction);
       if (!record) {
         throw target === 'node' ? new NodeNotFoundError(id) : new EdgeNotFoundError(id);
       }
@@ -551,7 +551,7 @@ export class MongoStorageProvider implements IStorageProvider {
   async deleteProperty(target: 'node' | 'edge', id: string, key: string, transaction?: ITransactionHandle): Promise<void> {
     const session = transaction?.context as ClientSession | undefined;
     const collection = target === 'node' ? this._nodes : this._edges;
-    const record = target === 'node' ? await this.getNode(id) : await this.getEdge(id);
+    const record = target === 'node' ? await this.getNode(id, transaction) : await this.getEdge(id, transaction);
 
     if (!record) {
       if (target === 'node') {
@@ -575,7 +575,7 @@ export class MongoStorageProvider implements IStorageProvider {
   async clearProperties(target: 'node' | 'edge', id: string, transaction?: ITransactionHandle): Promise<void> {
     const session = transaction?.context as ClientSession | undefined;
     const collection = target === 'node' ? this._nodes : this._edges;
-    const record = target === 'node' ? await this.getNode(id) : await this.getEdge(id);
+    const record = target === 'node' ? await this.getNode(id, transaction) : await this.getEdge(id, transaction);
 
     if (!record) {
       if (target === 'node') {

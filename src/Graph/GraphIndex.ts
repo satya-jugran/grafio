@@ -191,8 +191,8 @@ export class GraphIndex {
    * @returns true if removed, false if not found
    */
   async removeEdge(id: string, transaction?: GraphTransaction): Promise<boolean> {
-    if (!await this._store.hasEdge(id)) return false;
     const handle = transaction?._getHandle();
+    if (!await this._store.hasEdge(id, handle)) return false;
     await this._store.deleteEdge(id, handle);
     return true;
   }
