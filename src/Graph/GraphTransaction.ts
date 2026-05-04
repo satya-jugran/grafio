@@ -108,6 +108,14 @@ export class GraphTransaction {
   }
 
   /**
+   * Marks the transaction as failed. After this, only rollback() is allowed.
+   * Should be called by Graph operations when a storage operation fails.
+   */
+  markFailed(): void {
+    this._failed = true;
+  }
+
+  /**
    * Internal method to retrieve the transaction handle for storage provider communication.
    * @internal
    */

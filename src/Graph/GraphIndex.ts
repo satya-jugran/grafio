@@ -86,10 +86,15 @@ export class GraphIndex {
 
     const handle = transaction?._getHandle();
     const node = new Node(type, properties);
-    if (await this._store.hasNode(node.id, handle)) {
-      throw new NodeAlreadyExistsError(node.id);
+    try {
+      if (await this._store.hasNode(node.id, handle)) {
+        throw new NodeAlreadyExistsError(node.id);
+      }
+      await this._store.insertNode(node.toJSON(), handle);
+    } catch (error) {
+      transaction?.markFailed();
+      throw error;
     }
-    await this._store.insertNode(node.toJSON(), handle);
     return node;
   }
 
@@ -101,25 +106,30 @@ export class GraphIndex {
    */
   async removeNode(id: string, cascade: boolean = false, transaction?: GraphTransaction): Promise<boolean> {
     const handle = transaction?._getHandle();
-    if (!await this._store.hasNode(id, handle)) return false;
+    try {
+      if (!await this._store.hasNode(id, handle)) return false;
 
-    const [outgoing, incoming] = await Promise.all([
-      this._store.getEdgesBySource(id, undefined, handle),
-      this._store.getEdgesByTarget(id, undefined, handle),
-    ]);
+      const [outgoing, incoming] = await Promise.all([
+        this._store.getEdgesBySource(id, undefined, handle),
+        this._store.getEdgesByTarget(id, undefined, handle),
+      ]);
 
-    if (cascade) {
-      for (const edge of [...outgoing, ...incoming]) {
-        await this._store.deleteEdge(edge.id, handle);
+      if (cascade) {
+        for (const edge of [...outgoing, ...incoming]) {
+          await this._store.deleteEdge(edge.id, handle);
+        }
+      } else {
+        const incidentCount = outgoing.length + incoming.length;
+        if (incidentCount > 0) {
+          throw new NodeHasEdgesError(id, incidentCount);
+        }
       }
-    } else {
-      const incidentCount = outgoing.length + incoming.length;
-      if (incidentCount > 0) {
-        throw new NodeHasEdgesError(id, incidentCount);
-      }
+
+      await this._store.deleteNode(id, handle);
+    } catch (error) {
+      transaction?.markFailed();
+      throw error;
     }
-
-    await this._store.deleteNode(id, handle);
     return true;
   }
 
@@ -170,18 +180,23 @@ export class GraphIndex {
       }
     }
 
-    const handle = transaction?._getHandle();
-    const [sourceExists, targetExists] = await Promise.all([
-      this._store.hasNode(sourceId, handle),
-      this._store.hasNode(targetId, handle),
-    ]);
-    if (!sourceExists) throw new NodeNotFoundError(sourceId);
-    if (!targetExists) throw new NodeNotFoundError(targetId);
-
     const edge = new Edge(sourceId, targetId, type, properties);
-    if (await this._store.hasEdge(edge.id, handle)) throw new EdgeAlreadyExistsError(edge.id);
+    const handle = transaction?._getHandle();
+    try {
+      const [sourceExists, targetExists] = await Promise.all([
+        this._store.hasNode(sourceId, handle),
+        this._store.hasNode(targetId, handle),
+      ]);
+      if (!sourceExists) throw new NodeNotFoundError(sourceId);
+      if (!targetExists) throw new NodeNotFoundError(targetId);
 
-    await this._store.insertEdge(edge.toJSON(), handle);
+      if (await this._store.hasEdge(edge.id, handle)) throw new EdgeAlreadyExistsError(edge.id);
+
+      await this._store.insertEdge(edge.toJSON(), handle);
+    } catch (error) {
+      transaction?.markFailed();
+      throw error;
+    }
     return edge;
   }
 
@@ -192,8 +207,13 @@ export class GraphIndex {
    */
   async removeEdge(id: string, transaction?: GraphTransaction): Promise<boolean> {
     const handle = transaction?._getHandle();
-    if (!await this._store.hasEdge(id, handle)) return false;
-    await this._store.deleteEdge(id, handle);
+    try {
+      if (!await this._store.hasEdge(id, handle)) return false;
+      await this._store.deleteEdge(id, handle);
+    } catch (error) {
+      transaction?.markFailed();
+      throw error;
+    }
     return true;
   }
 
@@ -343,7 +363,12 @@ export class GraphIndex {
       throw new InvalidPropertyError(key, value);
     }
     const handle = transaction?._getHandle();
-    await this._store.addProperty('node', nodeId, key, value, handle);
+    try {
+      await this._store.addProperty('node', nodeId, key, value, handle);
+    } catch (error) {
+      transaction?.markFailed();
+      throw error;
+    }
   }
 
   /**
@@ -355,7 +380,12 @@ export class GraphIndex {
       throw new InvalidPropertyError(key, value);
     }
     const handle = transaction?._getHandle();
-    await this._store.updateProperty('node', nodeId, key, value, handle);
+    try {
+      await this._store.updateProperty('node', nodeId, key, value, handle);
+    } catch (error) {
+      transaction?.markFailed();
+      throw error;
+    }
   }
 
   /**
@@ -363,7 +393,12 @@ export class GraphIndex {
    */
   async deleteNodeProperty(nodeId: string, key: string, transaction?: GraphTransaction): Promise<void> {
     const handle = transaction?._getHandle();
-    await this._store.deleteProperty('node', nodeId, key, handle);
+    try {
+      await this._store.deleteProperty('node', nodeId, key, handle);
+    } catch (error) {
+      transaction?.markFailed();
+      throw error;
+    }
   }
 
   /**
@@ -371,7 +406,12 @@ export class GraphIndex {
    */
   async clearNodeProperties(nodeId: string, transaction?: GraphTransaction): Promise<void> {
     const handle = transaction?._getHandle();
-    await this._store.clearProperties('node', nodeId, handle);
+    try {
+      await this._store.clearProperties('node', nodeId, handle);
+    } catch (error) {
+      transaction?.markFailed();
+      throw error;
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -387,7 +427,12 @@ export class GraphIndex {
       throw new InvalidPropertyError(key, value);
     }
     const handle = transaction?._getHandle();
-    await this._store.addProperty('edge', edgeId, key, value, handle);
+    try {
+      await this._store.addProperty('edge', edgeId, key, value, handle);
+    } catch (error) {
+      transaction?.markFailed();
+      throw error;
+    }
   }
 
   /**
@@ -399,7 +444,12 @@ export class GraphIndex {
       throw new InvalidPropertyError(key, value);
     }
     const handle = transaction?._getHandle();
-    await this._store.updateProperty('edge', edgeId, key, value, handle);
+    try {
+      await this._store.updateProperty('edge', edgeId, key, value, handle);
+    } catch (error) {
+      transaction?.markFailed();
+      throw error;
+    }
   }
 
   /**
@@ -407,7 +457,12 @@ export class GraphIndex {
    */
   async deleteEdgeProperty(edgeId: string, key: string, transaction?: GraphTransaction): Promise<void> {
     const handle = transaction?._getHandle();
-    await this._store.deleteProperty('edge', edgeId, key, handle);
+    try {
+      await this._store.deleteProperty('edge', edgeId, key, handle);
+    } catch (error) {
+      transaction?.markFailed();
+      throw error;
+    }
   }
 
   /**
@@ -415,7 +470,12 @@ export class GraphIndex {
    */
   async clearEdgeProperties(edgeId: string, transaction?: GraphTransaction): Promise<void> {
     const handle = transaction?._getHandle();
-    await this._store.clearProperties('edge', edgeId, handle);
+    try {
+      await this._store.clearProperties('edge', edgeId, handle);
+    } catch (error) {
+      transaction?.markFailed();
+      throw error;
+    }
   }
 
   // ---------------------------------------------------------------------------
