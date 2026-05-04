@@ -643,8 +643,11 @@ export class MongoStorageProvider implements IStorageProvider {
     if (!session.inTransaction()) {
       throw new Error('No active transaction to commit');
     }
-    await session.commitTransaction();
-    session.endSession();
+    try {
+      await session.commitTransaction();
+    } finally {
+      session.endSession();
+    }
   }
 
   /**
@@ -654,9 +657,14 @@ export class MongoStorageProvider implements IStorageProvider {
   async rollbackTransaction(handle: ITransactionHandle): Promise<void> {
     const session = handle.context as ClientSession;
     if (session.inTransaction()) {
-      await session.abortTransaction();
+      try {
+        await session.abortTransaction();
+      } finally {
+        session.endSession();
+      }
+    } else {
+      session.endSession();
     }
-    session.endSession();
   }
 
   // ---------------------------------------------------------------------------
