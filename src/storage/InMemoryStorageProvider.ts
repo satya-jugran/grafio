@@ -167,12 +167,23 @@ export class InMemoryStorageProvider implements IStorageProvider {
   // Node mutations
   // ---------------------------------------------------------------------------
 
-  async insertNode(node: NodeData, _transaction?: ITransactionHandle): Promise<void> {
-    this._insertNode(node, false);
+  async insertNode(node: NodeData, transaction?: ITransactionHandle): Promise<void> {
+    const overlay = this._getOverlay(transaction?.id);
+
+    if (overlay) {
+      // Transaction active: write to overlay
+      overlay.nodes.set(node.id, deepClone(node));
+      // Update overlay indexes
+      this._overlayAddToIndex(overlay.nodesByType, node.type, node.id);
+      this._overlayIndexNodeProperties(overlay, node);
+    } else {
+      // No transaction: modify live state directly
+      this._insertNodeLive(node, false);
+    }
   }
 
   /** @internal Used by importJSON — skips the defensive clone since the data is already owned. */
-  private _insertNode(node: NodeData, skipClone: boolean): void {
+  private _insertNodeLive(node: NodeData, skipClone: boolean): void {
     if (this._nodes.has(node.id)) {
       throw new NodeAlreadyExistsError(node.id);
     }
@@ -189,80 +200,240 @@ export class InMemoryStorageProvider implements IStorageProvider {
     this._indexNodeProperties(stored);
   }
 
-  async deleteNode(id: string, _transaction?: ITransactionHandle): Promise<void> {
-    const node = this._nodes.get(id);
-    if (!node) return;
+  async deleteNode(id: string, transaction?: ITransactionHandle): Promise<void> {
+    const overlay = this._getOverlay(transaction?.id);
 
-    // Type index
-    const typeSet = this._nodesByType.get(node.type);
-    if (typeSet) {
-      typeSet.delete(id);
-      if (typeSet.size === 0) this._nodesByType.delete(node.type);
+    if (overlay) {
+      // Mark as deleted in overlay
+      overlay.nodes.set(id, null);
+      // Mark deletion in overlay indexes
+      this._overlayAddToIndex(overlay.nodesByType, '', id); // Will be handled specially
+    } else {
+      const node = this._nodes.get(id);
+      if (!node) return;
+
+      // Type index
+      const typeSet = this._nodesByType.get(node.type);
+      if (typeSet) {
+        typeSet.delete(id);
+        if (typeSet.size === 0) this._nodesByType.delete(node.type);
+      }
+
+      // Property value index
+      this._unindexNodeProperties(node);
+
+      this._nodes.delete(id);
     }
+  }
 
-    // Property value index
-    this._unindexNodeProperties(node);
+  private _overlayAddToIndex(index: Map<string, Set<string>>, type: string, id: string): void {
+    if (!type) return; // Skip for deletions
+    let typeSet = index.get(type);
+    if (!typeSet) {
+      typeSet = new Set();
+      index.set(type, typeSet);
+    }
+    typeSet.add(id);
+  }
 
-    this._nodes.delete(id);
+  private _overlayIndexNodeProperties(overlay: TransactionOverlay, node: NodeData): void {
+    for (const [key, value] of Object.entries(node.properties)) {
+      const serialized = JSON.stringify(value) ?? 'undefined';
+      let keyMap = overlay.nodesByProperty.get(key);
+      if (!keyMap) {
+        keyMap = new Map();
+        overlay.nodesByProperty.set(key, keyMap);
+      }
+      let idSet = keyMap.get(serialized);
+      if (!idSet) {
+        idSet = new Set();
+        keyMap.set(serialized, idSet);
+      }
+      idSet.add(node.id);
+    }
+  }
+
+  private _overlayIndexEdgeProperties(overlay: TransactionOverlay, edge: EdgeData): void {
+    for (const [key, value] of Object.entries(edge.properties)) {
+      const serialized = JSON.stringify(value) ?? 'undefined';
+      let keyMap = overlay.edgesByProperty.get(key);
+      if (!keyMap) {
+        keyMap = new Map();
+        overlay.edgesByProperty.set(key, keyMap);
+      }
+      let idSet = keyMap.get(serialized);
+      if (!idSet) {
+        idSet = new Set();
+        keyMap.set(serialized, idSet);
+      }
+      idSet.add(edge.id);
+    }
   }
 
   // ---------------------------------------------------------------------------
   // Node queries
   // ---------------------------------------------------------------------------
 
-  async hasNode(id: string, _transaction?: ITransactionHandle): Promise<boolean> {
+  async hasNode(id: string, transaction?: ITransactionHandle): Promise<boolean> {
+    const overlay = this._getOverlay(transaction?.id);
+    if (overlay) {
+      // Check overlay first
+      if (overlay.nodes.has(id)) {
+        return overlay.nodes.get(id) !== null;
+      }
+    }
     return this._nodes.has(id);
   }
 
-  async getNode(id: string, _transaction?: ITransactionHandle): Promise<NodeData | undefined> {
+  async getNode(id: string, transaction?: ITransactionHandle): Promise<NodeData | undefined> {
+    const overlay = this._getOverlay(transaction?.id);
+    if (overlay) {
+      // Check overlay first
+      const overlayNode = overlay.nodes.get(id);
+      if (overlayNode !== undefined) {
+        return overlayNode ? deepClone(overlayNode) : undefined;
+      }
+    }
     const node = this._nodes.get(id);
     return node ? deepClone(node) : undefined;
   }
 
-  async getAllNodes(limit?: number): Promise<NodeData[]> {
+  async getAllNodes(limit?: number, transaction?: ITransactionHandle): Promise<NodeData[]> {
+    const overlay = this._getOverlay(transaction?.id);
     const result: NodeData[] = [];
-    const iterator = this._nodes.values();
-    let count = 0;
-    for (const node of iterator) {
-      if (limit !== undefined && count >= limit) break;
+    const seen = new Set<string>();
+    
+    if (overlay) {
+      // First add all overlay nodes
+      for (const [id, node] of overlay.nodes) {
+        if (node) {
+          result.push(deepClone(node));
+          seen.add(id);
+          if (limit !== undefined && result.length >= limit) break;
+        }
+      }
+      if (limit !== undefined && result.length >= limit) {
+        return result;
+      }
+    }
+    
+    // Then add live nodes not overridden by overlay
+    for (const [id, node] of this._nodes) {
+      if (seen.has(id)) continue;
+      if (limit !== undefined && result.length >= limit) break;
       result.push(deepClone(node));
-      count++;
     }
     return result;
   }
 
-  async getNodesByType(type: string): Promise<NodeData[]> {
-    const ids = this._nodesByType.get(type);
-    if (!ids) return [];
-    return Array.from(ids)
-      .map(id => this._nodes.get(id))
-      .filter((n): n is NodeData => n !== undefined)
-      .map(deepClone);
+  async getNodesByType(type: string, transaction?: ITransactionHandle): Promise<NodeData[]> {
+    const overlay = this._getOverlay(transaction?.id);
+    const seen = new Set<string>();
+    const result: NodeData[] = [];
+    
+    if (overlay) {
+      // Check overlay nodesByType
+      const overlayIds = overlay.nodesByType.get(type);
+      if (overlayIds) {
+        for (const id of overlayIds) {
+          const node = overlay.nodes.get(id);
+          if (node) {
+            result.push(deepClone(node));
+            seen.add(id);
+          }
+        }
+      }
+    }
+    
+    // Merge with live nodes
+    const liveIds = this._nodesByType.get(type);
+    if (liveIds) {
+      for (const id of liveIds) {
+        if (seen.has(id)) continue;
+        const node = this._nodes.get(id);
+        if (node) {
+          // Only include if not deleted in overlay
+          const overlayNode = overlay?.nodes.get(id);
+          if (overlayNode !== null) {
+            result.push(deepClone(node));
+          }
+        }
+      }
+    }
+    return result;
   }
 
-  async getNodesByProperty(key: string, value: unknown, nodeType?: string): Promise<NodeData[]> {
+  async getNodesByProperty(key: string, value: unknown, nodeType?: string, transaction?: ITransactionHandle): Promise<NodeData[]> {
     const serialized = this._propKey(value);
-    const valueMap = this._nodesByProperty.get(key);
-    if (!valueMap) return [];
-    const ids = valueMap.get(serialized);
-    if (!ids) return [];
-    return Array.from(ids)
-      .map(id => this._nodes.get(id))
-      .filter((n): n is NodeData => n !== undefined)
-      .filter(n => !nodeType || nodeType === '*' || n.type === nodeType)
-      .map(deepClone);
+    const overlay = this._getOverlay(transaction?.id);
+    const seen = new Set<string>();
+    const result: NodeData[] = [];
+    
+    if (overlay) {
+      // Check overlay property index
+      const keyMap = overlay.nodesByProperty.get(key);
+      if (keyMap) {
+        const idSet = keyMap.get(serialized);
+        if (idSet) {
+          for (const id of idSet) {
+            const node = overlay.nodes.get(id);
+            if (node) {
+              if (!nodeType || nodeType === '*' || node.type === nodeType) {
+                result.push(deepClone(node));
+                seen.add(id);
+              }
+            }
+          }
+        }
+      }
+    }
+    
+    // Merge with live nodes
+    const liveMap = this._nodesByProperty.get(key);
+    if (liveMap) {
+      const liveIds = liveMap.get(serialized);
+      if (liveIds) {
+        for (const id of liveIds) {
+          if (seen.has(id)) continue;
+          const node = this._nodes.get(id);
+          if (node) {
+            // Only include if not deleted in overlay
+            const overlayNode = overlay?.nodes.get(id);
+            if (overlayNode !== null) {
+              if (!nodeType || nodeType === '*' || node.type === nodeType) {
+                result.push(deepClone(node));
+              }
+            }
+          }
+        }
+      }
+    }
+    return result;
   }
 
   // ---------------------------------------------------------------------------
   // Edge mutations
   // ---------------------------------------------------------------------------
 
-  async insertEdge(edge: EdgeData, _transaction?: ITransactionHandle): Promise<void> {
-    this._insertEdge(edge, false);
+  async insertEdge(edge: EdgeData, transaction?: ITransactionHandle): Promise<void> {
+    const overlay = this._getOverlay(transaction?.id);
+
+    if (overlay) {
+      // Transaction active: write to overlay
+      overlay.edges.set(edge.id, deepClone(edge));
+      // Update overlay indexes
+      this._overlayAddToIndex(overlay.edgesByType, edge.type, edge.id);
+      this._overlayAddToIndex(overlay.edgesBySource, edge.sourceId, edge.id);
+      this._overlayAddToIndex(overlay.edgesByTarget, edge.targetId, edge.id);
+      this._overlayIndexEdgeProperties(overlay, edge);
+    } else {
+      // No transaction: modify live state directly
+      this._insertEdgeLive(edge, false);
+    }
   }
 
   /** @internal Used by importJSON — skips the defensive clone since the data is already owned. */
-  private _insertEdge(edge: EdgeData, skipClone: boolean): void {
+  private _insertEdgeLive(edge: EdgeData, skipClone: boolean): void {
     if (this._edges.has(edge.id)) {
       throw new EdgeAlreadyExistsError(edge.id);
     }
@@ -287,77 +458,190 @@ export class InMemoryStorageProvider implements IStorageProvider {
     this._edgesByType.get(edge.type)!.add(edge.id);
   }
 
-  async deleteEdge(id: string, _transaction?: ITransactionHandle): Promise<void> {
-    const edge = this._edges.get(id);
-    if (!edge) return;
+  async deleteEdge(id: string, transaction?: ITransactionHandle): Promise<void> {
+    const overlay = this._getOverlay(transaction?.id);
 
-    // Adjacency
-    const srcSet = this._edgesBySource.get(edge.sourceId);
-    if (srcSet) {
-      srcSet.delete(id);
-      if (srcSet.size === 0) this._edgesBySource.delete(edge.sourceId);
+    if (overlay) {
+      // Mark as deleted in overlay
+      overlay.edges.set(id, null);
+    } else {
+      const edge = this._edges.get(id);
+      if (!edge) return;
+
+      // Adjacency
+      const srcSet = this._edgesBySource.get(edge.sourceId);
+      if (srcSet) {
+        srcSet.delete(id);
+        if (srcSet.size === 0) this._edgesBySource.delete(edge.sourceId);
+      }
+
+      const tgtSet = this._edgesByTarget.get(edge.targetId);
+      if (tgtSet) {
+        tgtSet.delete(id);
+        if (tgtSet.size === 0) this._edgesByTarget.delete(edge.targetId);
+      }
+
+      // Type index
+      const typeSet = this._edgesByType.get(edge.type);
+      if (typeSet) {
+        typeSet.delete(id);
+        if (typeSet.size === 0) this._edgesByType.delete(edge.type);
+      }
+
+      this._edges.delete(id);
     }
-
-    const tgtSet = this._edgesByTarget.get(edge.targetId);
-    if (tgtSet) {
-      tgtSet.delete(id);
-      if (tgtSet.size === 0) this._edgesByTarget.delete(edge.targetId);
-    }
-
-    // Type index
-    const typeSet = this._edgesByType.get(edge.type);
-    if (typeSet) {
-      typeSet.delete(id);
-      if (typeSet.size === 0) this._edgesByType.delete(edge.type);
-    }
-
-    this._edges.delete(id);
   }
 
   // ---------------------------------------------------------------------------
   // Edge queries
   // ---------------------------------------------------------------------------
 
-  async hasEdge(id: string, _transaction?: ITransactionHandle): Promise<boolean> {
+  async hasEdge(id: string, transaction?: ITransactionHandle): Promise<boolean> {
+    const overlay = this._getOverlay(transaction?.id);
+    if (overlay) {
+      if (overlay.edges.has(id)) {
+        return overlay.edges.get(id) !== null;
+      }
+    }
     return this._edges.has(id);
   }
 
-  async getEdge(id: string, _transaction?: ITransactionHandle): Promise<EdgeData | undefined> {
+  async getEdge(id: string, transaction?: ITransactionHandle): Promise<EdgeData | undefined> {
+    const overlay = this._getOverlay(transaction?.id);
+    if (overlay) {
+      const overlayEdge = overlay.edges.get(id);
+      if (overlayEdge !== undefined) {
+        return overlayEdge ? deepClone(overlayEdge) : undefined;
+      }
+    }
     const edge = this._edges.get(id);
     return edge ? deepClone(edge) : undefined;
   }
 
-  async getAllEdges(): Promise<EdgeData[]> {
-    return Array.from(this._edges.values()).map(deepClone);
+  async getAllEdges(transaction?: ITransactionHandle): Promise<EdgeData[]> {
+    const overlay = this._getOverlay(transaction?.id);
+    const result: EdgeData[] = [];
+    const seen = new Set<string>();
+
+    if (overlay) {
+      for (const [id, edge] of overlay.edges) {
+        if (edge) {
+          result.push(deepClone(edge));
+          seen.add(id);
+        }
+      }
+    }
+
+    for (const [id, edge] of this._edges) {
+      if (seen.has(id)) continue;
+      const overlayEdge = overlay?.edges.get(id);
+      if (overlayEdge !== null) {
+        result.push(deepClone(edge));
+      }
+    }
+    return result;
   }
 
-  async getEdgesByType(type: string): Promise<EdgeData[]> {
-    const ids = this._edgesByType.get(type);
-    if (!ids) return [];
-    return Array.from(ids)
-      .map(id => this._edges.get(id))
-      .filter((e): e is EdgeData => e !== undefined)
-      .map(deepClone);
+  async getEdgesByType(type: string, transaction?: ITransactionHandle): Promise<EdgeData[]> {
+    const overlay = this._getOverlay(transaction?.id);
+    const seen = new Set<string>();
+    const result: EdgeData[] = [];
+
+    if (overlay) {
+      const overlayIds = overlay.edgesByType.get(type);
+      if (overlayIds) {
+        for (const id of overlayIds) {
+          const edge = overlay.edges.get(id);
+          if (edge) {
+            result.push(deepClone(edge));
+            seen.add(id);
+          }
+        }
+      }
+    }
+
+    const liveIds = this._edgesByType.get(type);
+    if (liveIds) {
+      for (const id of liveIds) {
+        if (seen.has(id)) continue;
+        const edge = this._edges.get(id);
+        if (edge) {
+          const overlayEdge = overlay?.edges.get(id);
+          if (overlayEdge !== null) {
+            result.push(deepClone(edge));
+          }
+        }
+      }
+    }
+    return result;
   }
 
-  async getEdgesBySource(nodeId: string, type?: string, _transaction?: ITransactionHandle): Promise<EdgeData[]> {
-    const ids = this._edgesBySource.get(nodeId);
-    if (!ids) return [];
-    return Array.from(ids)
-      .map(id => this._edges.get(id))
-      .filter((e): e is EdgeData => e !== undefined)
-      .filter(e => !type || e.type === type)
-      .map(deepClone);
+  async getEdgesBySource(nodeId: string, type?: string, transaction?: ITransactionHandle): Promise<EdgeData[]> {
+    const overlay = this._getOverlay(transaction?.id);
+    const seen = new Set<string>();
+    const result: EdgeData[] = [];
+
+    if (overlay) {
+      const overlayIds = overlay.edgesBySource.get(nodeId);
+      if (overlayIds) {
+        for (const id of overlayIds) {
+          const edge = overlay.edges.get(id);
+          if (edge && (!type || edge.type === type)) {
+            result.push(deepClone(edge));
+            seen.add(id);
+          }
+        }
+      }
+    }
+
+    const liveIds = this._edgesBySource.get(nodeId);
+    if (liveIds) {
+      for (const id of liveIds) {
+        if (seen.has(id)) continue;
+        const edge = this._edges.get(id);
+        if (edge) {
+          const overlayEdge = overlay?.edges.get(id);
+          if (overlayEdge !== null && (!type || edge.type === type)) {
+            result.push(deepClone(edge));
+          }
+        }
+      }
+    }
+    return result;
   }
 
-  async getEdgesByTarget(nodeId: string, type?: string, _transaction?: ITransactionHandle): Promise<EdgeData[]> {
-    const ids = this._edgesByTarget.get(nodeId);
-    if (!ids) return [];
-    return Array.from(ids)
-      .map(id => this._edges.get(id))
-      .filter((e): e is EdgeData => e !== undefined)
-      .filter(e => !type || e.type === type)
-      .map(deepClone);
+  async getEdgesByTarget(nodeId: string, type?: string, transaction?: ITransactionHandle): Promise<EdgeData[]> {
+    const overlay = this._getOverlay(transaction?.id);
+    const seen = new Set<string>();
+    const result: EdgeData[] = [];
+
+    if (overlay) {
+      const overlayIds = overlay.edgesByTarget.get(nodeId);
+      if (overlayIds) {
+        for (const id of overlayIds) {
+          const edge = overlay.edges.get(id);
+          if (edge && (!type || edge.type === type)) {
+            result.push(deepClone(edge));
+            seen.add(id);
+          }
+        }
+      }
+    }
+
+    const liveIds = this._edgesByTarget.get(nodeId);
+    if (liveIds) {
+      for (const id of liveIds) {
+        if (seen.has(id)) continue;
+        const edge = this._edges.get(id);
+        if (edge) {
+          const overlayEdge = overlay?.edges.get(id);
+          if (overlayEdge !== null && (!type || edge.type === type)) {
+            result.push(deepClone(edge));
+          }
+        }
+      }
+    }
+    return result;
   }
 
   // ---------------------------------------------------------------------------
@@ -567,8 +851,7 @@ export class InMemoryStorageProvider implements IStorageProvider {
    */
   async importJSON(data: GraphData): Promise<void> {
     for (const nodeData of data.nodes) {
-      // _insertNode throws NodeAlreadyExistsError on duplicate ids
-      this._insertNode(nodeData, true);
+      this._insertNodeLive(nodeData, true);
     }
 
     for (const edgeData of data.edges) {
@@ -579,8 +862,7 @@ export class InMemoryStorageProvider implements IStorageProvider {
       if (!this._nodes.has(edgeData.targetId)) {
         throw new NodeNotFoundError(edgeData.targetId);
       }
-      // _insertEdge throws EdgeAlreadyExistsError on duplicate ids
-      this._insertEdge(edgeData, true);
+      this._insertEdgeLive(edgeData, true);
     }
   }
 
@@ -589,175 +871,168 @@ export class InMemoryStorageProvider implements IStorageProvider {
   // ---------------------------------------------------------------------------
 
   /**
-   * In-memory transactions use copy-on-write with snapshots.
-   * Snapshots are stored by transaction ID to support concurrent transactions.
+   * In-memory transactions use copy-on-write overlays for isolation.
+   * Each transaction has its own overlay that intercepts reads/writes.
+   * On commit, overlay changes are applied to live state.
+   * On rollback, the overlay is simply discarded.
    */
-  private _snapshots = new Map<string, {
-    nodes: Map<string, NodeData>;
-    edges: Map<string, EdgeData>;
-    nodesByType: Map<string, Set<string>>;
-    edgesByType: Map<string, Set<string>>;
-    edgesBySource: Map<string, Set<string>>;
-    edgesByTarget: Map<string, Set<string>>;
-    nodesByProperty: Map<string, Map<string, Set<string>>>;
-    edgesByProperty: Map<string, Map<string, Set<string>>>;
-  }>();
+  private _transactionOverlays = new Map<string, TransactionOverlay>();
+  private _activeTransaction: string | null = null;
 
-  /**
-   * Returns true - InMemoryStorageProvider supports transactions.
-   */
   supportsTransactions(): boolean {
     return true;
   }
 
-  /**
-   * Starts a new transaction by taking a deep snapshot of all internal state.
-   * Operations during the transaction modify live state directly.
-   * On commit, we simply clear the snapshot (live state already has changes).
-   * On rollback, we restore live state from the snapshot.
-   */
   async beginTransaction(): Promise<ITransactionHandle> {
     const txnId = `txn-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 
-    // Deep clone all internal state for the rollback snapshot
-    const nodesSnapshot = new Map<string, NodeData>();
-    for (const [id, node] of this._nodes) {
-      nodesSnapshot.set(id, deepClone(node));
-    }
-
-    const edgesSnapshot = new Map<string, EdgeData>();
-    for (const [id, edge] of this._edges) {
-      edgesSnapshot.set(id, deepClone(edge));
-    }
-
-    const nodesByTypeSnapshot = new Map<string, Set<string>>();
-    for (const [type, ids] of this._nodesByType) {
-      nodesByTypeSnapshot.set(type, new Set(ids));
-    }
-
-    const edgesByTypeSnapshot = new Map<string, Set<string>>();
-    for (const [type, ids] of this._edgesByType) {
-      edgesByTypeSnapshot.set(type, new Set(ids));
-    }
-
-    const edgesBySourceSnapshot = new Map<string, Set<string>>();
-    for (const [nodeId, edgeIds] of this._edgesBySource) {
-      edgesBySourceSnapshot.set(nodeId, new Set(edgeIds));
-    }
-
-    const edgesByTargetSnapshot = new Map<string, Set<string>>();
-    for (const [nodeId, edgeIds] of this._edgesByTarget) {
-      edgesByTargetSnapshot.set(nodeId, new Set(edgeIds));
-    }
-
-    const nodesByPropertySnapshot = new Map<string, Map<string, Set<string>>>();
-    for (const [key, valueMap] of this._nodesByProperty) {
-      const valueMapSnapshot = new Map<string, Set<string>>();
-      for (const [serialized, idSet] of valueMap) {
-        valueMapSnapshot.set(serialized, new Set(idSet));
-      }
-      nodesByPropertySnapshot.set(key, valueMapSnapshot);
-    }
-
-    const edgesByPropertySnapshot = new Map<string, Map<string, Set<string>>>();
-    for (const [key, valueMap] of this._edgesByProperty) {
-      const valueMapSnapshot = new Map<string, Set<string>>();
-      for (const [serialized, idSet] of valueMap) {
-        valueMapSnapshot.set(serialized, new Set(idSet));
-      }
-      edgesByPropertySnapshot.set(key, valueMapSnapshot);
-    }
-
-    this._snapshots.set(txnId, {
-      nodes: nodesSnapshot,
-      edges: edgesSnapshot,
-      nodesByType: nodesByTypeSnapshot,
-      edgesByType: edgesByTypeSnapshot,
-      edgesBySource: edgesBySourceSnapshot,
-      edgesByTarget: edgesByTargetSnapshot,
-      nodesByProperty: nodesByPropertySnapshot,
-      edgesByProperty: edgesByPropertySnapshot,
-    });
-
-    return {
-      id: txnId,
-      context: undefined,
+    const overlay: TransactionOverlay = {
+      nodes: new Map(),
+      edges: new Map(),
+      nodesByType: new Map(),
+      edgesByType: new Map(),
+      edgesBySource: new Map(),
+      edgesByTarget: new Map(),
+      nodesByProperty: new Map(),
+      edgesByProperty: new Map(),
     };
+
+    this._transactionOverlays.set(txnId, overlay);
+    this._activeTransaction = txnId;
+
+    return { id: txnId, context: undefined };
   }
 
-  /**
-   * Commits the transaction. Since operations modify live state directly,
-   * we just need to clear the snapshot.
-   */
   async commitTransaction(handle: ITransactionHandle): Promise<void> {
-    if (!this._snapshots.has(handle.id)) {
+    const overlay = this._transactionOverlays.get(handle.id);
+    if (!overlay) {
       throw new Error('No active transaction to commit');
     }
 
-    // Live state already has all the changes from the transaction,
-    // so we just need to clear the snapshot
-    this._snapshots.delete(handle.id);
+    // Apply all overlay changes to live state
+    this._applyOverlayToLive(overlay);
+
+    this._transactionOverlays.delete(handle.id);
+    if (this._activeTransaction === handle.id) {
+      this._activeTransaction = null;
+    }
   }
 
-  /**
-   * Rolls back the transaction by restoring live state from the snapshot.
-   */
   async rollbackTransaction(handle: ITransactionHandle): Promise<void> {
-    const snapshot = this._snapshots.get(handle.id);
-    if (!snapshot) {
-      // No active transaction to rollback
+    if (!this._transactionOverlays.has(handle.id)) {
       return;
     }
 
-    // Restore all live state from snapshot
-    this._nodes.clear();
-    for (const [id, node] of snapshot.nodes) {
-      this._nodes.set(id, node);
+    this._transactionOverlays.delete(handle.id);
+    if (this._activeTransaction === handle.id) {
+      this._activeTransaction = null;
     }
-
-    this._edges.clear();
-    for (const [id, edge] of snapshot.edges) {
-      this._edges.set(id, edge);
-    }
-
-    this._nodesByType.clear();
-    for (const [type, ids] of snapshot.nodesByType) {
-      this._nodesByType.set(type, new Set(ids));
-    }
-
-    this._edgesByType.clear();
-    for (const [type, ids] of snapshot.edgesByType) {
-      this._edgesByType.set(type, new Set(ids));
-    }
-
-    this._edgesBySource.clear();
-    for (const [nodeId, edgeIds] of snapshot.edgesBySource) {
-      this._edgesBySource.set(nodeId, new Set(edgeIds));
-    }
-
-    this._edgesByTarget.clear();
-    for (const [nodeId, edgeIds] of snapshot.edgesByTarget) {
-      this._edgesByTarget.set(nodeId, new Set(edgeIds));
-    }
-
-    this._nodesByProperty.clear();
-    for (const [key, valueMap] of snapshot.nodesByProperty) {
-      const valueMapCopy = new Map<string, Set<string>>();
-      for (const [serialized, idSet] of valueMap) {
-        valueMapCopy.set(serialized, new Set(idSet));
-      }
-      this._nodesByProperty.set(key, valueMapCopy);
-    }
-
-    this._edgesByProperty.clear();
-    for (const [key, valueMap] of snapshot.edgesByProperty) {
-      const valueMapCopy = new Map<string, Set<string>>();
-      for (const [serialized, idSet] of valueMap) {
-        valueMapCopy.set(serialized, new Set(idSet));
-      }
-      this._edgesByProperty.set(key, valueMapCopy);
-    }
-
-    this._snapshots.delete(handle.id);
   }
+
+  private _getOverlay(txnId?: string): TransactionOverlay | null {
+    const id = txnId ?? this._activeTransaction;
+    if (!id) return null;
+    return this._transactionOverlays.get(id) ?? null;
+  }
+
+  private _applyOverlayToLive(overlay: TransactionOverlay): void {
+    // Apply node changes
+    for (const [id, node] of overlay.nodes) {
+      if (node === null) {
+        this._nodes.delete(id);
+        // Remove from indexes
+        const existing = this._nodes.get(id);
+        if (existing) {
+          this._unindexNodeProperties(existing);
+        }
+      } else {
+        this._nodes.set(id, node);
+        this._indexNodeProperties(node);
+      }
+    }
+
+    // Apply edge changes
+    for (const [id, edge] of overlay.edges) {
+      if (edge === null) {
+        this._edges.delete(id);
+        const existing = this._edges.get(id);
+        if (existing) {
+          this._unindexEdgeProperties(existing);
+        }
+      } else {
+        this._edges.set(id, edge);
+        this._indexEdgeProperties(edge);
+      }
+    }
+
+    // Apply index changes
+    this._mergeOverlayIndexes(this._nodesByType, overlay.nodesByType);
+    this._mergeOverlayIndexes(this._edgesByType, overlay.edgesByType);
+    this._mergeOverlayIndexes(this._edgesBySource, overlay.edgesBySource);
+    this._mergeOverlayIndexes(this._edgesByTarget, overlay.edgesByTarget);
+    this._mergePropertyOverlayIndexes(this._nodesByProperty, overlay.nodesByProperty);
+    this._mergePropertyOverlayIndexes(this._edgesByProperty, overlay.edgesByProperty);
+  }
+
+  private _mergeOverlayIndexes(
+    live: Map<string, Set<string>>,
+    overlay: Map<string, Set<string>>
+  ): void {
+    for (const [key, idSet] of overlay) {
+      const liveSet = live.get(key);
+      if (liveSet) {
+        for (const id of idSet) {
+          liveSet.add(id);
+        }
+      } else {
+        live.set(key, new Set(idSet));
+      }
+    }
+  }
+
+  private _mergePropertyOverlayIndexes(
+    live: Map<string, Map<string, Set<string>>>,
+    overlay: Map<string, Map<string, Set<string>>>
+  ): void {
+    for (const [key, valueMap] of overlay) {
+      let liveMap = live.get(key);
+      if (!liveMap) {
+        liveMap = new Map();
+        live.set(key, liveMap);
+      }
+      for (const [serialized, idSet] of valueMap) {
+        let liveSet = liveMap.get(serialized);
+        if (!liveSet) {
+          liveSet = new Set();
+          liveMap.set(serialized, liveSet);
+        }
+        for (const id of idSet) {
+          liveSet.add(id);
+        }
+      }
+    }
+  }
+
+  private _indexEdgeProperties(edge: EdgeData): void {
+    for (const [key, value] of Object.entries(edge.properties)) {
+      this._indexEdgeProperty(edge.id, key, value);
+    }
+  }
+
+  private _unindexEdgeProperties(edge: EdgeData): void {
+    for (const [key, value] of Object.entries(edge.properties)) {
+      this._unindexEdgeProperty(edge.id, key, value);
+    }
+  }
+}
+
+interface TransactionOverlay {
+  nodes: Map<string, NodeData | null>;
+  edges: Map<string, EdgeData | null>;
+  nodesByType: Map<string, Set<string>>;
+  edgesByType: Map<string, Set<string>>;
+  edgesBySource: Map<string, Set<string>>;
+  edgesByTarget: Map<string, Set<string>>;
+  nodesByProperty: Map<string, Map<string, Set<string>>>;
+  edgesByProperty: Map<string, Map<string, Set<string>>>;
 }
