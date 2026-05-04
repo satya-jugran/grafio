@@ -139,14 +139,14 @@ export interface IStorageProvider {
    * Optionally filtered by edge type to leverage compound adjacency indexes.
    * Implementations must use an adjacency index (not a full scan).
    */
-  getEdgesBySource(nodeId: string, type?: string): Promise<EdgeData[]>;
+  getEdgesBySource(nodeId: string, type?: string, transaction?: ITransactionHandle): Promise<EdgeData[]>;
 
   /**
    * Returns all edges whose `targetId` equals the given node id.
    * Optionally filtered by edge type to leverage compound adjacency indexes.
    * Implementations must use an adjacency index (not a full scan).
    */
-  getEdgesByTarget(nodeId: string, type?: string): Promise<EdgeData[]>;
+  getEdgesByTarget(nodeId: string, type?: string, transaction?: ITransactionHandle): Promise<EdgeData[]>;
 
   // ---------------------------------------------------------------------------
   // Property mutations

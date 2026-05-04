@@ -100,14 +100,14 @@ export class GraphIndex {
    * @throws NodeHasEdgesError if cascade is false and the node has incident edges
    */
   async removeNode(id: string, cascade: boolean = false, transaction?: GraphTransaction): Promise<boolean> {
-    if (!await this._store.hasNode(id)) return false;
+    const handle = transaction?._getHandle();
+    if (!await this._store.hasNode(id, handle)) return false;
 
     const [outgoing, incoming] = await Promise.all([
-      this._store.getEdgesBySource(id),
-      this._store.getEdgesByTarget(id),
+      this._store.getEdgesBySource(id, undefined, handle),
+      this._store.getEdgesByTarget(id, undefined, handle),
     ]);
 
-    const handle = transaction?._getHandle();
     if (cascade) {
       for (const edge of [...outgoing, ...incoming]) {
         await this._store.deleteEdge(edge.id, handle);

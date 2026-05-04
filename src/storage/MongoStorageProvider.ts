@@ -308,17 +308,19 @@ export class MongoStorageProvider implements IStorageProvider {
     return docs.map(d => this._docToEdge(d));
   }
 
-  async getEdgesBySource(nodeId: string, type?: string): Promise<EdgeData[]> {
+  async getEdgesBySource(nodeId: string, type?: string, transaction?: ITransactionHandle): Promise<EdgeData[]> {
+    const session = transaction?.context as ClientSession | undefined;
     const filter: Filter<EdgeDoc> = { graphId: this._graphId, sourceId: nodeId };
     if (type) filter.type = type;
-    const docs = await this._edges.find(filter).toArray();
+    const docs = await this._edges.find(filter, { session }).toArray();
     return docs.map(d => this._docToEdge(d));
   }
 
-  async getEdgesByTarget(nodeId: string, type?: string): Promise<EdgeData[]> {
+  async getEdgesByTarget(nodeId: string, type?: string, transaction?: ITransactionHandle): Promise<EdgeData[]> {
+    const session = transaction?.context as ClientSession | undefined;
     const filter: Filter<EdgeDoc> = { graphId: this._graphId, targetId: nodeId };
     if (type) filter.type = type;
-    const docs = await this._edges.find(filter).toArray();
+    const docs = await this._edges.find(filter, { session }).toArray();
     return docs.map(d => this._docToEdge(d));
   }
 

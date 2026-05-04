@@ -340,7 +340,7 @@ export class InMemoryStorageProvider implements IStorageProvider {
       .map(deepClone);
   }
 
-  async getEdgesBySource(nodeId: string, type?: string): Promise<EdgeData[]> {
+  async getEdgesBySource(nodeId: string, type?: string, _transaction?: ITransactionHandle): Promise<EdgeData[]> {
     const ids = this._edgesBySource.get(nodeId);
     if (!ids) return [];
     return Array.from(ids)
@@ -350,7 +350,7 @@ export class InMemoryStorageProvider implements IStorageProvider {
       .map(deepClone);
   }
 
-  async getEdgesByTarget(nodeId: string, type?: string): Promise<EdgeData[]> {
+  async getEdgesByTarget(nodeId: string, type?: string, _transaction?: ITransactionHandle): Promise<EdgeData[]> {
     const ids = this._edgesByTarget.get(nodeId);
     if (!ids) return [];
     return Array.from(ids)
