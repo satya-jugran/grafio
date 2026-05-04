@@ -10,6 +10,7 @@
     "clean": "rimraf dist",
     "rebuild": "npm run clean && npm run build:prod",
     "test": "jest",
+    "test:coverage": "jest --coverage --coverageReporters=text-summary --coverageReporters=html",
     "perf:in-memory": "ts-node --project tsconfig.perf.json perf/in-memory/entryPoint.ts",
     "perf:in-memory:gc": "cross-env TS_NODE_PROJECT=tsconfig.perf.json node --expose-gc -r ts-node/register perf/in-memory/entryPoint.ts",
     "perf:mongodb": "ts-node --project tsconfig.perf.json perf/mongodb/entryPoint.ts",

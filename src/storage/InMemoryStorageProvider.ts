@@ -220,9 +220,15 @@ export class InMemoryStorageProvider implements IStorageProvider {
   }
 
   async getAllNodes(limit?: number): Promise<NodeData[]> {
-    const nodes = Array.from(this._nodes.values());
-    if (limit !== undefined) return nodes.slice(0, limit).map(deepClone);
-    return nodes.map(deepClone);
+    const result: NodeData[] = [];
+    const iterator = this._nodes.values();
+    let count = 0;
+    for (const node of iterator) {
+      if (limit !== undefined && count >= limit) break;
+      result.push(deepClone(node));
+      count++;
+    }
+    return result;
   }
 
   async getNodesByType(type: string): Promise<NodeData[]> {
@@ -374,7 +380,7 @@ export class InMemoryStorageProvider implements IStorageProvider {
       if (!this._nodesByProperty.has(propertyKey)) {
         this._nodesByProperty.set(propertyKey, new Map());
       }
-      
+
       // If type is specified, build compound index for existing nodes of that type
       if (type && type !== '*') {
         const valueMap = this._nodesByProperty.get(propertyKey)!;
@@ -394,7 +400,7 @@ export class InMemoryStorageProvider implements IStorageProvider {
       if (!this._edgesByProperty.has(propertyKey)) {
         this._edgesByProperty.set(propertyKey, new Map());
       }
-      
+
       // If type is specified, build compound index for existing edges of that type
       if (type && type !== '*') {
         const valueMap = this._edgesByProperty.get(propertyKey)!;
@@ -440,7 +446,7 @@ export class InMemoryStorageProvider implements IStorageProvider {
     }
 
     record.properties = { ...record.properties, [key]: value };
-    
+
     if (target === 'node') {
       this._indexNodeProperty(id, key, value);
     } else {
@@ -501,7 +507,7 @@ export class InMemoryStorageProvider implements IStorageProvider {
 
     const oldValue = record.properties[key];
     delete record.properties[key];
-    
+
     if (target === 'node') {
       this._unindexNodeProperty(id, key, oldValue);
     } else {
