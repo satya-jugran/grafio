@@ -220,9 +220,10 @@ export class MongoStorageProvider implements IStorageProvider {
     return doc ? this._docToNode(doc) : undefined;
   }
 
-  async getAllNodes(limit?: number): Promise<NodeData[]> {
+  async getAllNodes(limit?: number, transaction?: ITransactionHandle): Promise<NodeData[]> {
+    const session = transaction?.context as ClientSession | undefined;
     const nodes: NodeData[] = [];
-    const cursor = this._nodes.find({ graphId: this._graphId }).batchSize(this._batchSize);
+    const cursor = this._nodes.find({ graphId: this._graphId }, { session }).batchSize(this._batchSize);
     if (limit) cursor.limit(limit);
 
     for await (const doc of cursor) {
@@ -231,12 +232,14 @@ export class MongoStorageProvider implements IStorageProvider {
     return nodes;
   }
 
-  async getNodesByType(type: string): Promise<NodeData[]> {
-    const docs = await this._nodes.find({ graphId: this._graphId, type }).toArray();
+  async getNodesByType(type: string, transaction?: ITransactionHandle): Promise<NodeData[]> {
+    const session = transaction?.context as ClientSession | undefined;
+    const docs = await this._nodes.find({ graphId: this._graphId, type }, { session }).toArray();
     return docs.map(d => this._docToNode(d));
   }
 
-  async getNodesByProperty(key: string, value: unknown, nodeType?: string): Promise<NodeData[]> {
+  async getNodesByProperty(key: string, value: unknown, nodeType?: string, transaction?: ITransactionHandle): Promise<NodeData[]> {
+    const session = transaction?.context as ClientSession | undefined;
     const filter: Filter<NodeDoc> = {
       graphId: this._graphId,
       [`properties.${key}`]: value as unknown as WithId<NodeDoc>[keyof WithId<NodeDoc>],
@@ -244,11 +247,12 @@ export class MongoStorageProvider implements IStorageProvider {
     if (nodeType !== undefined) {
       filter.type = nodeType;
     }
-    const docs = await this._nodes.find(filter).toArray();
+    const docs = await this._nodes.find(filter, { session }).toArray();
     return docs.map(d => this._docToNode(d));
   }
 
-  async getEdgesByProperty(key: string, value: unknown, edgeType?: string): Promise<EdgeData[]> {
+  async getEdgesByProperty(key: string, value: unknown, edgeType?: string, transaction?: ITransactionHandle): Promise<EdgeData[]> {
+    const session = transaction?.context as ClientSession | undefined;
     const filter: Filter<EdgeDoc> = {
       graphId: this._graphId,
       [`properties.${key}`]: value as unknown as WithId<EdgeDoc>[keyof WithId<EdgeDoc>],
@@ -256,7 +260,7 @@ export class MongoStorageProvider implements IStorageProvider {
     if (edgeType !== undefined) {
       filter.type = edgeType;
     }
-    const docs = await this._edges.find(filter).toArray();
+    const docs = await this._edges.find(filter, { session }).toArray();
     return docs.map(d => this._docToEdge(d));
   }
 
@@ -305,9 +309,10 @@ export class MongoStorageProvider implements IStorageProvider {
     return doc ? this._docToEdge(doc) : undefined;
   }
 
-  async getAllEdges(): Promise<EdgeData[]> {
+  async getAllEdges(transaction?: ITransactionHandle): Promise<EdgeData[]> {
+    const session = transaction?.context as ClientSession | undefined;
     const edges: EdgeData[] = [];
-    const cursor = this._edges.find({ graphId: this._graphId }).batchSize(this._batchSize);
+    const cursor = this._edges.find({ graphId: this._graphId }, { session }).batchSize(this._batchSize);
 
     for await (const doc of cursor) {
       edges.push(this._docToEdge(doc));
@@ -315,8 +320,9 @@ export class MongoStorageProvider implements IStorageProvider {
     return edges;
   }
 
-  async getEdgesByType(type: string): Promise<EdgeData[]> {
-    const docs = await this._edges.find({ graphId: this._graphId, type }).toArray();
+  async getEdgesByType(type: string, transaction?: ITransactionHandle): Promise<EdgeData[]> {
+    const session = transaction?.context as ClientSession | undefined;
+    const docs = await this._edges.find({ graphId: this._graphId, type }, { session }).toArray();
     return docs.map(d => this._docToEdge(d));
   }
 

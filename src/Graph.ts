@@ -1,4 +1,4 @@
-import type { GraphData } from './types';
+import type { GraphData, GraphOptions } from './types';
 import { Node } from './Node';
 import { Edge } from './Edge';
 import { GraphIndex } from './Graph/GraphIndex';
@@ -72,32 +72,36 @@ export class Graph {
 
   /**
    * Returns all nodes in the graph.
+   * @param transaction - Optional transaction for consistent reads within a transaction
    */
-  async getNodes(): Promise<readonly Node[]> {
-    return this._index.getNodes();
+  async getNodes(transaction?: GraphTransaction): Promise<readonly Node[]> {
+    return this._index.getNodes(transaction);
   }
 
   /**
    * Returns all edges in the graph.
+   * @param transaction - Optional transaction for consistent reads within a transaction
    */
-  async getEdges(): Promise<readonly Edge[]> {
-    return this._index.getEdges();
+  async getEdges(transaction?: GraphTransaction): Promise<readonly Edge[]> {
+    return this._index.getEdges(transaction);
   }
 
   /**
    * Checks if a node exists in the graph.
    * @param id - Id of the node
+   * @param transaction - Optional transaction for consistent reads within a transaction
    */
-  async hasNode(id: string): Promise<boolean> {
-    return this._index.hasNode(id);
+  async hasNode(id: string, transaction?: GraphTransaction): Promise<boolean> {
+    return this._index.hasNode(id, transaction);
   }
 
   /**
    * Checks if an edge exists in the graph.
    * @param id - Id of the edge
+   * @param transaction - Optional transaction for consistent reads within a transaction
    */
-  async hasEdge(id: string): Promise<boolean> {
-    return this._index.hasEdge(id);
+  async hasEdge(id: string, transaction?: GraphTransaction): Promise<boolean> {
+    return this._index.hasEdge(id, transaction);
   }
 
   /**
@@ -125,19 +129,21 @@ export class Graph {
   /**
    * Retrieves a node by id.
    * @param id - Id of the node
+   * @param transaction - Optional transaction for consistent reads within a transaction
    * @returns The Node if found, undefined otherwise
    */
-  async getNode(id: string): Promise<Node | undefined> {
-    return this._index.getNode(id);
+  async getNode(id: string, transaction?: GraphTransaction): Promise<Node | undefined> {
+    return this._index.getNode(id, transaction);
   }
 
   /**
    * Retrieves nodes by their type.
    * @param type - The node type to filter by
+   * @param transaction - Optional transaction for consistent reads within a transaction
    * @returns Array of Nodes with the specified type
    */
-  async getNodesByType(type: string): Promise<Node[]> {
-    return this._index.getNodesByType(type);
+  async getNodesByType(type: string, transaction?: GraphTransaction): Promise<Node[]> {
+    return this._index.getNodesByType(type, transaction);
   }
 
   /**
@@ -145,9 +151,10 @@ export class Graph {
    * @param key - The property key to search
    * @param value - The property value to match
    * @param options - Optional options with nodeType filter
+   * @param transaction - Optional transaction for consistent reads within a transaction
    * @returns Array of Nodes with the specified property value
    */
-  async getNodesByProperty(key: string, value: unknown, options?: { nodeType?: string }): Promise<Node[]> {
+  async getNodesByProperty(key: string, value: unknown, options?: GraphOptions<{ nodeType?: string }>): Promise<Node[]> {
     return this._index.getNodesByProperty(key, value, options);
   }
 
@@ -155,9 +162,9 @@ export class Graph {
    * Retrieves edges by a property value.
    * @param key - The property key to search for
    * @param value - The property value to match
-   * @param options - Optional options with edgeType filter
+   * @param options - Optional options with edgeType filter and transaction
    */
-  async getEdgesByProperty(key: string, value: unknown, options?: { edgeType?: string }): Promise<Edge[]> {
+  async getEdgesByProperty(key: string, value: unknown, options?: GraphOptions<{ edgeType?: string }>): Promise<Edge[]> {
     return this._index.getEdgesByProperty(key, value, options);
   }
 
@@ -193,10 +200,11 @@ export class Graph {
   /**
    * Retrieves an edge by id.
    * @param id - Id of the edge
+   * @param transaction - Optional transaction to use for this operation
    * @returns The Edge if found, undefined otherwise
    */
-  async getEdge(id: string): Promise<Edge | undefined> {
-    return this._index.getEdge(id);
+  async getEdge(id: string, transaction?: GraphTransaction): Promise<Edge | undefined> {
+    return this._index.getEdge(id, transaction);
   }
 
   /**
@@ -204,9 +212,10 @@ export class Graph {
    * Parents are nodes that have edges pointing TO this node.
    * @param nodeId - Id of the target node
    * @param options - Optional traversal options with nodeType and edgeType filters
+   * @param transaction - Optional transaction for consistent reads within a transaction
    * @returns Array of parent Nodes
    */
-  async getParents(nodeId: string, options?: { nodeType?: string; edgeType?: string }): Promise<Node[]> {
+  async getParents(nodeId: string, options?: GraphOptions<{ nodeType?: string; edgeType?: string }>): Promise<Node[]> {
     return this._index.getParents(nodeId, options);
   }
 
@@ -214,10 +223,10 @@ export class Graph {
    * Gets the child nodes of a given node.
    * Children are nodes that this node points TO.
    * @param nodeId - Id of the source node
-   * @param options - Optional traversal options with nodeType and edgeType filters
+   * @param options - Optional options with nodeType and edgeType filters and transaction
    * @returns Array of child Nodes
    */
-  async getChildren(nodeId: string, options?: { nodeType?: string; edgeType?: string }): Promise<Node[]> {
+  async getChildren(nodeId: string, options?: GraphOptions<{ nodeType?: string; edgeType?: string }>): Promise<Node[]> {
     return this._index.getChildren(nodeId, options);
   }
 
@@ -227,17 +236,17 @@ export class Graph {
    * @param options - Optional traversal options with edgeType filter
    * @returns Array of outgoing Edges
    */
-  async getEdgesFrom(sourceId: string, options?: { edgeType?: string }): Promise<Edge[]> {
+  async getEdgesFrom(sourceId: string, options?: GraphOptions<{ edgeType?: string }>): Promise<Edge[]> {
     return this._index.getEdgesFrom(sourceId, options);
   }
 
   /**
    * Gets all edges pointing to a node (incoming edges).
    * @param targetId - Id of the target node
-   * @param options - Optional traversal options with edgeType filter
+   * @param options - Optional options with edgeType filter and transaction
    * @returns Array of incoming Edges
    */
-  async getEdgesTo(targetId: string, options?: { edgeType?: string }): Promise<Edge[]> {
+  async getEdgesTo(targetId: string, options?: GraphOptions<{ edgeType?: string }>): Promise<Edge[]> {
     return this._index.getEdgesTo(targetId, options);
   }
 
@@ -246,20 +255,21 @@ export class Graph {
    * Only returns edges where the two nodes are directly connected.
    * @param sourceId - Id of the first node
    * @param targetId - Id of the second node
-   * @param options - Optional traversal options with edgeType filter
+   * @param options - Optional options with edgeType filter and transaction
    * @returns Array of Edges between the nodes
    */
-  async getDirectEdgesBetween(sourceId: string, targetId: string, options?: { edgeType?: string }): Promise<Edge[]> {
+  async getDirectEdgesBetween(sourceId: string, targetId: string, options?: GraphOptions<{ edgeType?: string }>): Promise<Edge[]> {
     return this._index.getDirectEdgesBetween(sourceId, targetId, options);
   }
 
   /**
    * Gets all edges of a specific type.
    * @param type - The edge type to filter by
+   * @param transaction - Optional transaction for consistent reads within a transaction
    * @returns Array of Edges with the specified type
    */
-  async getEdgesByType(type: string): Promise<Edge[]> {
-    return this._index.getEdgesByType(type);
+  async getEdgesByType(type: string, transaction?: GraphTransaction): Promise<Edge[]> {
+    return this._index.getEdgesByType(type, transaction);
   }
 
   /**

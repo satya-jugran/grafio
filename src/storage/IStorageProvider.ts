@@ -77,21 +77,24 @@ export interface IStorageProvider {
   /**
    * Returns all stored nodes, optionally limited.
    * @param limit - Maximum number of nodes to return (default: unlimited)
+   * @param transaction - Optional transaction handle for transactional storage providers
    */
-  getAllNodes(limit?: number): Promise<NodeData[]>;
+  getAllNodes(limit?: number, transaction?: ITransactionHandle): Promise<NodeData[]>;
 
   /**
    * Returns all nodes whose `type` field matches the given value.
    * Implementations must use an index (not a full scan).
+   * @param transaction - Optional transaction handle for transactional storage providers
    */
-  getNodesByType(type: string): Promise<NodeData[]>;
+  getNodesByType(type: string, transaction?: ITransactionHandle): Promise<NodeData[]>;
 
   /**
    * Returns all nodes that have a property `key` equal to `value`.
    * Optionally filtered to a specific node type.
    * Implementations must use an index (not a full scan).
+   * @param transaction - Optional transaction handle for transactional storage providers
    */
-  getNodesByProperty(key: string, value: unknown, nodeType?: string): Promise<NodeData[]>;
+  getNodesByProperty(key: string, value: unknown, nodeType?: string, transaction?: ITransactionHandle): Promise<NodeData[]>;
 
   // ---------------------------------------------------------------------------
   // Edge mutations
@@ -126,20 +129,22 @@ export interface IStorageProvider {
   getEdge(id: string, transaction?: ITransactionHandle): Promise<EdgeData | undefined>;
 
   /** Returns all stored edges. */
-  getAllEdges(): Promise<EdgeData[]>;
+  getAllEdges(transaction?: ITransactionHandle): Promise<EdgeData[]>;
 
   /**
    * Returns all edges whose `type` field matches the given value.
    * Implementations must use an index (not a full scan).
+   * @param transaction - Optional transaction handle for transactional storage providers
    */
-  getEdgesByType(type: string): Promise<EdgeData[]>;
+  getEdgesByType(type: string, transaction?: ITransactionHandle): Promise<EdgeData[]>;
 
   /**
    * Returns all edges that have a property `key` equal to `value`.
    * Optionally filtered to a specific edge type.
    * Implementations must use an index (not a full scan).
+   * @param transaction - Optional transaction handle for transactional storage providers
    */
-  getEdgesByProperty(key: string, value: unknown, edgeType?: string): Promise<EdgeData[]>;
+  getEdgesByProperty(key: string, value: unknown, edgeType?: string, transaction?: ITransactionHandle): Promise<EdgeData[]>;
 
   /**
    * Returns all edges whose `sourceId` equals the given node id.
