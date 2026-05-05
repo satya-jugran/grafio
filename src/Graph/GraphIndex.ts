@@ -256,7 +256,7 @@ export class GraphIndex {
     const edgeType = options?.edgeType ?? '*';
     const parentIds = new Set<string>();
 
-    const edges = await this._store.getEdgesByTarget(nodeId, undefined, handle);
+    const edges = await this._store.getEdgesByTarget(nodeId, edgeType !== '*' ? edgeType : undefined, handle);
     for (const edge of edges) {
       if (edgeType !== '*' && edge.type !== edgeType) continue;
       if (nodeType === '*') {

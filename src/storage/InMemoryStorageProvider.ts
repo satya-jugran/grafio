@@ -1009,6 +1009,14 @@ export class InMemoryStorageProvider implements IStorageProvider {
       const map = target === 'node' ? overlay.nodes : overlay.edges;
       const overlayRecord = map.get(id);
       if (overlayRecord !== undefined) {
+        if (overlayRecord === null) {
+          // Tombstone: deleted in this transaction — do not fall back to live store
+          if (target === 'node') {
+            throw new NodeNotFoundError(id);
+          } else {
+            throw new EdgeNotFoundError(id);
+          }
+        }
         record = overlayRecord;
         isOverlay = true;
       }
