@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 1. **Transaction-Aware Query Methods**
    - All public Graph methods now accept an optional `transaction` parameter
-   - Query methods (`getNode`, `getNodes`, `hasNode`, `hasEdge`, `getEdges`, `getNodeByType`, `getNodesByProperty`, `getEdgesByType`, `getEdgesByProperty`) support transactions
+   - Query methods (`getNode`, `getNodes`, `hasNode`, `hasEdge`, `getEdges`, `getNodesByProperty`, `getEdgesByType`, `getEdgesByProperty`) support transactions
    - Navigation methods (`getParents`, `getChildren`, `getEdgesFrom`, `getEdgesTo`, `getDirectEdgesBetween`) support transactions
    - Traversal method (`traverse`) supports transactions
    - Allows reading uncommitted changes within a transaction context
