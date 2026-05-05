@@ -135,6 +135,13 @@ export interface IStorageProvider {
   getEdgesByType(type: string): Promise<EdgeData[]>;
 
   /**
+   * Returns all edges that have a property `key` equal to `value`.
+   * Optionally filtered to a specific edge type.
+   * Implementations must use an index (not a full scan).
+   */
+  getEdgesByProperty(key: string, value: unknown, edgeType?: string): Promise<EdgeData[]>;
+
+  /**
    * Returns all edges whose `sourceId` equals the given node id.
    * Optionally filtered by edge type to leverage compound adjacency indexes.
    * Implementations must use an adjacency index (not a full scan).

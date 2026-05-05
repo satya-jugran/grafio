@@ -155,6 +155,12 @@ describe('Graph.createIndex', () => {
 
       // Should not throw
       await expect(graph.createIndex('edge', 'weight')).resolves.toBeUndefined();
+
+      // Should be able to query by the indexed property
+      const results = await graph.getEdgesByProperty('weight', 0.8);
+      expect(results).toHaveLength(1);
+      expect(results[0].sourceId).toBe(alice.id);
+      expect(results[0].targetId).toBe(bob.id);
     });
 
     it('should create compound index on edge property with type', async () => {
@@ -168,6 +174,10 @@ describe('Graph.createIndex', () => {
 
       // Create compound index for KNOWS edges only
       await expect(graph.createIndex('edge', 'weight', 'KNOWS')).resolves.toBeUndefined();
+
+      const results = await graph.getEdgesByProperty('weight', 0.8, { edgeType: 'KNOWS' });
+      expect(results).toHaveLength(1);
+      expect(results[0].type).toBe('KNOWS');
     });
   });
 

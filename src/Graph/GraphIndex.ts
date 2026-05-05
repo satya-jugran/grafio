@@ -156,6 +156,15 @@ export class GraphIndex {
   }
 
   /**
+   * Retrieves edges by a property value.
+   * @param options - Optional options with edgeType filter
+   */
+  async getEdgesByProperty(key: string, value: unknown, options?: { edgeType?: string }): Promise<Edge[]> {
+    const data = await this._store.getEdgesByProperty(key, value, options?.edgeType);
+    return data.map(d => new Edge(d.sourceId, d.targetId, d.type, d.properties, d.id));
+  }
+
+  /**
    * Adds a new directed edge to the graph.
    * @throws InvalidPropertyError if properties contain non-primitive values
    * @throws NodeNotFoundError if source or target node doesn't exist

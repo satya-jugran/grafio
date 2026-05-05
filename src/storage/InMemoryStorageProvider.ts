@@ -411,6 +411,54 @@ export class InMemoryStorageProvider implements IStorageProvider {
     return result;
   }
 
+  async getEdgesByProperty(key: string, value: unknown, edgeType?: string, transaction?: ITransactionHandle): Promise<EdgeData[]> {
+    const serialized = this._propKey(value);
+    const overlay = this._getOverlay(transaction?.id);
+    const seen = new Set<string>();
+    const result: EdgeData[] = [];
+    
+    if (overlay) {
+      // Check overlay property index
+      const keyMap = overlay.edgesByProperty.get(key);
+      if (keyMap) {
+        const idSet = keyMap.get(serialized);
+        if (idSet) {
+          for (const id of idSet) {
+            const edge = overlay.edges.get(id);
+            if (edge) {
+              if (!edgeType || edgeType === '*' || edge.type === edgeType) {
+                result.push(deepClone(edge));
+                seen.add(id);
+              }
+            }
+          }
+        }
+      }
+    }
+    
+    // Merge with live edges
+    const liveMap = this._edgesByProperty.get(key);
+    if (liveMap) {
+      const liveIds = liveMap.get(serialized);
+      if (liveIds) {
+        for (const id of liveIds) {
+          if (seen.has(id)) continue;
+          const edge = this._edges.get(id);
+          if (edge) {
+            // Only include if not deleted in overlay
+            const overlayEdge = overlay?.edges.get(id);
+            if (overlayEdge !== null) {
+              if (!edgeType || edgeType === '*' || edge.type === edgeType) {
+                result.push(deepClone(edge));
+              }
+            }
+          }
+        }
+      }
+    }
+    return result;
+  }
+
   // ---------------------------------------------------------------------------
   // Edge mutations
   // ---------------------------------------------------------------------------
@@ -456,6 +504,9 @@ export class InMemoryStorageProvider implements IStorageProvider {
       this._edgesByType.set(edge.type, new Set());
     }
     this._edgesByType.get(edge.type)!.add(edge.id);
+
+    // Property value index
+    this._indexEdgeProperties(stored);
   }
 
   async deleteEdge(id: string, transaction?: ITransactionHandle): Promise<void> {

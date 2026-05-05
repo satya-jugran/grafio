@@ -248,6 +248,18 @@ export class MongoStorageProvider implements IStorageProvider {
     return docs.map(d => this._docToNode(d));
   }
 
+  async getEdgesByProperty(key: string, value: unknown, edgeType?: string): Promise<EdgeData[]> {
+    const filter: Filter<EdgeDoc> = {
+      graphId: this._graphId,
+      [`properties.${key}`]: value as unknown as WithId<EdgeDoc>[keyof WithId<EdgeDoc>],
+    };
+    if (edgeType !== undefined) {
+      filter.type = edgeType;
+    }
+    const docs = await this._edges.find(filter).toArray();
+    return docs.map(d => this._docToEdge(d));
+  }
+
   // ---------------------------------------------------------------------------
   // Edge mutations
   // ---------------------------------------------------------------------------

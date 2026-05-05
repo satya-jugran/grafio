@@ -152,6 +152,16 @@ export class Graph {
   }
 
   /**
+   * Retrieves edges by a property value.
+   * @param key - The property key to search for
+   * @param value - The property value to match
+   * @param options - Optional options with edgeType filter
+   */
+  async getEdgesByProperty(key: string, value: unknown, options?: { edgeType?: string }): Promise<Edge[]> {
+    return this._index.getEdgesByProperty(key, value, options);
+  }
+
+  /**
    * Adds a new directed edge to the graph.
    * @param sourceId - Id of the source node
    * @param targetId - Id of the target node
