@@ -19,6 +19,21 @@ export interface EdgeData {
 }
 
 /**
+ * Options for graph query methods that support filtering and transactions.
+ * Allows combining filter options with an optional transaction in a single parameter.
+ */
+export interface GraphOptions<T = unknown> {
+  /**
+   * Optional filter criteria (e.g., nodeType, edgeType)
+   */
+  filter?: T;
+  /**
+   * Optional transaction for consistent reads within a transaction
+   */
+  transaction?: import('./Graph/GraphTransaction').GraphTransaction;
+}
+
+/**
  * Data transfer object for Graph serialization.
  * Optionally carries the graph partition key when round-tripping through a
  * partitioned storage provider.

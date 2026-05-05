@@ -76,7 +76,7 @@ export function runSocialGraphScenarios(buildGraph: () => Promise<Graph>): void 
         let mostSocial = '';
 
         for (const person of allPeople) {
-          const friends = await graph.getChildren(person.id, { edgeType: 'FRIENDS_WITH' });
+          const friends = await graph.getChildren(person.id, { filter: { edgeType: 'FRIENDS_WITH' } });
           if (friends.length > maxFriends) {
             maxFriends = friends.length;
             mostSocial = person.properties.name as string;
@@ -90,11 +90,11 @@ export function runSocialGraphScenarios(buildGraph: () => Promise<Graph>): void 
       it('should get friends of friends for Alice (2nd degree connections)', async () => {
         const allPeople = await graph.getNodesByType('Person');
         const alice = allPeople.find(n => n.properties.name === 'Alice')!;
-        const aliceFriends = await graph.getChildren(alice.id, { edgeType: 'FRIENDS_WITH' });
+        const aliceFriends = await graph.getChildren(alice.id, { filter: { edgeType: 'FRIENDS_WITH' } });
         const friendsOfFriends = new Set<string>();
 
         for (const friend of aliceFriends) {
-          const theirFriends = await graph.getChildren(friend.id, { edgeType: 'FRIENDS_WITH' });
+          const theirFriends = await graph.getChildren(friend.id, { filter: { edgeType: 'FRIENDS_WITH' } });
           for (const fof of theirFriends) {
             if (fof.properties.name !== 'Alice') {
               friendsOfFriends.add(fof.properties.name as string);
@@ -123,7 +123,7 @@ export function runSocialGraphScenarios(buildGraph: () => Promise<Graph>): void 
       it('should find all posts by Alice', async () => {
         const allPeople = await graph.getNodesByType('Person');
         const alice = allPeople.find(n => n.properties.name === 'Alice')!;
-        const aliceChildren = await graph.getChildren(alice.id, { edgeType: 'POSTED' });
+        const aliceChildren = await graph.getChildren(alice.id, { filter: { edgeType: 'POSTED' } });
         expect(aliceChildren).toHaveLength(1);
         expect(aliceChildren[0].properties.content).toContain('Just joined');
       });
@@ -149,7 +149,7 @@ export function runSocialGraphScenarios(buildGraph: () => Promise<Graph>): void 
         let mostLikedPost = '';
 
         for (const post of allPosts) {
-          const likes = await graph.getEdgesTo(post.id, { edgeType: 'LIKES_POST' });
+          const likes = await graph.getEdgesTo(post.id, { filter: { edgeType: 'LIKES_POST' } });
           if (likes.length > maxLikes) {
             maxLikes = likes.length;
             mostLikedPost = post.properties.content as string;
@@ -165,7 +165,7 @@ export function runSocialGraphScenarios(buildGraph: () => Promise<Graph>): void 
         let maxLikes = 0;
 
         for (const person of allPeople) {
-          const likes = await graph.getEdgesFrom(person.id, { edgeType: 'LIKES_POST' });
+          const likes = await graph.getEdgesFrom(person.id, { filter: { edgeType: 'LIKES_POST' } });
           if (likes.length > maxLikes) {
             maxLikes = likes.length;
           }
@@ -204,7 +204,7 @@ export function runSocialGraphScenarios(buildGraph: () => Promise<Graph>): void 
         let maxComments = 0;
 
         for (const post of allPosts) {
-          const commentsOnPost = await graph.getParents(post.id, { edgeType: 'ON_POST' });
+          const commentsOnPost = await graph.getParents(post.id, { filter: { edgeType: 'ON_POST' } });
           if (commentsOnPost.length > maxComments) {
             maxComments = commentsOnPost.length;
           }
@@ -239,11 +239,11 @@ export function runSocialGraphScenarios(buildGraph: () => Promise<Graph>): void 
       it('should find all people who liked Alice posts', async () => {
         const allPeople = await graph.getNodesByType('Person');
         const alice = allPeople.find(n => n.properties.name === 'Alice')!;
-        const alicePosts = await graph.getChildren(alice.id, { edgeType: 'POSTED' });
+        const alicePosts = await graph.getChildren(alice.id, { filter: { edgeType: 'POSTED' } });
         const likerNames = new Set<string>();
 
         for (const post of alicePosts) {
-          const likes = await graph.getEdgesTo(post.id, { edgeType: 'LIKES_POST' });
+          const likes = await graph.getEdgesTo(post.id, { filter: { edgeType: 'LIKES_POST' } });
           for (const like of likes) {
             const liker = await graph.getNode(like.sourceId);
             likerNames.add(liker!.properties.name as string);
@@ -258,8 +258,8 @@ export function runSocialGraphScenarios(buildGraph: () => Promise<Graph>): void 
         const alice = allPeople.find(n => n.properties.name === 'Alice')!;
         const frank = allPeople.find(n => n.properties.name === 'Frank')!;
 
-        const aliceFriends = await graph.getChildren(alice.id, { edgeType: 'FRIENDS_WITH' });
-        const frankFriends = await graph.getChildren(frank.id, { edgeType: 'FRIENDS_WITH' });
+        const aliceFriends = await graph.getChildren(alice.id, { filter: { edgeType: 'FRIENDS_WITH' } });
+        const frankFriends = await graph.getChildren(frank.id, { filter: { edgeType: 'FRIENDS_WITH' } });
 
         const aliceFriendIds = new Set(aliceFriends.map(n => n.id));
         const mutualFriends = frankFriends.filter(n => aliceFriendIds.has(n.id));
@@ -316,7 +316,7 @@ export function runSocialGraphScenarios(buildGraph: () => Promise<Graph>): void 
         const aliceNode = allNodes.find(n => n.properties.name === 'Alice');
         expect(aliceNode).toBeDefined();
 
-        const aliceFriends = await reconstructed.getChildren(aliceNode!.id, { edgeType: 'FRIENDS_WITH' });
+        const aliceFriends = await reconstructed.getChildren(aliceNode!.id, { filter: { edgeType: 'FRIENDS_WITH' } });
         expect(aliceFriends.length).toBe(4);
       });
 

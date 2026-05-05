@@ -186,7 +186,7 @@ Omit `storageProvider` to use the built-in `InMemoryStorageProvider`.
 | `hasNode(id, transaction?)` | `Promise<boolean>` | Check if node exists |
 | `getNodes(transaction?)` | `Promise<readonly Node[]>` | Get all nodes |
 | `getNodesByType(type, transaction?)` | `Promise<Node[]>` | Get all nodes of a given type |
-| `getNodesByProperty(key, value, opts?, transaction?)` | `Promise<Node[]>` | Get nodes by property value, optionally filtered by node type |
+| `getNodesByProperty(key, value, options?)` | `Promise<Node[]>` | Get nodes by property value, optionally filtered by node type |
 
 #### Node Property Operations
 
@@ -208,7 +208,7 @@ Omit `storageProvider` to use the built-in `InMemoryStorageProvider`.
 | `hasEdge(id, transaction?)` | `Promise<boolean>` | Check if edge exists |
 | `getEdges(transaction?)` | `Promise<readonly Edge[]>` | Get all edges |
 | `getEdgesByType(type, transaction?)` | `Promise<Edge[]>` | Get all edges of a given relationship type |
-| `getEdgesByProperty(key, value, opts?, transaction?)` | `Promise<Edge[]>` | Get edges by property value, optionally filtered by edge type |
+| `getEdgesByProperty(key, value, options?)` | `Promise<Edge[]>` | Get edges by property value, optionally filtered by edge type |
 
 #### Edge Property Operations
 
@@ -224,11 +224,11 @@ Omit `storageProvider` to use the built-in `InMemoryStorageProvider`.
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `getParents(nodeId, opts?, transaction?)` | `Promise<Node[]>` | Get parent nodes with optional type filters |
-| `getChildren(nodeId, opts?, transaction?)` | `Promise<Node[]>` | Get child nodes with optional type filters |
-| `getEdgesFrom(sourceId, opts?, transaction?)` | `Promise<Edge[]>` | Get outgoing edges with optional type filter |
-| `getEdgesTo(targetId, opts?, transaction?)` | `Promise<Edge[]>` | Get incoming edges with optional type filter |
-| `getDirectEdgesBetween(sourceId, targetId, opts?, transaction?)` | `Promise<Edge[]>` | Get direct edges between two nodes |
+| `getParents(nodeId, options?)` | `Promise<Node[]>` | Get parent nodes with optional filters |
+| `getChildren(nodeId, options?)` | `Promise<Node[]>` | Get child nodes with optional filters |
+| `getEdgesFrom(sourceId, options?)` | `Promise<Edge[]>` | Get outgoing edges with optional type filter |
+| `getEdgesTo(targetId, options?)` | `Promise<Edge[]>` | Get incoming edges with optional type filter |
+| `getDirectEdgesBetween(sourceId, targetId, options?)` | `Promise<Edge[]>` | Get direct edges between two nodes |
 
 #### Traversal & Analysis
 
@@ -402,9 +402,9 @@ const nodes = await graph.getNodes(txn);  // includes Alice
 const node = await graph.getNode(nodeId, txn);
 const hasIt = await graph.hasNode(nodeId, txn);
 
-// Navigation methods also support transactions
-const parents = await graph.getParents(nodeId, undefined, txn);
-const children = await graph.getChildren(nodeId, undefined, txn);
+// Navigation methods also support transactions and filters via GraphOptions
+const parents = await graph.getParents(nodeId, { transaction: txn });
+const children = await graph.getChildren(nodeId, { filter: { edgeType: 'KNOWS' }, transaction: txn });
 ```
 
 **Note:** MongoDB storage provider requires a replica set for transaction support.

@@ -29,6 +29,8 @@ afterAll(async () => {
 describe('Facebook Social Graph (MongoDB)', () => {
   runSocialGraphScenarios(async () => {
     const graph = new Graph(provider);
+    // Create index on 'name' property since socialGraphScenarios queries by name
+    await graph.createIndex('node', 'name');
 
     // ========================================
     // CREATE PEOPLE (10 nodes)
@@ -222,9 +224,6 @@ describe('Facebook Social Graph (MongoDB)', () => {
     await graph.addEdge(c16.id, photoFood.id, 'ON_PHOTO', {});
     await graph.addEdge(frank.id, c17.id, 'COMMENTED_ON_PHOTO', { timestamp: '2024-07-06T17:00:00Z' });
     await graph.addEdge(c17.id, photoMountain.id, 'ON_PHOTO', {});
-
-    // Create index on 'name' property since socialGraphScenarios queries by name
-    await graph.createIndex('node', 'name');
 
     return graph;
   });

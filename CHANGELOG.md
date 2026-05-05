@@ -16,6 +16,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
    - Traversal method (`traverse`) supports transactions
    - Allows reading uncommitted changes within a transaction context
 
+2. **GraphOptions API for Improved Ergonomics**
+   - Added `GraphOptions<T>` type to consolidate filter options and transaction in a single parameter
+   - Query methods (`getNodesByProperty`, `getEdgesByProperty`, `getParents`, `getChildren`) now accept `options?: GraphOptions<{...}>` instead of separate `options` and `transaction` parameters
+   - Navigation methods (`getEdgesFrom`, `getEdgesTo`, `getDirectEdgesBetween`) also updated to use GraphOptions
+   - Allows cleaner API usage: `{ transaction: tx }` or `{ filter: { edgeType: 'KNOWS' } }`
+   - Exported `GraphOptions` type from the library for external use
+
+### 🐛 Bug Fixes
+
+1. **Tombstone Fallback Bug in InMemoryStorageProvider**
+   - Fixed `addProperty`, `updateProperty`, `deleteProperty`, `clearProperties` methods
+   - When a node/edge was deleted within a transaction, the overlay stored `null` as tombstone
+   - Previously, property mutations on deleted records would fall back to live store (resurrecting them)
+   - Now throws `NodeNotFoundError`/`EdgeNotFoundError` when overlay tombstone is detected
+
+2. **getParents Performance Optimization**
+   - `getParents` now passes `edgeType` filter directly to `getEdgesByTarget()` storage method
+   - Enables storage implementations (e.g., MongoDB with adjacency indexes) to filter at storage level
+   - Previously always passed `undefined` and filtered in JavaScript
+
 ## [5.3.0] - 2026-05-04
 
 ### ✨ New Features

@@ -353,12 +353,12 @@ describe('MongoStorageProvider Transaction Support', () => {
       expect(await graph.hasEdge(newEdge.id, txn)).toBe(true);
       expect((await graph.getNode(carol.id, txn))?.properties['name']).toBe('Carol');
       expect((await graph.getEdge(newEdge.id, txn))?.properties['weight']).toBe(0.9);
-      expect(await graph.getNodesByProperty('status', 'active', undefined, txn)).toHaveLength(2); // carol + bob with updated prop
-      expect(await graph.getEdgesByProperty('weight', 0.9, undefined, txn)).toHaveLength(1);
+      expect(await graph.getNodesByProperty('status', 'active', { transaction: txn })).toHaveLength(2); // carol + bob with updated prop
+      expect(await graph.getEdgesByProperty('weight', 0.9, { transaction: txn })).toHaveLength(1);
       expect(await graph.getNodesByType('Person', txn)).toHaveLength(4);
       expect(await graph.getEdgesByType('KNOWS', txn)).toHaveLength(1);
-      expect(await graph.getParents(carol.id, undefined, txn)).toHaveLength(1); // alice -> carol
-      expect(await graph.getChildren(alice.id, undefined, txn)).toHaveLength(2); // bob + carol
+      expect(await graph.getParents(carol.id, { transaction: txn })).toHaveLength(1); // alice -> carol
+      expect(await graph.getChildren(alice.id, { transaction: txn })).toHaveLength(2); // bob + carol
 
       // hasNode/hasEdge on modified existing node/edge
       expect(await graph.hasNode(bob.id, txn)).toBe(true);
