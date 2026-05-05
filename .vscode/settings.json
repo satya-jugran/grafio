@@ -1,0 +1,23 @@
+{
+    "jest.rootPath": "./", // CWD for tests
+    "jest.debugMode": true,
+    "jest.runMode": "on-demand",
+    "jest.jestCommandLine": "npx jest --config=jest.config.js --verbose --no-cache",
+    "files.exclude": {
+        "**/.git": true,
+        "**/.svn": true,
+        "**/.hg": true,
+        "**/CVS": true,
+        "**/.DS_Store": true,
+        "**/Thumbs.db": true,
+        "**/node_modules": true,
+        "**/build": true,
+        "**/*.log": true
+    },
+    "search.exclude": {
+        "**/node_modules": true,
+        "**/bower_components": true,
+        "**/*.log": true,
+        "**/build": true
+    }
+}

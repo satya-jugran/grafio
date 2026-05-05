@@ -302,7 +302,7 @@ export class InMemoryStorageProvider implements IStorageProvider {
     const overlay = this._getOverlay(transaction?.id);
     const result: NodeData[] = [];
     const seen = new Set<string>();
-    
+
     if (overlay) {
       // First add all overlay nodes
       for (const [id, node] of overlay.nodes) {
@@ -316,7 +316,7 @@ export class InMemoryStorageProvider implements IStorageProvider {
         return result;
       }
     }
-    
+
     // Then add live nodes not overridden by overlay
     for (const [id, node] of this._nodes) {
       if (seen.has(id)) continue;
@@ -330,7 +330,7 @@ export class InMemoryStorageProvider implements IStorageProvider {
     const overlay = this._getOverlay(transaction?.id);
     const seen = new Set<string>();
     const result: NodeData[] = [];
-    
+
     if (overlay) {
       // Check overlay nodesByType
       const overlayIds = overlay.nodesByType.get(type);
@@ -344,7 +344,7 @@ export class InMemoryStorageProvider implements IStorageProvider {
         }
       }
     }
-    
+
     // Merge with live nodes
     const liveIds = this._nodesByType.get(type);
     if (liveIds) {
@@ -368,7 +368,7 @@ export class InMemoryStorageProvider implements IStorageProvider {
     const overlay = this._getOverlay(transaction?.id);
     const seen = new Set<string>();
     const result: NodeData[] = [];
-    
+
     if (overlay) {
       // Check overlay property index
       const keyMap = overlay.nodesByProperty.get(key);
@@ -387,7 +387,7 @@ export class InMemoryStorageProvider implements IStorageProvider {
         }
       }
     }
-    
+
     // Merge with live nodes
     const liveMap = this._nodesByProperty.get(key);
     if (liveMap) {
@@ -416,7 +416,7 @@ export class InMemoryStorageProvider implements IStorageProvider {
     const overlay = this._getOverlay(transaction?.id);
     const seen = new Set<string>();
     const result: EdgeData[] = [];
-    
+
     if (overlay) {
       // Check overlay property index
       const keyMap = overlay.edgesByProperty.get(key);
@@ -435,7 +435,7 @@ export class InMemoryStorageProvider implements IStorageProvider {
         }
       }
     }
-    
+
     // Merge with live edges
     const liveMap = this._edgesByProperty.get(key);
     if (liveMap) {
@@ -762,13 +762,29 @@ export class InMemoryStorageProvider implements IStorageProvider {
    * @throws PropertyAlreadyExistsError if the property key already exists
    * @throws InvalidPropertyError if the value is not a primitive
    */
-  async addProperty(target: 'node' | 'edge', id: string, key: string, value: unknown, _transaction?: ITransactionHandle): Promise<void> {
+  async addProperty(target: 'node' | 'edge', id: string, key: string, value: unknown, transaction?: ITransactionHandle): Promise<void> {
     if (!isPrimitive(value)) {
       throw new InvalidPropertyError(key, value);
     }
 
-    const record = target === 'node' ? this._nodes.get(id) : this._edges.get(id);
-    if (!record) {
+    const overlay = this._getOverlay(transaction?.id);
+    let record: NodeData | EdgeData | null = null;
+    let isOverlay = false;
+
+    if (overlay) {
+      const map = target === 'node' ? overlay.nodes : overlay.edges;
+      const overlayRecord = map.get(id);
+      if (overlayRecord !== undefined) {
+        record = overlayRecord;
+        isOverlay = true;
+      }
+    }
+
+    if (record === null) {
+      record = target === 'node' ? this._nodes.get(id) ?? null : this._edges.get(id) ?? null;
+    }
+
+    if (record === null) {
       if (target === 'node') {
         throw new NodeNotFoundError(id);
       } else {
@@ -780,9 +796,31 @@ export class InMemoryStorageProvider implements IStorageProvider {
       throw new PropertyAlreadyExistsError(target, id, key);
     }
 
+    // Clone before mutating to avoid affecting original storage
+    if (overlay) {
+      record = deepClone(record);
+      isOverlay = true; // After cloning, treat as overlay for index updates
+    }
+
     record.properties = { ...record.properties, [key]: value };
 
-    if (target === 'node') {
+    if (isOverlay && overlay) {
+      const map = target === 'node' ? overlay.nodes : overlay.edges;
+      map.set(id, record);
+      const serialized = this._propKey(value);
+      const propIndex = target === 'node' ? overlay.nodesByProperty : overlay.edgesByProperty;
+      let keyMap = propIndex.get(key);
+      if (!keyMap) {
+        keyMap = new Map();
+        propIndex.set(key, keyMap);
+      }
+      let idSet = keyMap.get(serialized);
+      if (!idSet) {
+        idSet = new Set();
+        keyMap.set(serialized, idSet);
+      }
+      idSet.add(id);
+    } else if (target === 'node') {
       this._indexNodeProperty(id, key, value);
     } else {
       this._indexEdgeProperty(id, key, value);
@@ -795,13 +833,29 @@ export class InMemoryStorageProvider implements IStorageProvider {
    * @throws PropertyNotFoundError if the property key doesn't exist
    * @throws InvalidPropertyError if the value is not a primitive
    */
-  async updateProperty(target: 'node' | 'edge', id: string, key: string, value: unknown, _transaction?: ITransactionHandle): Promise<void> {
+  async updateProperty(target: 'node' | 'edge', id: string, key: string, value: unknown, transaction?: ITransactionHandle): Promise<void> {
     if (!isPrimitive(value)) {
       throw new InvalidPropertyError(key, value);
     }
 
-    const record = target === 'node' ? this._nodes.get(id) : this._edges.get(id);
-    if (!record) {
+    const overlay = this._getOverlay(transaction?.id);
+    let record: NodeData | EdgeData | null = null;
+    let isOverlay = false;
+
+    if (overlay) {
+      const map = target === 'node' ? overlay.nodes : overlay.edges;
+      const overlayRecord = map.get(id);
+      if (overlayRecord !== undefined) {
+        record = overlayRecord;
+        isOverlay = true;
+      }
+    }
+
+    if (record === null) {
+      record = target === 'node' ? this._nodes.get(id) ?? null : this._edges.get(id) ?? null;
+    }
+
+    if (record === null) {
       if (target === 'node') {
         throw new NodeNotFoundError(id);
       } else {
@@ -814,15 +868,48 @@ export class InMemoryStorageProvider implements IStorageProvider {
     }
 
     const oldValue = record.properties[key];
+
+    // Clone before mutating to avoid affecting original storage
+    if (overlay) {
+      record = deepClone(record);
+      isOverlay = true; // After cloning, treat as overlay for index updates
+    }
+
     record.properties = { ...record.properties, [key]: value };
 
-    // Update index: remove from old value map, add to new
-    if (target === 'node') {
-      this._unindexNodeProperty(id, key, oldValue);
-      this._indexNodeProperty(id, key, value);
+    if (isOverlay && overlay) {
+      const map = target === 'node' ? overlay.nodes : overlay.edges;
+      map.set(id, record);
+      // Update overlay property index: remove from old, add to new
+      const propIndex = target === 'node' ? overlay.nodesByProperty : overlay.edgesByProperty;
+      const serialized = this._propKey(oldValue);
+      const oldKeyMap = propIndex.get(key);
+      if (oldKeyMap) {
+        const oldIdSet = oldKeyMap.get(serialized);
+        if (oldIdSet) {
+          oldIdSet.delete(id);
+        }
+      }
+      const newSerialized = this._propKey(value);
+      let keyMap = propIndex.get(key);
+      if (!keyMap) {
+        keyMap = new Map();
+        propIndex.set(key, keyMap);
+      }
+      let idSet = keyMap.get(newSerialized);
+      if (!idSet) {
+        idSet = new Set();
+        keyMap.set(newSerialized, idSet);
+      }
+      idSet.add(id);
     } else {
-      this._unindexEdgeProperty(id, key, oldValue);
-      this._indexEdgeProperty(id, key, value);
+      if (target === 'node') {
+        this._unindexNodeProperty(id, key, oldValue);
+        this._indexNodeProperty(id, key, value);
+      } else {
+        this._unindexEdgeProperty(id, key, oldValue);
+        this._indexEdgeProperty(id, key, value);
+      }
     }
   }
 
@@ -830,9 +917,25 @@ export class InMemoryStorageProvider implements IStorageProvider {
    * Deletes a property from a node or edge.
    * @throws NodeNotFoundError/EdgeNotFoundError if the target doesn't exist
    */
-  async deleteProperty(target: 'node' | 'edge', id: string, key: string, _transaction?: ITransactionHandle): Promise<void> {
-    const record = target === 'node' ? this._nodes.get(id) : this._edges.get(id);
-    if (!record) {
+  async deleteProperty(target: 'node' | 'edge', id: string, key: string, transaction?: ITransactionHandle): Promise<void> {
+    const overlay = this._getOverlay(transaction?.id);
+    let record: NodeData | EdgeData | null = null;
+    let isOverlay = false;
+
+    if (overlay) {
+      const map = target === 'node' ? overlay.nodes : overlay.edges;
+      const overlayRecord = map.get(id);
+      if (overlayRecord !== undefined) {
+        record = overlayRecord;
+        isOverlay = true;
+      }
+    }
+
+    if (record === null) {
+      record = target === 'node' ? this._nodes.get(id) ?? null : this._edges.get(id) ?? null;
+    }
+
+    if (record === null) {
       if (target === 'node') {
         throw new NodeNotFoundError(id);
       } else {
@@ -841,9 +944,28 @@ export class InMemoryStorageProvider implements IStorageProvider {
     }
 
     const oldValue = record.properties[key];
+
+    // Clone before mutating to avoid affecting original storage
+    if (overlay) {
+      record = deepClone(record);
+      isOverlay = true; // After cloning, treat as overlay for index updates
+    }
+
     delete record.properties[key];
 
-    if (target === 'node') {
+    if (isOverlay && overlay) {
+      const map = target === 'node' ? overlay.nodes : overlay.edges;
+      map.set(id, record);
+      const propIndex = target === 'node' ? overlay.nodesByProperty : overlay.edgesByProperty;
+      const serialized = this._propKey(oldValue);
+      const keyMap = propIndex.get(key);
+      if (keyMap) {
+        const idSet = keyMap.get(serialized);
+        if (idSet) {
+          idSet.delete(id);
+        }
+      }
+    } else if (target === 'node') {
       this._unindexNodeProperty(id, key, oldValue);
     } else {
       this._unindexEdgeProperty(id, key, oldValue);
@@ -854,9 +976,25 @@ export class InMemoryStorageProvider implements IStorageProvider {
    * Clears all properties from a node or edge.
    * @throws NodeNotFoundError/EdgeNotFoundError if the target doesn't exist
    */
-  async clearProperties(target: 'node' | 'edge', id: string, _transaction?: ITransactionHandle): Promise<void> {
-    const record = target === 'node' ? this._nodes.get(id) : this._edges.get(id);
-    if (!record) {
+  async clearProperties(target: 'node' | 'edge', id: string, transaction?: ITransactionHandle): Promise<void> {
+    const overlay = this._getOverlay(transaction?.id);
+    let record: NodeData | EdgeData | null = null;
+    let isOverlay = false;
+
+    if (overlay) {
+      const map = target === 'node' ? overlay.nodes : overlay.edges;
+      const overlayRecord = map.get(id);
+      if (overlayRecord !== undefined) {
+        record = overlayRecord;
+        isOverlay = true;
+      }
+    }
+
+    if (record === null) {
+      record = target === 'node' ? this._nodes.get(id) ?? null : this._edges.get(id) ?? null;
+    }
+
+    if (record === null) {
       if (target === 'node') {
         throw new NodeNotFoundError(id);
       } else {
@@ -864,9 +1002,26 @@ export class InMemoryStorageProvider implements IStorageProvider {
       }
     }
 
-    // Unindex all current properties
-    for (const [key, value] of Object.entries(record.properties)) {
-      if (target === 'node') {
+    // Clone before mutating to avoid affecting original storage
+    if (overlay) {
+      record = deepClone(record);
+      isOverlay = true; // After cloning, treat as overlay for index updates
+    }
+
+    const oldProperties = { ...record.properties };
+
+    for (const [key, value] of Object.entries(oldProperties)) {
+      if (isOverlay && overlay) {
+        const propIndex = target === 'node' ? overlay.nodesByProperty : overlay.edgesByProperty;
+        const serialized = this._propKey(value);
+        const keyMap = propIndex.get(key);
+        if (keyMap) {
+          const idSet = keyMap.get(serialized);
+          if (idSet) {
+            idSet.delete(id);
+          }
+        }
+      } else if (target === 'node') {
         this._unindexNodeProperty(id, key, value);
       } else {
         this._unindexEdgeProperty(id, key, value);
@@ -874,6 +1029,11 @@ export class InMemoryStorageProvider implements IStorageProvider {
     }
 
     record.properties = {};
+
+    if (isOverlay && overlay) {
+      const map = target === 'node' ? overlay.nodes : overlay.edges;
+      map.set(id, record);
+    }
   }
 
   // ---------------------------------------------------------------------------

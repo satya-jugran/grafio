@@ -182,11 +182,11 @@ Omit `storageProvider` to use the built-in `InMemoryStorageProvider`.
 |--------|---------|-------------|
 | `addNode(type, properties?, transaction?)` | `Promise<Node>` | Add a new node with type label |
 | `removeNode(id, cascade?, transaction?)` | `Promise<boolean>` | Remove node; `cascade=true` removes incident edges |
-| `getNode(id)` | `Promise<Node \| undefined>` | Get node by id |
-| `hasNode(id)` | `Promise<boolean>` | Check if node exists |
-| `getNodes()` | `Promise<readonly Node[]>` | Get all nodes |
-| `getNodesByType(type)` | `Promise<Node[]>` | Get all nodes of a given type |
-| `getNodesByProperty(key, value, opts?)` | `Promise<Node[]>` | Get nodes by property value, optionally filtered by node type |
+| `getNode(id, transaction?)` | `Promise<Node \| undefined>` | Get node by id |
+| `hasNode(id, transaction?)` | `Promise<boolean>` | Check if node exists |
+| `getNodes(transaction?)` | `Promise<readonly Node[]>` | Get all nodes |
+| `getNodesByType(type, transaction?)` | `Promise<Node[]>` | Get all nodes of a given type |
+| `getNodesByProperty(key, value, opts?, transaction?)` | `Promise<Node[]>` | Get nodes by property value, optionally filtered by node type |
 
 #### Node Property Operations
 
@@ -204,10 +204,11 @@ Omit `storageProvider` to use the built-in `InMemoryStorageProvider`.
 |--------|---------|-------------|
 | `addEdge(sourceId, targetId, type, properties?, transaction?)` | `Promise<Edge>` | Add a directed edge with relationship type |
 | `removeEdge(id, transaction?)` | `Promise<boolean>` | Remove edge by id |
-| `getEdge(id)` | `Promise<Edge \| undefined>` | Get edge by id |
-| `hasEdge(id)` | `Promise<boolean>` | Check if edge exists |
-| `getEdges()` | `Promise<readonly Edge[]>` | Get all edges |
-| `getEdgesByType(type)` | `Promise<Edge[]>` | Get all edges of a given relationship type |
+| `getEdge(id, transaction?)` | `Promise<Edge \| undefined>` | Get edge by id |
+| `hasEdge(id, transaction?)` | `Promise<boolean>` | Check if edge exists |
+| `getEdges(transaction?)` | `Promise<readonly Edge[]>` | Get all edges |
+| `getEdgesByType(type, transaction?)` | `Promise<Edge[]>` | Get all edges of a given relationship type |
+| `getEdgesByProperty(key, value, opts?, transaction?)` | `Promise<Edge[]>` | Get edges by property value, optionally filtered by edge type |
 
 #### Edge Property Operations
 
@@ -223,17 +224,17 @@ Omit `storageProvider` to use the built-in `InMemoryStorageProvider`.
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `getParents(nodeId, opts?)` | `Promise<Node[]>` | Get parent nodes with optional type filters |
-| `getChildren(nodeId, opts?)` | `Promise<Node[]>` | Get child nodes with optional type filters |
-| `getEdgesFrom(sourceId, opts?)` | `Promise<Edge[]>` | Get outgoing edges with optional type filter |
-| `getEdgesTo(targetId, opts?)` | `Promise<Edge[]>` | Get incoming edges with optional type filter |
-| `getDirectEdgesBetween(sourceId, targetId, opts?)` | `Promise<Edge[]>` | Get direct edges between two nodes |
+| `getParents(nodeId, opts?, transaction?)` | `Promise<Node[]>` | Get parent nodes with optional type filters |
+| `getChildren(nodeId, opts?, transaction?)` | `Promise<Node[]>` | Get child nodes with optional type filters |
+| `getEdgesFrom(sourceId, opts?, transaction?)` | `Promise<Edge[]>` | Get outgoing edges with optional type filter |
+| `getEdgesTo(targetId, opts?, transaction?)` | `Promise<Edge[]>` | Get incoming edges with optional type filter |
+| `getDirectEdgesBetween(sourceId, targetId, opts?, transaction?)` | `Promise<Edge[]>` | Get direct edges between two nodes |
 
 #### Traversal & Analysis
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `traverse(sourceId, targetId, opts?)` | `Promise<string[][] \| null>` | Find path(s) between nodes using BFS or DFS |
+| `traverse(sourceId, targetId, opts?, transaction?)` | `Promise<string[][] \| null>` | Find path(s) between nodes using BFS or DFS |
 | `isDAG()` | `Promise<boolean>` | Check if graph is a Directed Acyclic Graph |
 | `topologicalSort()` | `Promise<string[] \| null>` | Topological order; `null` if cycles exist |
 
@@ -385,6 +386,26 @@ try {
 - `rollback()` — discards all changes
 - `isFailed()` — returns true if a storage operation failed within the transaction
 - `isActive()` — returns true if transaction is active and not failed
+
+**Transaction-aware methods:**
+
+All public Graph methods accept an optional `transaction` parameter to operate within a transaction context:
+
+```typescript
+// Query within a transaction to see uncommitted changes
+const txn = graph.createTransaction();
+await txn.begin();
+await graph.addNode('Person', { name: 'Alice' }, txn);
+
+// Pass transaction to see uncommitted data
+const nodes = await graph.getNodes(txn);  // includes Alice
+const node = await graph.getNode(nodeId, txn);
+const hasIt = await graph.hasNode(nodeId, txn);
+
+// Navigation methods also support transactions
+const parents = await graph.getParents(nodeId, undefined, txn);
+const children = await graph.getChildren(nodeId, undefined, txn);
+```
 
 **Note:** MongoDB storage provider requires a replica set for transaction support.
 

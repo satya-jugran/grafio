@@ -45,25 +45,29 @@ export class GraphIndex {
   // ---------------------------------------------------------------------------
 
   /** Returns all nodes in the graph. */
-  async getNodes(): Promise<readonly Node[]> {
-    const data = await this._store.getAllNodes();
+  async getNodes(transaction?: GraphTransaction): Promise<readonly Node[]> {
+    const handle = transaction?._getHandle();
+    const data = await this._store.getAllNodes(undefined, handle);
     return data.map(d => new Node(d.type, d.properties, d.id));
   }
 
   /** Returns all edges in the graph. */
-  async getEdges(): Promise<readonly Edge[]> {
-    const data = await this._store.getAllEdges();
+  async getEdges(transaction?: GraphTransaction): Promise<readonly Edge[]> {
+    const handle = transaction?._getHandle();
+    const data = await this._store.getAllEdges(handle);
     return data.map(d => new Edge(d.sourceId, d.targetId, d.type, d.properties, d.id));
   }
 
   /** Checks if a node exists in the graph. */
-  async hasNode(id: string): Promise<boolean> {
-    return this._store.hasNode(id);
+  async hasNode(id: string, transaction?: GraphTransaction): Promise<boolean> {
+    const handle = transaction?._getHandle();
+    return this._store.hasNode(id, handle);
   }
 
   /** Checks if an edge exists in the graph. */
-  async hasEdge(id: string): Promise<boolean> {
-    return this._store.hasEdge(id);
+  async hasEdge(id: string, transaction?: GraphTransaction): Promise<boolean> {
+    const handle = transaction?._getHandle();
+    return this._store.hasEdge(id, handle);
   }
 
   /**
@@ -134,33 +138,39 @@ export class GraphIndex {
   }
 
   /** Retrieves a node by id. */
-  async getNode(id: string): Promise<Node | undefined> {
-    const data = await this._store.getNode(id);
+  async getNode(id: string, transaction?: GraphTransaction): Promise<Node | undefined> {
+    const handle = transaction?._getHandle();
+    const data = await this._store.getNode(id, handle);
     if (!data) return undefined;
     return new Node(data.type, data.properties, data.id);
   }
 
   /** Retrieves nodes by their type. */
-  async getNodesByType(type: string): Promise<Node[]> {
-    const data = await this._store.getNodesByType(type);
+  async getNodesByType(type: string, transaction?: GraphTransaction): Promise<Node[]> {
+    const handle = transaction?._getHandle();
+    const data = await this._store.getNodesByType(type, handle);
     return data.map(d => new Node(d.type, d.properties, d.id));
   }
 
   /**
    * Retrieves nodes by a property value.
    * @param options - Optional options with nodeType filter
+   * @param transaction - Optional transaction for consistent reads within a transaction
    */
-  async getNodesByProperty(key: string, value: unknown, options?: { nodeType?: string }): Promise<Node[]> {
-    const data = await this._store.getNodesByProperty(key, value, options?.nodeType);
+  async getNodesByProperty(key: string, value: unknown, options?: { nodeType?: string }, transaction?: GraphTransaction): Promise<Node[]> {
+    const handle = transaction?._getHandle();
+    const data = await this._store.getNodesByProperty(key, value, options?.nodeType, handle);
     return data.map(d => new Node(d.type, d.properties, d.id));
   }
 
   /**
    * Retrieves edges by a property value.
    * @param options - Optional options with edgeType filter
+   * @param transaction - Optional transaction for consistent reads within a transaction
    */
-  async getEdgesByProperty(key: string, value: unknown, options?: { edgeType?: string }): Promise<Edge[]> {
-    const data = await this._store.getEdgesByProperty(key, value, options?.edgeType);
+  async getEdgesByProperty(key: string, value: unknown, options?: { edgeType?: string }, transaction?: GraphTransaction): Promise<Edge[]> {
+    const handle = transaction?._getHandle();
+    const data = await this._store.getEdgesByProperty(key, value, options?.edgeType, handle);
     return data.map(d => new Edge(d.sourceId, d.targetId, d.type, d.properties, d.id));
   }
 
@@ -227,8 +237,9 @@ export class GraphIndex {
   }
 
   /** Retrieves an edge by id. */
-  async getEdge(id: string): Promise<Edge | undefined> {
-    const data = await this._store.getEdge(id);
+  async getEdge(id: string, transaction?: GraphTransaction): Promise<Edge | undefined> {
+    const handle = transaction?._getHandle();
+    const data = await this._store.getEdge(id, handle);
     if (!data) return undefined;
     return new Edge(data.sourceId, data.targetId, data.type, data.properties, data.id);
   }
@@ -237,20 +248,21 @@ export class GraphIndex {
    * Gets the parent nodes of a given node (nodes with edges pointing TO this node).
    * @throws NodeNotFoundError if the node doesn't exist
    */
-  async getParents(nodeId: string, options?: { nodeType?: string; edgeType?: string }): Promise<Node[]> {
-    if (!await this._store.hasNode(nodeId)) throw new NodeNotFoundError(nodeId);
+  async getParents(nodeId: string, options?: { nodeType?: string; edgeType?: string }, transaction?: GraphTransaction): Promise<Node[]> {
+    const handle = transaction?._getHandle();
+    if (!await this._store.hasNode(nodeId, handle)) throw new NodeNotFoundError(nodeId);
 
     const nodeType = options?.nodeType ?? '*';
     const edgeType = options?.edgeType ?? '*';
     const parentIds = new Set<string>();
 
-    const edges = await this._store.getEdgesByTarget(nodeId);
+    const edges = await this._store.getEdgesByTarget(nodeId, undefined, handle);
     for (const edge of edges) {
       if (edgeType !== '*' && edge.type !== edgeType) continue;
       if (nodeType === '*') {
         parentIds.add(edge.sourceId);
       } else {
-        const sourceData = await this._store.getNode(edge.sourceId);
+        const sourceData = await this._store.getNode(edge.sourceId, handle);
         if (!sourceData) continue;
         if (sourceData.type !== nodeType) continue;
         parentIds.add(edge.sourceId);
@@ -258,7 +270,7 @@ export class GraphIndex {
     }
 
     if (parentIds.size === 0) return [];
-    const parentDataList = await Promise.all([...parentIds].map(id => this._store.getNode(id)));
+    const parentDataList = await Promise.all([...parentIds].map(id => this._store.getNode(id, handle)));
     return parentDataList.filter((d): d is NonNullable<typeof d> => d !== undefined).map(d => new Node(d.type, d.properties, d.id));
   }
 
@@ -266,19 +278,20 @@ export class GraphIndex {
    * Gets the child nodes of a given node (nodes this node points TO).
    * @throws NodeNotFoundError if the node doesn't exist
    */
-  async getChildren(nodeId: string, options?: { nodeType?: string; edgeType?: string }): Promise<Node[]> {
-    if (!await this._store.hasNode(nodeId)) throw new NodeNotFoundError(nodeId);
+  async getChildren(nodeId: string, options?: { nodeType?: string; edgeType?: string }, transaction?: GraphTransaction): Promise<Node[]> {
+    const handle = transaction?._getHandle();
+    if (!await this._store.hasNode(nodeId, handle)) throw new NodeNotFoundError(nodeId);
 
     const nodeType = options?.nodeType ?? '*';
     const edgeType = options?.edgeType ?? '*';
     const childIds = new Set<string>();
 
-    const edges = await this._store.getEdgesBySource(nodeId, edgeType !== '*' ? edgeType : undefined);
+    const edges = await this._store.getEdgesBySource(nodeId, edgeType !== '*' ? edgeType : undefined, handle);
     for (const edge of edges) {
       if (nodeType === '*') {
         childIds.add(edge.targetId);
       } else {
-        const targetData = await this._store.getNode(edge.targetId);
+        const targetData = await this._store.getNode(edge.targetId, handle);
         if (!targetData) continue;
         if (targetData.type !== nodeType) continue;
         childIds.add(edge.targetId);
@@ -286,7 +299,7 @@ export class GraphIndex {
     }
 
     if (childIds.size === 0) return [];
-    const childDataList = await Promise.all([...childIds].map(id => this._store.getNode(id)));
+    const childDataList = await Promise.all([...childIds].map(id => this._store.getNode(id, handle)));
     return childDataList.filter((d): d is NonNullable<typeof d> => d !== undefined).map(d => new Node(d.type, d.properties, d.id));
   }
 
@@ -349,8 +362,9 @@ export class GraphIndex {
   }
 
   /** Gets all edges of a specific type. */
-  async getEdgesByType(type: string): Promise<Edge[]> {
-    const data = await this._store.getEdgesByType(type);
+  async getEdgesByType(type: string, transaction?: GraphTransaction): Promise<Edge[]> {
+    const handle = transaction?._getHandle();
+    const data = await this._store.getEdgesByType(type, handle);
     return data.map(d => new Edge(d.sourceId, d.targetId, d.type, d.properties, d.id));
   }
 
