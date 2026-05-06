@@ -229,4 +229,30 @@ describe('GraphToMermaid', () => {
       expect(result).toContain('CONTAINS');
     });
   });
+
+  describe('_validateGraphData validation', () => {
+    it('should throw when data is null', () => {
+      expect(() => new GraphToMermaid('null')).toThrow('GraphData must be an object');
+    });
+
+    it('should throw when data is a function', () => {
+      expect(() => new GraphToMermaid('function() {}')).toThrow('Invalid JSON');
+    });
+
+    it('should throw when data is missing nodes property', () => {
+      const jsonData = JSON.stringify({
+        edges: [],
+      });
+
+      expect(() => new GraphToMermaid(jsonData)).toThrow('GraphData must have a nodes array');
+    });
+
+    it('should throw when data is missing edges property', () => {
+      const jsonData = JSON.stringify({
+        nodes: [],
+      });
+
+      expect(() => new GraphToMermaid(jsonData)).toThrow('GraphData must have an edges array');
+    });
+  });
 });
