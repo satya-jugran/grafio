@@ -70,16 +70,15 @@ export class GraphTraversal {
 
     // Use type-filtered query if nodeTypes are specified and not ['*']
     if (nodeTypes && nodeTypes.length > 0 && !nodeTypes.includes('*')) {
-      const ids: string[] = [];
-      await Promise.all(
+      const results = await Promise.all(
         nodeTypes.map(type => this._store.getNodesByType(type))
-      ).then(results => {
-        for (const nodes of results) {
-          for (const node of nodes) {
-            ids.push(node.id);
-          }
+      );
+      const ids: string[] = [];
+      for (const nodes of results) {
+        for (const node of nodes) {
+          ids.push(node.id);
         }
-      });
+      }
       return ids;
     }
 

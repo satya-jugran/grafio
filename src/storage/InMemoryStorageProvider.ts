@@ -161,6 +161,7 @@ export class InMemoryStorageProvider implements IStorageProvider {
     this._edgesBySource.clear();
     this._edgesByTarget.clear();
     this._nodesByProperty.clear();
+    this._edgesByProperty.clear();
   }
 
   // ---------------------------------------------------------------------------
