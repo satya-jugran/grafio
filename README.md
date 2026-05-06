@@ -576,4 +576,4 @@ The test suite (367 tests across 18 suites) runs against both `InMemoryStoragePr
 
 ## License
 
-MIT
+GPL
