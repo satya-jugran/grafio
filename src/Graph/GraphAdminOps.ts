@@ -44,8 +44,8 @@ export class GraphAdminOps {
     for (const node of data.nodes) {
       if (!isFlatRecord(node.properties)) {
         const invalidEntry = Object.entries(node.properties)
-          .find(([, value]) => !isPrimitive(value));
-        throw new InvalidPropertyError(invalidEntry?.[0] ?? '', invalidEntry?.[1]);
+          .find(([, value]) => !isPrimitive(value))!;
+        throw new InvalidPropertyError(invalidEntry?.[0], invalidEntry?.[1]);
       }
     }
 
@@ -53,8 +53,8 @@ export class GraphAdminOps {
     for (const edge of data.edges) {
       if (!isFlatRecord(edge.properties)) {
         const invalidEntry = Object.entries(edge.properties)
-          .find(([, value]) => !isPrimitive(value));
-        throw new InvalidPropertyError(invalidEntry?.[0] ?? '', invalidEntry?.[1]);
+          .find(([, value]) => !isPrimitive(value))!;
+        throw new InvalidPropertyError(invalidEntry?.[0], invalidEntry?.[1]);
       }
     }
 
