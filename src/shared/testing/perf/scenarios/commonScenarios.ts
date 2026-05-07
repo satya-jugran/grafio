@@ -17,7 +17,7 @@ function calcIterations(
   const adjusted = isLarge
     ? Math.floor(baseIterations * largeMultiplier)
     : baseIterations;
-  return Math.floor(adjusted * factor);
+  return Math.max(1, Math.floor(adjusted * factor));
 }
 
 /**

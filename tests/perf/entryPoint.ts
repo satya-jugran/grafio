@@ -3,13 +3,11 @@
  * grafio  ·  In-Memory Performance Test Runner
  *
  * Run with:
- *   npm run perf:in-memory
- *   npm run perf:in-memory:gc   (with accurate heap measurements)
+ *   npm run perf
+ *   npm run perf:gc   (with accurate heap measurements)
  */
 
-import { buildGraph } from '../../src/shared/testing/perf/graphGenerator';
-import { runScenario, printReport, printScaleHeader, printSectionTitle } from '../../src/shared/testing/perf/benchmarkRunner';
-import { buildScenarios } from '../../src/shared/testing/perf';
+import { buildGraph, runScenario, printReport, printScaleHeader, printSectionTitle, buildScenarios } from '../../src/shared/testing/perf';
 
 // ─── Scale Definitions ────────────────────────────────────────────────────────
 // In-memory provider is fast — we can benchmark at significant scales.
