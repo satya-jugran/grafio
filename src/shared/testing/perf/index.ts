@@ -6,10 +6,20 @@
  * iteration counts calculated via iteration factors.
  */
 
+// Re-export from iterationFactors
 export { ITERATION_FACTORS, getIterationFactor } from './scenarios/iterationFactors';
 export type { StorageProvider } from './scenarios/iterationFactors';
 
+// Re-export from commonScenarios
 export { buildCommonScenarios } from './scenarios/commonScenarios';
+
+// Re-export functions from benchmarkRunner
+export { runScenario, printReport, printScaleHeader, printSectionTitle } from './benchmarkRunner';
+export type { BenchmarkScenario, BenchmarkResult } from './benchmarkRunner';
+
+// Re-export from graphGenerator
+export { buildGraph } from './graphGenerator';
+export type { GraphMeta } from './graphGenerator';
 
 import type { BenchmarkScenario } from './benchmarkRunner';
 import type { StorageProvider } from './scenarios/iterationFactors';

@@ -1,6 +1,6 @@
 {
   "name": "grafio",
-  "version": "6.0.0",
+  "version": "6.0.1",
   "description": "A graph database with pluggable storage architecture. Supports multiple isolated graphs via graphId partitioning. Ships with a zero-dependency in-memory provider. Includes BFS/DFS traversal, type/property filtering, topological sort, DAG detection, transaction support, and Mermaid export.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -11,8 +11,8 @@
     "rebuild": "npm run clean && npm run build:prod",
     "test": "jest",
     "test:coverage": "jest --coverage --coverageReporters=text-summary --coverageReporters=html",
-    "perf:in-memory": "ts-node --project tsconfig.perf.json tests/perf/entryPoint.ts",
-    "perf:in-memory:gc": "cross-env TS_NODE_PROJECT=tsconfig.perf.json node --expose-gc -r ts-node/register tests/perf/entryPoint.ts"
+    "perf": "ts-node --project tsconfig.perf.json tests/perf/entryPoint.ts",
+    "perf:gc": "cross-env TS_NODE_PROJECT=tsconfig.perf.json node --expose-gc -r ts-node/register tests/perf/entryPoint.ts"
   },
   "exports": {
     ".": {
