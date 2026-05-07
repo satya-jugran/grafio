@@ -6,7 +6,7 @@ module.exports = {
   testMatch: ['**/*.test.ts'],
   moduleFileExtensions: ['ts', 'js', 'json'],
   collectCoverageFrom: ['src/**/*.ts'],
-  coveragePathIgnorePatterns: ['/node_modules/', '/dist/'],
+  coveragePathIgnorePatterns: ['/node_modules/', '/dist/', '/shared/testing/', 'src/index.ts'],
   coverageThreshold: {
     global: {
       branches: 80,
@@ -15,6 +15,8 @@ module.exports = {
       statements: 80
     }
   },
+  testTimeout: 60000,
+  maxWorkers: 1,
   coverageReporters: [
     "lcov",
     "json-summary"

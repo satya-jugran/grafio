@@ -201,10 +201,9 @@ export class GraphIndex {
     const edge = new Edge(sourceId, targetId, type, properties);
     const handle = transaction?._getHandle();
     try {
-      const [sourceExists, targetExists] = await Promise.all([
-        this._store.hasNode(sourceId, handle),
-        this._store.hasNode(targetId, handle),
-      ]);
+      
+      const sourceExists = await this._store.hasNode(sourceId, handle);
+      const targetExists = await this._store.hasNode(targetId, handle);
       if (!sourceExists) throw new NodeNotFoundError(sourceId);
       if (!targetExists) throw new NodeNotFoundError(targetId);
 
