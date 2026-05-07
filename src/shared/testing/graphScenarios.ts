@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, it, expect } from '@jest/globals';
-import { Graph } from '../../src/index';
+import { Graph } from '../../index';
 
 /**
  * Shared test scenarios for the Education Graph.

@@ -1,6 +1,6 @@
 {
   "name": "grafio",
-  "version": "5.4.0",
+  "version": "5.4.1",
   "description": "A graph database with pluggable storage architecture. Supports multiple isolated graphs via graphId partitioning. Ships with a zero-dependency in-memory provider; optional MongoDB backend for persistence. Includes BFS/DFS traversal, type/property filtering, topological sort, DAG detection, transaction support, and Mermaid export.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -15,6 +15,23 @@
     "perf:in-memory:gc": "cross-env TS_NODE_PROJECT=tsconfig.perf.json node --expose-gc -r ts-node/register perf/in-memory/entryPoint.ts",
     "perf:mongodb": "ts-node --project tsconfig.perf.json perf/mongodb/entryPoint.ts",
     "perf:mongodb:gc": "cross-env TS_NODE_PROJECT=tsconfig.perf.json node --expose-gc -r ts-node/register perf/mongodb/entryPoint.ts"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./errors": {
+      "import": "./dist/errors.js",
+      "require": "./dist/errors.js",
+      "types": "./dist/errors.d.ts"
+    },
+    "./testing": {
+      "import": "./dist/shared/testing/index.js",
+      "require": "./dist/shared/testing/index.js",
+      "types": "./dist/shared/testing/index.d.ts"
+    }
   },
   "keywords": [
     "graph",

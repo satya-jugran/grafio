@@ -3,8 +3,7 @@ import { MongoMemoryServer } from 'mongodb-memory-server';
 import { MongoClient } from 'mongodb';
 import { Graph } from '../src/index';
 import { MongoStorageProvider } from '../src/storage/MongoStorageProvider';
-import { runEducationGraphScenarios } from './shared/graphScenarios';
-import educationGraphData from './data/education-graph.json';
+import { educationGraphData, runEducationGraphScenarios } from '../src/shared/testing';
 
 let mongoServer: MongoMemoryServer;
 let client: MongoClient;

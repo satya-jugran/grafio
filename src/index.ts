@@ -25,18 +25,5 @@ export type { IGraphFactory } from './storage/IGraphFactory';
 export { MongoGraphFactory } from './storage/MongoGraphFactory';
 export { InMemoryGraphFactory } from './storage/InMemoryGraphFactory';
 
-// Error classes
-export {
-  GraphError,
-  NodeAlreadyExistsError,
-  EdgeAlreadyExistsError,
-  NodeNotFoundError,
-  NodeHasEdgesError,
-  EdgeNotFoundError,
-  InvalidGraphDataError,
-  InvalidPropertyError,
-  PropertyAlreadyExistsError,
-  PropertyNotFoundError,
-  TraversalLimitExceededError,
-} from './errors';
+export { isPrimitive } from './utils';
 export { TransactionNotActiveError, TransactionFailedError } from './Graph/GraphTransaction';

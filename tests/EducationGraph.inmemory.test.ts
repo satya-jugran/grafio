@@ -1,7 +1,6 @@
 import { describe } from '@jest/globals';
 import { Graph } from '../src/index';
-import { runEducationGraphScenarios } from './shared/graphScenarios';
-import educationGraphData from './data/education-graph.json';
+import { educationGraphData, runEducationGraphScenarios } from '../src/shared/testing';
 
 describe('Education Graph (InMemory)', () => {
   runEducationGraphScenarios(async () => {
