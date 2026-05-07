@@ -1,7 +1,7 @@
 {
   "name": "grafio",
-  "version": "5.4.2",
-  "description": "A graph database with pluggable storage architecture. Supports multiple isolated graphs via graphId partitioning. Ships with a zero-dependency in-memory provider; optional MongoDB backend for persistence. Includes BFS/DFS traversal, type/property filtering, topological sort, DAG detection, transaction support, and Mermaid export.",
+  "version": "6.0.0",
+  "description": "A graph database with pluggable storage architecture. Supports multiple isolated graphs via graphId partitioning. Ships with a zero-dependency in-memory provider. Includes BFS/DFS traversal, type/property filtering, topological sort, DAG detection, transaction support, and Mermaid export.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
@@ -12,9 +12,7 @@
     "test": "jest",
     "test:coverage": "jest --coverage --coverageReporters=text-summary --coverageReporters=html",
     "perf:in-memory": "ts-node --project tsconfig.perf.json perf/in-memory/entryPoint.ts",
-    "perf:in-memory:gc": "cross-env TS_NODE_PROJECT=tsconfig.perf.json node --expose-gc -r ts-node/register perf/in-memory/entryPoint.ts",
-    "perf:mongodb": "ts-node --project tsconfig.perf.json perf/mongodb/entryPoint.ts",
-    "perf:mongodb:gc": "cross-env TS_NODE_PROJECT=tsconfig.perf.json node --expose-gc -r ts-node/register perf/mongodb/entryPoint.ts"
+    "perf:in-memory:gc": "cross-env TS_NODE_PROJECT=tsconfig.perf.json node --expose-gc -r ts-node/register perf/in-memory/entryPoint.ts"
   },
   "exports": {
     ".": {
@@ -37,7 +35,6 @@
     "graph",
     "database",
     "in-memory",
-    "mongodb",
     "typescript",
     "async",
     "transactions",
@@ -49,14 +46,6 @@
     "topological-sort",
     "mermaid"
   ],
-  "peerDependencies": {
-    "mongodb": ">=5.0.0"
-  },
-  "peerDependenciesMeta": {
-    "mongodb": {
-      "optional": true
-    }
-  },
   "author": "Satya Jugran",
   "license": "MIT",
   "repository": {
@@ -68,8 +57,6 @@
     "@types/node": "^25.6.0",
     "cross-env": "^10.1.0",
     "jest": "^29.5.0",
-    "mongodb": "^7.2.0",
-    "mongodb-memory-server": "^11.1.0",
     "rimraf": "^5.0.0",
     "ts-jest": "^29.1.0",
     "ts-node": "^10.9.0",

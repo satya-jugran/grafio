@@ -1,6 +1,8 @@
 # grafio
 
-A graph database with **pluggable storage architecture**. Supports **multiple isolated graphs** via `graphId` partitioning. Ships with a zero-dependency in-memory provider; optional MongoDB backend for persistence. Includes BFS/DFS traversal, type/property filtering, topological sort, DAG detection, transaction support and Mermaid export.
+A graph database with **pluggable storage architecture**. Supports **multiple isolated graphs** via `graphId` partitioning. Ships with a zero-dependency in-memory provider. Includes BFS/DFS traversal, type/property filtering, topological sort, DAG detection, transaction support and Mermaid export.
+
+> **MongoDB Storage**: For MongoDB-backed persistence, see the separate [`grafio-mongo`](https://github.com/satya-jugran/grafio-mongo) package.
 
 ## Features:
 ### Core
@@ -11,7 +13,7 @@ A graph database with **pluggable storage architecture**. Supports **multiple is
 
 ### Storage Providers
 - **`InMemoryStorageProvider`** — built-in, zero dependencies, perfect for development/testing
-- **`MongoStorageProvider`** — optional MongoDB backend (`>= 5.0.0`), with optimized indexes for nodes and edges
+- **`MongoStorageProvider`** — available in [`grafio-mongo`](https://github.com/satya-jugran/grafio-mongo) package
 
 ### Traversal & Querying
 - **BFS / DFS traversal** — find paths between nodes
@@ -32,21 +34,17 @@ A graph database with **pluggable storage architecture**. Supports **multiple is
 ### Data Management
 - **JSON serialization** — `exportJSON()` / `importJSON()` for backup/restore
 - **Deep-frozen properties** — immutability guarantees on node/edge data
-- **Graph factories** — `MongoGraphFactory` and `InMemoryGraphFactory` for controlled instance creation
+- **Graph factories** — `InMemoryGraphFactory` for controlled instance creation
 
 ### Transactions
 - **Atomic multi-operation updates** — group multiple operations into a single atomic unit
 - **Automatic rollback** — discard all changes if an error occurs during the transaction
 - **Copy-on-write snapshots** (in-memory) — isolation without blocking
-- **MongoDB sessions** — native transaction support when using MongoDB backend
 
 ## Installation
 
 ```bash
 npm install grafio
-
-# MongoDB backend (optional)
-npm install mongodb
 ```
 
 ## Quick Start
@@ -99,68 +97,6 @@ const dag = await graph.isDAG(); // true
 // Topological sort
 const order = await graph.topologicalSort(); // [authorId, courseId, chapterId]
 ```
-
-## MongoDB Backend
-
-```typescript
-import { MongoClient } from 'mongodb';
-import { MongoGraphFactory } from 'grafio';
-
-// Connect to MongoDB
-const client = new MongoClient('mongodb://localhost:27017');
-await client.connect();
-
-const factory = new MongoGraphFactory(client.db('mydb'));
-
-// Create indexes once at startup (idempotent — safe to call every time)
-await factory.ensureIndexes();
-
-// Get a graph scoped to a named partition
-const graph = factory.forGraph('my-graph');
-
-const alice = await graph.addNode('Person', { name: 'Alice' });
-const bob   = await graph.addNode('Person', { name: 'Bob' });
-await graph.addEdge(alice.id, bob.id, 'KNOWS');
-
-const path = await graph.traverse(alice.id, bob.id, { edgeTypes: ['KNOWS'] });
-
-// Caller manages the MongoClient lifecycle
-await client.close();
-```
-
-### Direct `MongoStorageProvider` Usage
-
-For fine-grained control over collection names, construct the provider directly:
-
-```typescript
-import { MongoClient } from 'mongodb';
-import { Graph, MongoStorageProvider } from 'grafio';
-
-const client = new MongoClient('mongodb://localhost:27017');
-await client.connect();
-
-const provider = new MongoStorageProvider(client.db('mydb'), {
-  graphId: 'my-graph',          // default: 'default' — partitions data by graph id
-  nodesCollection: 'my_nodes',  // default: 'sgdb_nodes'
-  edgesCollection: 'my_edges',  // default: 'sgdb_edges'
-});
-
-await provider.ensureIndexes();
-
-const graph = new Graph(provider);
-```
-
-### Indexes Created by `ensureIndexes()`
-
-| Collection | Index | Purpose |
-|-----------|-------|---------|
-| nodes | `{ graphId: 1, id: 1 }` unique | Fast node id lookups within a graph partition |
-| nodes | `{ graphId: 1, type: 1 }` | `getNodesByType()` within a graph partition |
-| nodes | `{ graphId: 1, properties: 1 }` | Property value lookups within a graph partition |
-| edges | `{ graphId: 1, id: 1 }` unique | Fast edge id lookups within a graph partition |
-| edges | `{ graphId: 1, type: 1 }` | `getEdgesByType()` within a graph partition |
-| edges | `{ graphId: 1, sourceId: 1, type: 1 }` | Outgoing adjacency queries |
-| edges | `{ graphId: 1, targetId: 1, type: 1 }` | Incoming adjacency queries |
 
 ## API Reference
 
@@ -407,8 +343,6 @@ const parents = await graph.getParents(nodeId, { transaction: txn });
 const children = await graph.getChildren(nodeId, { filter: { edgeType: 'KNOWS' }, transaction: txn });
 ```
 
-**Note:** MongoDB storage provider requires a replica set for transaction support.
-
 ## Error Handling
 
 ```typescript
@@ -549,7 +483,7 @@ npm test
 
 ## Testing
 
-The test suite (367 tests across 18 suites) runs against both `InMemoryStorageProvider` and `MongoStorageProvider` backends:
+The test suite runs against the built-in `InMemoryStorageProvider` backend:
 
 ### In-Memory Tests
 - `tests/graph/Graph.node.test.ts` — Node operations
@@ -563,15 +497,11 @@ The test suite (367 tests across 18 suites) runs against both `InMemoryStoragePr
 - `tests/graph/Graph.properties.test.ts` — Property CRUD and validation
 - `tests/graph/GraphToMermaid.test.ts` — Mermaid export
 
-### Cross-Provider Scenarios (InMemory + MongoDB)
+### Integration Tests
 - `tests/EducationGraph.inmemory.test.ts` — Education graph via InMemory provider
-- `tests/EducationGraph.mongo.test.ts` — Education graph via MongoDB provider
 - `tests/SocialGraph.inmemory.test.ts` — Social graph via InMemory provider
-- `tests/SocialGraph.mongo.test.ts` — Social graph via MongoDB provider
 
 ### Storage Provider Tests
-- `tests/storage/MongoStorageProvider.test.ts` — MongoDB provider unit tests (isolation, indexing)
-- `tests/storage/MongoGraphFactory.test.ts` — MongoDB factory lifecycle tests
 - `tests/storage/InMemoryGraphFactory.test.ts` — In-memory factory tests
 
 ## License

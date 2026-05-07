@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.0.0] - 2026-05-07
+
+### Breaking Changes
+
+1. **Extracted MongoDB Storage to Separate Package**
+   - MongoDB storage implementation (`MongoStorageProvider`, `MongoGraphFactory`) has been moved to the [`grafio-mongo`](https://github.com/satya-jugran/grafio-mongo) package
+   - `grafio` now ships only with `InMemoryStorageProvider` as the built-in storage backend
+   - To use MongoDB storage, install `grafio-mongo` package: `npm install grafio-mongo`
+   - Removed MongoDB-related exports from `grafio` package
+   - Removed MongoDB peer dependency from `grafio` package
+
+2. **Package.json Updates**
+   - Removed `mongodb` and `mongodb-memory-server` devDependencies
+   - Removed `perf:mongodb` and `perf:mongodb:gc` scripts
+   - Removed `mongodb` keyword
+   - Removed `peerDependencies.mongodb` and `peerDependenciesMeta.mongodb`
+
+### Documentation
+
+1. **README Updates**
+   - Removed all MongoDB usage examples and documentation
+   - Added reference to `grafio-mongo` package for MongoDB storage
+   - Updated test section to reflect in-memory-only tests
+
 ## [5.4.2] - 2026-05-07
 
 ### Refactoring
