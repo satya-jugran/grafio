@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from '@jest/globals';
-import { Graph, InvalidPropertyError, PropertyAlreadyExistsError, PropertyNotFoundError } from '../../src/index';
+import { Graph } from '../../src/index';
+import { InvalidPropertyError } from '../../src/errors';
 
 describe('Graph Node/Edge Properties Validation', () => {
   let graph: Graph;
@@ -126,7 +127,7 @@ describe('Graph.createIndex', () => {
       // Create compound index for Person nodes only
       await expect(graph.createIndex('node', 'email', 'Person')).resolves.toBeUndefined();
 
-      const results = await graph.getNodesByProperty('email', 'alice@example.com', { nodeType: 'Person' });
+      const results = await graph.getNodesByProperty('email', 'alice@example.com', { filter: { nodeType: 'Person' } });
       expect(results).toHaveLength(1);
       expect(results[0].type).toBe('Person');
     });
@@ -175,7 +176,7 @@ describe('Graph.createIndex', () => {
       // Create compound index for KNOWS edges only
       await expect(graph.createIndex('edge', 'weight', 'KNOWS')).resolves.toBeUndefined();
 
-      const results = await graph.getEdgesByProperty('weight', 0.8, { edgeType: 'KNOWS' });
+      const results = await graph.getEdgesByProperty('weight', 0.8, { filter: { edgeType: 'KNOWS' } });
       expect(results).toHaveLength(1);
       expect(results[0].type).toBe('KNOWS');
     });

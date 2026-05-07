@@ -1,7 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe } from '@jest/globals';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import { MongoClient } from 'mongodb';
-import { Graph } from '../src/index';
 import { MongoStorageProvider } from '../src/storage/MongoStorageProvider';
 import { runSocialGraphScenarios } from '../src/shared/testing/socialGraphScenarios';
 

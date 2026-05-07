@@ -30,8 +30,8 @@ describe('Graph.topologicalSort()', () => {
 
     const result = await graph.topologicalSort()!;
     expect(result).toHaveLength(3);
-    expect(result.indexOf(a.id)).toBeLessThan(result.indexOf(b.id));
-    expect(result.indexOf(b.id)).toBeLessThan(result.indexOf(c.id));
+    expect(result!.indexOf(a.id)).toBeLessThan(result!.indexOf(b.id));
+    expect(result!.indexOf(b.id)).toBeLessThan(result!.indexOf(c.id));
   });
 
   it('should handle multiple roots (nodes with no incoming edges)', async () => {
@@ -49,8 +49,8 @@ describe('Graph.topologicalSort()', () => {
     expect(result).toContain(b.id);
     expect(result).toContain(c.id);
     // Both A and B should come before C
-    expect(result.indexOf(c.id)).toBeGreaterThan(result.indexOf(a.id));
-    expect(result.indexOf(c.id)).toBeGreaterThan(result.indexOf(b.id));
+    expect(result!.indexOf(c.id)).toBeGreaterThan(result!.indexOf(a.id));
+    expect(result!.indexOf(c.id)).toBeGreaterThan(result!.indexOf(b.id));
   });
 
   it('should return null for graph with cycle', async () => {
@@ -93,11 +93,11 @@ describe('Graph.topologicalSort()', () => {
     const result = await graph.topologicalSort()!;
     expect(result).toHaveLength(4);
     // A must come before both B and C
-    expect(result.indexOf(a.id)).toBeLessThan(result.indexOf(b.id));
-    expect(result.indexOf(a.id)).toBeLessThan(result.indexOf(c.id));
+    expect(result!.indexOf(a.id)).toBeLessThan(result!.indexOf(b.id));
+    expect(result!.indexOf(a.id)).toBeLessThan(result!.indexOf(c.id));
     // Both B and C must come before D
-    expect(result.indexOf(b.id)).toBeLessThan(result.indexOf(d.id));
-    expect(result.indexOf(c.id)).toBeLessThan(result.indexOf(d.id));
+    expect(result!.indexOf(b.id)).toBeLessThan(result!.indexOf(d.id));
+    expect(result!.indexOf(c.id)).toBeLessThan(result!.indexOf(d.id));
   });
 
   it('should handle isolated nodes (no edges)', async () => {

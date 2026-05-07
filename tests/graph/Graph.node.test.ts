@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from '@jest/globals';
-import { Graph, NodeHasEdgesError } from '../../src/index';
+import { Graph } from '../../src/index';
+import { NodeHasEdgesError } from '../../src/errors';
 
 describe('Graph.Node Operations', () => {
   let graph: Graph;
