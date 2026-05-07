@@ -11,8 +11,8 @@
     "rebuild": "npm run clean && npm run build:prod",
     "test": "jest",
     "test:coverage": "jest --coverage --coverageReporters=text-summary --coverageReporters=html",
-    "perf:in-memory": "ts-node --project tsconfig.perf.json perf/in-memory/entryPoint.ts",
-    "perf:in-memory:gc": "cross-env TS_NODE_PROJECT=tsconfig.perf.json node --expose-gc -r ts-node/register perf/in-memory/entryPoint.ts"
+    "perf:in-memory": "ts-node --project tsconfig.perf.json tests/perf/entryPoint.ts",
+    "perf:in-memory:gc": "cross-env TS_NODE_PROJECT=tsconfig.perf.json node --expose-gc -r ts-node/register tests/perf/entryPoint.ts"
   },
   "exports": {
     ".": {
@@ -29,6 +29,11 @@
       "import": "./dist/shared/testing/index.js",
       "require": "./dist/shared/testing/index.js",
       "types": "./dist/shared/testing/index.d.ts"
+    },
+    "./testing/perf": {
+      "import": "./dist/shared/testing/perf/index.js",
+      "require": "./dist/shared/testing/perf/index.js",
+      "types": "./dist/shared/testing/perf/index.d.ts"
     }
   },
   "keywords": [

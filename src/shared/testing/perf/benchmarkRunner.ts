@@ -1,4 +1,4 @@
-import { Graph } from '../src/index';
+import { Graph } from '../../../index';
 import type { GraphMeta } from './graphGenerator';
 
 // ─── Types ────────────────────────────────────────────────────────────────────

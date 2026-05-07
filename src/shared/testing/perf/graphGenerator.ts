@@ -1,5 +1,5 @@
-import { Graph } from '../src/index';
-import { InMemoryStorageProvider } from '../src/storage/InMemoryStorageProvider';
+import { Graph } from '../../../index';
+import { InMemoryStorageProvider } from '../../../storage/InMemoryStorageProvider';
 
 export interface GraphMeta {
   graph: Graph;
