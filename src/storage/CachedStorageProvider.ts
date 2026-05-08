@@ -5,6 +5,7 @@ import type {
 } from '../types';
 import type {
   IStorageProvider,
+  IOrderBy,
   ITransactionHandle,
 } from './IStorageProvider';
 import type { CacheConfig } from './cache/CacheConfig';
@@ -123,10 +124,11 @@ export class CachedStorageProvider implements IStorageProvider {
 
   async getAllNodes(
     limit?: number,
+    orderBy?: IOrderBy,
     transaction?: ITransactionHandle
   ): Promise<NodeData[]> {
     // Collection queries are NOT cached — delegate directly
-    return this._underlying.getAllNodes(limit, transaction);
+    return this._underlying.getAllNodes(limit, orderBy, transaction);
   }
 
   async getNodesByType(
@@ -196,8 +198,8 @@ export class CachedStorageProvider implements IStorageProvider {
     return edge;
   }
 
-  async getAllEdges(limit?: number, transaction?: ITransactionHandle): Promise<EdgeData[]> {
-    return this._underlying.getAllEdges(limit, transaction);
+  async getAllEdges(limit?: number, orderBy?: IOrderBy, transaction?: ITransactionHandle): Promise<EdgeData[]> {
+    return this._underlying.getAllEdges(limit, orderBy, transaction);
   }
 
   async getEdgesByType(
@@ -355,46 +357,22 @@ export class CachedStorageProvider implements IStorageProvider {
       }
 
       case 'recent': {
-        // Load nodes sorted by timestamp property (descending)
-        if (!this._config.timestampProperty) {
-          console.warn(
-            '[CachedStorageProvider] preloadStrategy "recent" requires timestampProperty. ' +
-            'Falling back to "none".'
-          );
-          break;
-        }
-
-        const nodes = await this._underlying.getAllNodes(this._config.maxNodesCount);
-        // Filter and sort by timestamp property
-        const sorted = nodes
-          .filter((n) => n.properties[this._config.timestampProperty!] !== undefined)
-          .sort((a, b) => {
-            const aVal = a.properties[this._config.timestampProperty!] as number;
-            const bVal = b.properties[this._config.timestampProperty!] as number;
-            return bVal - aVal; // descending
-          });
-
-        for (const node of sorted) {
+        // Load nodes/edges sorted by updatedOn (descending - most recent first)
+        // Storage provider handles sorting natively for efficiency
+        const nodes = await this._underlying.getAllNodes(
+          this._config.maxNodesCount,
+          { field: 'updatedOn', direction: 'desc' }
+        );
+        for (const node of nodes) {
           await this._cacheManager.setNode(this._graphId, node.id, node);
         }
 
-        // Also load edges (most recently modified first, if timestampProperty exists)
-        const edges = await this._underlying.getAllEdges(this._config.maxEdgesCount);
-        if (this._config.timestampProperty) {
-          const sortedEdges = edges
-            .filter((e) => e.properties[this._config.timestampProperty!] !== undefined)
-            .sort((a, b) => {
-              const aVal = a.properties[this._config.timestampProperty!] as number;
-              const bVal = b.properties[this._config.timestampProperty!] as number;
-              return bVal - aVal;
-            });
-          for (const edge of sortedEdges) {
-            await this._cacheManager.setEdge(this._graphId, edge.id, edge);
-          }
-        } else {
-          for (const edge of edges) {
-            await this._cacheManager.setEdge(this._graphId, edge.id, edge);
-          }
+        const edges = await this._underlying.getAllEdges(
+          this._config.maxEdgesCount,
+          { field: 'updatedOn', direction: 'desc' }
+        );
+        for (const edge of edges) {
+          await this._cacheManager.setEdge(this._graphId, edge.id, edge);
         }
         break;
       }

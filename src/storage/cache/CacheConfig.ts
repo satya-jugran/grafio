@@ -62,20 +62,13 @@ export interface CacheConfig {
    *
    * - 'none'    — Cache starts empty; items populate on first read (default).
    * - 'all'     — Load all nodes/edges up to budget via getAllNodes/getAllEdges.
-   * - 'recent'  — Load nodes/edges sorted descending by `timestampProperty`.
-   *               Requires `timestampProperty` to be set.
+   * - 'recent'  — Load nodes/edges sorted descending by `updatedOn` property.
    * - 'first-n' — Load the first N nodes/edges as returned by the storage provider
    *               (insertion order or natural DB order). Simple and predictable.
    *
    * @default 'none'
    */
   preloadStrategy: PreloadStrategy;
-
-  /**
-   * Property name used for 'recent' preload strategy.
-   * E.g. 'createdAt' or 'updatedAt'. Nodes/edges lacking this property are skipped.
-   */
-  timestampProperty?: string;
 
   /**
    * Per-graphId TTL in milliseconds. After this duration of inactivity,

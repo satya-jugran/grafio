@@ -53,17 +53,23 @@ export function runGraphSerializationScenarios(
       expect(data.edges).toHaveLength(1);
       const aliceNode = data.nodes.find(n => n.id === aliceId);
       const bobNode = data.nodes.find(n => n.id === bobId);
-      expect(aliceNode).toEqual({ id: aliceId, type: 'Person', properties: { name: 'Alice', age: 30 } });
-      expect(bobNode).toEqual({ id: bobId, type: 'Person', properties: { name: 'Bob', age: 25 } });
+      expect(aliceNode).toMatchObject({ id: aliceId, type: 'Person', properties: { name: 'Alice', age: 30 } });
+      expect(aliceNode?.createdOn).toBeDefined();
+      expect(aliceNode?.updatedOn).toBeDefined();
+      expect(bobNode).toMatchObject({ id: bobId, type: 'Person', properties: { name: 'Bob', age: 25 } });
+      expect(bobNode?.createdOn).toBeDefined();
+      expect(bobNode?.updatedOn).toBeDefined();
       expect(data.edges[0].id).toBeDefined();
       expect(data.edges[0].id).toBe(edge.id);
-      expect(data.edges[0]).toEqual({
+      expect(data.edges[0]).toMatchObject({
         id: edge.id,
         sourceId: aliceId,
         targetId: bobId,
         type: 'KNOWS',
         properties: { since: 2020 },
       });
+      expect(data.edges[0].createdOn).toBeDefined();
+      expect(data.edges[0].updatedOn).toBeDefined();
     });
 
     it('should reconstruct graph from data', async () => {
