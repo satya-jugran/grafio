@@ -1,12 +1,12 @@
 {
   "name": "grafio",
-  "version": "6.0.3",
+  "version": "6.0.4",
   "description": "A graph database with pluggable storage architecture. Supports multiple isolated graphs via graphId partitioning. Ships with a zero-dependency in-memory provider. Includes BFS/DFS traversal, type/property filtering, topological sort, DAG detection, transaction support, and Mermaid export.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
-    "build:prod": "tsc -p tsconfig.prod.json",
+    "build:prod": "npm run clean && tsc -p tsconfig.prod.json",
     "clean": "rimraf dist",
     "rebuild": "npm run clean && npm run build:prod",
     "test": "jest",
