@@ -18,8 +18,6 @@ jest.config.js
 *.md
 !README.md
 LICENSE
-CACHE_DESIGN.md
-CYPHER_QUERY_LAYER.md
 
 # VS Code
 .vscode/
