@@ -9,7 +9,6 @@ plans/
 
 # TypeScript config files
 tsconfig*.json
-!tsconfig.prod.json
 
 # Jest and other config
 jest.config.js
@@ -29,6 +28,9 @@ CYPHER_QUERY_LAYER.md
 .git/
 .gitignore
 .npmignore
+
+# Coverage reports
+coverage/
 
 # Lock files (optional, some prefer to keep package-lock.json)
 package-lock.json
