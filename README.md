@@ -15,6 +15,13 @@ A graph database with **pluggable storage architecture**. Supports **multiple is
 - **`InMemoryStorageProvider`** — built-in, zero dependencies, perfect for development/testing
 - **`MongoStorageProvider`** — available in [`grafio-mongo`](https://www.npmjs.com/package/grafio-mongo) package
 
+### Caching
+- **`CachedStorageProvider`** — wraps any storage provider with LRU/LFU/FIFO caching
+- **`CacheManager`** — manages cache across multiple graphId partitions with budget enforcement
+- **`GraphManager`** — application-scoped singleton for cache initialization
+- **`InMemoryCache`** — built-in in-process cache (zero dependencies)
+- **`RedisCache`** — distributed cache using Redis (via ioredis, optional)
+
 ### Traversal & Querying
 - **BFS / DFS traversal** — find paths between nodes
 - **Wildcard traversal** — `traverse('*', target)`, `traverse(source, '*')`, or `traverse(['a','b'], ['x','y'])`
@@ -40,6 +47,92 @@ A graph database with **pluggable storage architecture**. Supports **multiple is
 - **Atomic multi-operation updates** — group multiple operations into a single atomic unit
 - **Automatic rollback** — discard all changes if an error occurs during the transaction
 - **Copy-on-write snapshots** (in-memory) — isolation without blocking
+
+## Caching
+
+grafio includes a pluggable caching layer that wraps any storage provider for improved read performance.
+
+### Quick Start with Caching
+
+```typescript
+import { Graph, GraphManager, CachedStorageProvider, InMemoryCache, CacheConfig } from 'grafio';
+import { InMemoryStorageProvider } from 'grafio';
+
+// 1. Initialize GraphManager with cache configuration
+GraphManager.init({
+  cache: {
+    maxNodesCount: 10000,
+    maxEdgesCount: 20000,
+    cacheStore: 'in-memory',
+    evictionStrategy: 'LRU',
+    preloadStrategy: 'none',
+  }
+});
+
+// 2. Create a graph (automatically uses caching when configured)
+const graph = new Graph(new InMemoryStorageProvider());
+
+// 3. Warm the cache explicitly (for preload strategies other than 'none')
+await graph.warmCache();
+```
+
+### Cache Configuration Options
+
+| Option | Type | Description | Default |
+|--------|------|-------------|---------|
+| `maxNodesCount` | `number` | Maximum total nodes cached across all graphId partitions | `10000` |
+| `maxEdgesCount` | `number` | Maximum total edges cached across all graphId partitions | `20000` |
+| `cacheStore` | `'in-memory' \| 'redis'` | Cache backend type | `'in-memory'` |
+| `evictionStrategy` | `'LRU' \| 'LFU' \| 'FIFO'` | Per-partition eviction strategy | `'LRU'` |
+| `preloadStrategy` | `'none' \| 'all' \| 'recent' \| 'first-n'` | Strategy to warm cache on startup | `'none'` |
+| `timestampProperty` | `string` | Property name for 'recent' preload sorting | - |
+
+### Preload Strategies
+
+- **`none`** — Cache starts empty; items populate on first read (default)
+- **`all`** — Load all nodes/edges up to budget via storage provider
+- **`recent`** — Load nodes/edges sorted by `timestampProperty` (descending). Requires `timestampProperty`
+- **`first-n`** — Load first N items as returned by storage provider
+
+### Using Redis Cache
+
+```typescript
+import { GraphManager } from 'grafio';
+import { RedisCache } from 'grafio/cache';
+
+GraphManager.init({
+  cache: {
+    maxNodesCount: 50000,
+    maxEdgesCount: 100000,
+    cacheStore: 'redis',
+    evictionStrategy: 'LRU',
+    preloadStrategy: 'all',
+  }
+});
+
+// RedisCache requires ioredis: npm install ioredis
+```
+
+### Manual Cache Wrapping
+
+For fine-grained control, wrap storage providers manually:
+
+```typescript
+import { CachedStorageProvider, InMemoryStorageProvider, CacheManager, CacheConfig } from 'grafio';
+
+const cacheManager = new CacheManager({ /* CacheConfig */ });
+const storage = new InMemoryStorageProvider();
+
+const cachedStorage = new CachedStorageProvider(
+  storage,
+  'my-graph-id',
+  cacheManager,
+  { /* CacheConfig */ }
+);
+
+const graph = new Graph(cachedStorage);
+await cachedStorage.warmCache(); // Preload cache
+```
 
 ## Installation
 
@@ -173,6 +266,7 @@ Omit `storageProvider` to use the built-in `InMemoryStorageProvider`.
 | `traverse(sourceId, targetId, opts?, transaction?)` | `Promise<string[][] \| null>` | Find path(s) between nodes using BFS or DFS |
 | `isDAG()` | `Promise<boolean>` | Check if graph is a Directed Acyclic Graph |
 | `topologicalSort()` | `Promise<string[] \| null>` | Topological order; `null` if cycles exist |
+| `warmCache()` | `Promise<void>` | Pre-warm the cache using configured preloadStrategy |
 
 #### TraversalOptions Interface
 
@@ -444,14 +538,14 @@ class MyCustomProvider implements IStorageProvider {
   async deleteNode(id: string): Promise<void> { /* ... */ }
   async hasNode(id: string): Promise<boolean> { /* ... */ }
   async getNode(id: string): Promise<NodeData | undefined> { /* ... */ }
-  async getAllNodes(limit?: number): Promise<NodeData[]> { /* ... */ }
+  async getAllNodes(limit?: number, orderBy?: IOrderBy): Promise<NodeData[]> { /* ... */ }
   async getNodesByType(type: string): Promise<NodeData[]> { /* ... */ }
   async getNodesByProperty(key: string, value: unknown, nodeType?: string): Promise<NodeData[]> { /* ... */ }
   async insertEdge(edge: EdgeData): Promise<void> { /* ... */ }
   async deleteEdge(id: string): Promise<void> { /* ... */ }
   async hasEdge(id: string): Promise<boolean> { /* ... */ }
   async getEdge(id: string): Promise<EdgeData | undefined> { /* ... */ }
-  async getAllEdges(): Promise<EdgeData[]> { /* ... */ }
+  async getAllEdges(limit?: number, orderBy?: IOrderBy): Promise<EdgeData[]> { /* ... */ }
   async getEdgesByType(type: string): Promise<EdgeData[]> { /* ... */ }
   async getEdgesBySource(nodeId: string, type?: string): Promise<EdgeData[]> { /* ... */ }
   async getEdgesByTarget(nodeId: string, type?: string): Promise<EdgeData[]> { /* ... */ }
@@ -463,6 +557,12 @@ class MyCustomProvider implements IStorageProvider {
   async exportJSON(): Promise<GraphData> { /* ... */ }
   async importJSON(data: GraphData): Promise<void> { /* ... */ }
   async clear(): Promise<void> { /* ... */ }
+}
+
+// IOrderBy interface for ordering collection queries
+interface IOrderBy {
+  field: 'createdOn' | 'updatedOn';
+  direction: 'asc' | 'desc';
 }
 
 const graph = new Graph(new MyCustomProvider());
@@ -503,6 +603,9 @@ The test suite runs against the built-in `InMemoryStorageProvider` backend:
 
 ### Storage Provider Tests
 - `tests/storage/InMemoryGraphFactory.test.ts` — In-memory factory tests
+
+### Cache Tests
+- `tests/storage/cache/InMemoryCache.test.ts` — In-memory cache unit tests
 
 ## License
 
