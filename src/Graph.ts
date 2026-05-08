@@ -77,8 +77,8 @@ export class Graph {
    */
   async warmCache(): Promise<void> {
     const store = this._index._getStore();
-    if (typeof (store as any).initialize === 'function') {
-      await (store as any).initialize();
+    if (typeof (store as any).warmCache === 'function') {
+      await (store as any).warmCache();
     }
   }
 

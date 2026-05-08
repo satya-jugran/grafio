@@ -4,7 +4,7 @@
 export type EvictionStrategy = 'LRU' | 'LFU' | 'FIFO';
 
 /**
- * Strategy used to warm-start the cache when CachedStorageProvider.initialize()
+ * Strategy used to warm-start the cache when CachedStorageProvider.warmCache()
  * is called.
  */
 export type PreloadStrategy = 'none' | 'all' | 'recent' | 'first-n';
@@ -57,7 +57,7 @@ export interface CacheConfig {
   evictionStrategy: EvictionStrategy;
 
   /**
-   * Strategy used to warm-start the cache when CachedStorageProvider.initialize()
+   * Strategy used to warm-start the cache when CachedStorageProvider.warmCache()
    * is called.
    *
    * - 'none'    — Cache starts empty; items populate on first read (default).

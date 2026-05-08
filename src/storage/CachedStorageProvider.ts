@@ -331,10 +331,10 @@ export class CachedStorageProvider implements IStorageProvider {
    *   preloadStrategy: 'recent',
    *   timestampProperty: 'createdAt',
    * });
-   * await cachedProvider.initialize();
+   * await cachedProvider.warmCache();
    * ```
    */
-  async initialize(): Promise<void> {
+  async warmCache(): Promise<void> {
     switch (this._config.preloadStrategy) {
       case 'none':
         // No pre-loading — cache starts empty
