@@ -22,5 +22,18 @@ export type { InMemoryStorageProviderOptions } from './storage/InMemoryStoragePr
 export type { IGraphFactory } from './storage/IGraphFactory';
 export { InMemoryGraphFactory } from './storage/InMemoryGraphFactory';
 
+// Caching layer
+export { GraphManager } from './GraphManager';
+export type { GraphManagerConfig } from './GraphManager';
+export { CachedStorageProvider } from './storage/CachedStorageProvider';
+export type { CacheConfig } from './storage/cache/CacheConfig';
+export type { EvictionStrategy } from './storage/cache/CacheConfig';
+export type { PreloadStrategy } from './storage/cache/CacheConfig';
+export type { CacheStoreType } from './storage/cache/CacheConfig';
+export { CacheManager } from './storage/cache/CacheManager';
+export type { CacheStats } from './storage/cache/CacheManager';
+export type { ICacheProvider } from './storage/cache/ICacheProvider';
+export { InMemoryCache } from './storage/cache/InMemoryCache';
+
 export { isPrimitive } from './utils';
 export { TransactionNotActiveError, TransactionFailedError } from './Graph/GraphTransaction';

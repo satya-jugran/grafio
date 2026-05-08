@@ -2,7 +2,7 @@
 
 A graph database with **pluggable storage architecture**. Supports **multiple isolated graphs** via `graphId` partitioning. Ships with a zero-dependency in-memory provider. Includes BFS/DFS traversal, type/property filtering, topological sort, DAG detection, transaction support and Mermaid export.
 
-> **MongoDB Storage**: For MongoDB-backed persistence, see the separate [`grafio-mongo`](https://github.com/satya-jugran/grafio-mongo) package.
+> **MongoDB Storage**: For MongoDB-backed persistence, see the separate [`grafio-mongo`](https://www.npmjs.com/package/grafio-mongo) package.
 
 ## Features:
 ### Core
@@ -13,7 +13,7 @@ A graph database with **pluggable storage architecture**. Supports **multiple is
 
 ### Storage Providers
 - **`InMemoryStorageProvider`** — built-in, zero dependencies, perfect for development/testing
-- **`MongoStorageProvider`** — available in [`grafio-mongo`](https://github.com/satya-jugran/grafio-mongo) package
+- **`MongoStorageProvider`** — available in [`grafio-mongo`](https://www.npmjs.com/package/grafio-mongo) package
 
 ### Traversal & Querying
 - **BFS / DFS traversal** — find paths between nodes

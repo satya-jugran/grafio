@@ -128,8 +128,12 @@ export interface IStorageProvider {
    */
   getEdge(id: string, transaction?: ITransactionHandle): Promise<EdgeData | undefined>;
 
-  /** Returns all stored edges. */
-  getAllEdges(transaction?: ITransactionHandle): Promise<EdgeData[]>;
+  /**
+   * Returns all stored edges, up to the optional limit.
+   * @param limit - Optional maximum number of edges to return
+   * @param transaction - Optional transaction handle
+   */
+  getAllEdges(limit?: number, transaction?: ITransactionHandle): Promise<EdgeData[]>;
 
   /**
    * Returns all edges whose `type` field matches the given value.

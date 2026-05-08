@@ -573,7 +573,7 @@ export class InMemoryStorageProvider implements IStorageProvider {
     return edge ? deepClone(edge) : undefined;
   }
 
-  async getAllEdges(transaction?: ITransactionHandle): Promise<EdgeData[]> {
+  async getAllEdges(limit?: number, transaction?: ITransactionHandle): Promise<EdgeData[]> {
     const overlay = this._getOverlay(transaction?.id);
     const result: EdgeData[] = [];
     const seen = new Set<string>();
@@ -594,7 +594,7 @@ export class InMemoryStorageProvider implements IStorageProvider {
         result.push(deepClone(edge));
       }
     }
-    return result;
+    return limit !== undefined ? result.slice(0, limit) : result;
   }
 
   async getEdgesByType(type: string, transaction?: ITransactionHandle): Promise<EdgeData[]> {

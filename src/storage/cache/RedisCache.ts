@@ -1,0 +1,216 @@
+import type { ICacheProvider } from './ICacheProvider';
+
+/**
+ * Redis-backed cache implementation.
+ *
+ * Uses Redis data structures as follows:
+ * - Individual entries: `grafio:{type}:{graphId}:{id}` → JSON serialized value
+ * - GraphId LRU tracking: `grafio:meta:graphids` (sorted set, score = lastAccessed ms)
+ * - TTL: propagated via `PEXPIRE` on each key
+ *
+ * The `ioredis` package is a peer dependency. It is loaded dynamically only when
+ * `cacheStore: 'redis'` is configured, so consumers not using Redis are not affected.
+ *
+ * @example
+ * ```typescript
+ * const cache = new RedisCache('redis://localhost:6379', 10000, 'nodes');
+ * await cache.set('tenant-a:node-1', { id: 'node-1', type: 'Person', properties: {} });
+ * ```
+ */
+export class RedisCache<T> implements ICacheProvider<T> {
+  private readonly _redisUrl: string;
+  private readonly _maxSize: number;
+  private readonly _type: 'nodes' | 'edges';
+  private readonly _ttlMs: number | undefined;
+
+  // Dynamically loaded Redis client - typed as any to avoid compile-time dependency
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private _redis: any = null;
+  private _redisReady = false;
+
+  // In-memory size tracking (Redis doesn't expose key count efficiently)
+  private _size = 0;
+
+  constructor(
+    redisUrl: string,
+    maxSize: number,
+    type: 'nodes' | 'edges' = 'nodes',
+    ttlMs?: number
+  ) {
+    this._redisUrl = redisUrl;
+    this._maxSize = maxSize;
+    this._type = type;
+    this._ttlMs = ttlMs;
+  }
+
+  // ─── Lazy initialization ───────────────────────────────────────────────────
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private async _ensureRedis(): Promise<any> {
+    if (this._redis && this._redisReady) {
+      return this._redis;
+    }
+
+    // Dynamically import ioredis (peer dependency) using require to avoid
+    // TypeScript module resolution issues with optional peer dependencies
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const Redis = require('ioredis');
+    this._redis = new Redis(this._redisUrl);
+
+    // Wait for connection
+    await new Promise<void>((resolve, reject) => {
+      if (!this._redis) return reject(new Error('Redis client not initialized'));
+
+      this._redis.once('ready', () => {
+        this._redisReady = true;
+        resolve();
+      });
+
+      this._redis.once('error', (err: Error) => {
+        reject(err);
+      });
+    });
+
+    return this._redis;
+  }
+
+  // ─── Key helpers ────────────────────────────────────────────────────────────
+
+  private _key(graphId: string, id: string): string {
+    return `grafio:${this._type}:${graphId}:${id}`;
+  }
+
+  private _metaKey(): string {
+    return `grafio:meta:graphids`;
+  }
+
+  // ─── ICacheProvider implementation ─────────────────────────────────────────
+
+  async get(id: string): Promise<T | undefined> {
+    const redis = await this._ensureRedis();
+    const raw = await redis.get(id);
+
+    if (!raw) return undefined;
+
+    try {
+      return JSON.parse(raw) as T;
+    } catch {
+      return undefined;
+    }
+  }
+
+  async set(id: string, value: T): Promise<void> {
+    const redis = await this._ensureRedis();
+    const serialized = JSON.stringify(value);
+
+    // Check if this is a new key (for size tracking)
+    const exists = await redis.exists(id);
+    if (!exists) {
+      // Enforce capacity
+      if (this._size >= this._maxSize) {
+        await this._evictOne();
+      }
+      this._size++;
+    }
+
+    // Set the value with optional TTL
+    if (this._ttlMs) {
+      await redis.set(id, serialized, 'PX', this._ttlMs);
+    } else {
+      await redis.set(id, serialized);
+    }
+
+    // Update graphId LRU score
+    const graphId = this._extractGraphId(id);
+    if (graphId) {
+      await redis.zadd(this._metaKey(), Date.now(), graphId);
+    }
+  }
+
+  async has(id: string): Promise<boolean> {
+    const redis = await this._ensureRedis();
+    const result = await redis.exists(id);
+    return result === 1;
+  }
+
+  async invalidate(id: string): Promise<void> {
+    const redis = await this._ensureRedis();
+    const existed = await redis.exists(id);
+
+    await redis.del(id);
+
+    if (existed) {
+      this._size = Math.max(0, this._size - 1);
+    }
+  }
+
+  async invalidateAll(): Promise<void> {
+    const redis = await this._ensureRedis();
+
+    // Delete all keys matching our pattern
+    let cursor = '0';
+    do {
+      const [nextCursor, keys] = await redis.scan(cursor, 'MATCH', `grafio:${this._type}:*`, 'COUNT', 100);
+      cursor = nextCursor;
+
+      if (keys.length > 0) {
+        await redis.del(...keys);
+      }
+    } while (cursor !== '0');
+
+    this._size = 0;
+  }
+
+  async size(): Promise<number> {
+    return this._size;
+  }
+
+  maxSize(): number {
+    return this._maxSize;
+  }
+
+  // ─── Private helpers ───────────────────────────────────────────────────────
+
+  /**
+   * Extracts the graphId from a cache key.
+   * Key format: `grafio:{type}:{graphId}:{id}`
+   */
+  private _extractGraphId(key: string): string | null {
+    const parts = key.split(':');
+    // parts[0] = 'grafio', parts[1] = type, parts[2] = graphId
+    if (parts.length >= 3 && parts[0] === 'grafio') {
+      return parts[2];
+    }
+    return null;
+  }
+
+  /**
+   * Evicts the least-recently-used graphId by finding the one with the oldest
+   * lastAccessed timestamp in the sorted set, then deleting all its keys.
+   */
+  private async _evictOne(): Promise<void> {
+    const redis = await this._ensureRedis();
+
+    // Get the graphId with the oldest lastAccessed (lowest score)
+    const [oldestGraphId] = await redis.zrange(this._metaKey(), 0, 0, 'WITHSCORES');
+
+    if (!oldestGraphId) return;
+
+    // Delete all keys for this graphId
+    let cursor = '0';
+    const pattern = `grafio:${this._type}:${oldestGraphId}:*`;
+
+    do {
+      const [nextCursor, keys] = await redis.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+      cursor = nextCursor;
+
+      if (keys.length > 0) {
+        await redis.del(...keys);
+        this._size = Math.max(0, this._size - keys.length);
+      }
+    } while (cursor !== '0');
+
+    // Remove from LRU tracking
+    await redis.zrem(this._metaKey(), oldestGraphId);
+  }
+}

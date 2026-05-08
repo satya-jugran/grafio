@@ -55,7 +55,7 @@ export class GraphIndex {
   /** Returns all edges in the graph. */
   async getEdges(transaction?: GraphTransaction): Promise<readonly Edge[]> {
     const handle = transaction?._getHandle();
-    const data = await this._store.getAllEdges(handle);
+    const data = await this._store.getAllEdges(undefined, handle);
     return data.map(d => new Edge(d.sourceId, d.targetId, d.type, d.properties, d.id));
   }
 
