@@ -1,7 +1,8 @@
 import type { NodeData, EdgeData } from '../../types';
 import type { CacheConfig } from './CacheConfig';
-import type { ICacheProvider } from './ICacheProvider';
 import { InMemoryCache } from './InMemoryCache';
+import { RedisCache } from './RedisCache';
+import type { ICacheProvider } from './ICacheProvider';
 
 /**
  * Metadata tracked per graphId in the registry.
@@ -74,22 +75,29 @@ export class CacheManager {
 
     // Create the appropriate cache backend
     if (config.cacheStore === 'redis') {
-      // RedisCache will be implemented in Phase 4
-      // For now, fall back to in-memory with a warning
-      console.warn(
-        '[CacheManager] Redis cache store requested but not yet implemented. ' +
-        'Falling back to in-memory. Set cacheStore to "in-memory" to suppress this warning.'
+      if (!config.redisUrl) {
+        throw new Error('[CacheManager] redisUrl is required when cacheStore is "redis"');
+      }
+      this._nodeCache = new RedisCache<NodeData>(
+        config.redisUrl,
+        config.maxNodesCount,
+        'nodes'
+      );
+      this._edgeCache = new RedisCache<EdgeData>(
+        config.redisUrl,
+        config.maxEdgesCount,
+        'edges'
+      );
+    } else {
+      this._nodeCache = new InMemoryCache<NodeData>(
+        config.maxNodesCount,
+        config.evictionStrategy
+      );
+      this._edgeCache = new InMemoryCache<EdgeData>(
+        config.maxEdgesCount,
+        config.evictionStrategy
       );
     }
-
-    this._nodeCache = new InMemoryCache<NodeData>(
-      config.maxNodesCount,
-      config.evictionStrategy
-    );
-    this._edgeCache = new InMemoryCache<EdgeData>(
-      config.maxEdgesCount,
-      config.evictionStrategy
-    );
   }
 
   // ─── Node operations ────────────────────────────────────────────────────────
