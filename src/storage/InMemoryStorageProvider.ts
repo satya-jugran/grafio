@@ -173,25 +173,28 @@ export class InMemoryStorageProvider implements IStorageProvider {
 
   async insertNode(node: NodeData, transaction?: ITransactionHandle): Promise<void> {
     const now = Date.now();
+    // Clone first to avoid mutating the caller's object
+    const nodeToInsert = deepClone(node);
+    
     // Set createdOn and updatedOn at node level if not already set
-    if (node.createdOn === undefined) {
-      node.createdOn = now;
+    if (nodeToInsert.createdOn === undefined) {
+      nodeToInsert.createdOn = now;
     }
-    if (node.updatedOn === undefined) {
-      node.updatedOn = now;
+    if (nodeToInsert.updatedOn === undefined) {
+      nodeToInsert.updatedOn = now;
     }
 
     const overlay = this._getOverlay(transaction?.id);
 
     if (overlay) {
       // Transaction active: write to overlay
-      overlay.nodes.set(node.id, deepClone(node));
+      overlay.nodes.set(nodeToInsert.id, nodeToInsert);
       // Update overlay indexes
-      this._overlayAddToIndex(overlay.nodesByType, node.type, node.id);
-      this._overlayIndexNodeProperties(overlay, node);
+      this._overlayAddToIndex(overlay.nodesByType, nodeToInsert.type, nodeToInsert.id);
+      this._overlayIndexNodeProperties(overlay, nodeToInsert);
     } else {
       // No transaction: modify live state directly
-      this._insertNodeLive(node, false);
+      this._insertNodeLive(nodeToInsert, true);
     }
   }
 
@@ -490,27 +493,30 @@ export class InMemoryStorageProvider implements IStorageProvider {
 
   async insertEdge(edge: EdgeData, transaction?: ITransactionHandle): Promise<void> {
     const now = Date.now();
+    // Clone first to avoid mutating the caller's object
+    const edgeToInsert = deepClone(edge);
+    
     // Set createdOn and updatedOn at edge level if not already set
-    if (edge.createdOn === undefined) {
-      edge.createdOn = now;
+    if (edgeToInsert.createdOn === undefined) {
+      edgeToInsert.createdOn = now;
     }
-    if (edge.updatedOn === undefined) {
-      edge.updatedOn = now;
+    if (edgeToInsert.updatedOn === undefined) {
+      edgeToInsert.updatedOn = now;
     }
 
     const overlay = this._getOverlay(transaction?.id);
 
     if (overlay) {
       // Transaction active: write to overlay
-      overlay.edges.set(edge.id, deepClone(edge));
+      overlay.edges.set(edgeToInsert.id, edgeToInsert);
       // Update overlay indexes
-      this._overlayAddToIndex(overlay.edgesByType, edge.type, edge.id);
-      this._overlayAddToIndex(overlay.edgesBySource, edge.sourceId, edge.id);
-      this._overlayAddToIndex(overlay.edgesByTarget, edge.targetId, edge.id);
-      this._overlayIndexEdgeProperties(overlay, edge);
+      this._overlayAddToIndex(overlay.edgesByType, edgeToInsert.type, edgeToInsert.id);
+      this._overlayAddToIndex(overlay.edgesBySource, edgeToInsert.sourceId, edgeToInsert.id);
+      this._overlayAddToIndex(overlay.edgesByTarget, edgeToInsert.targetId, edgeToInsert.id);
+      this._overlayIndexEdgeProperties(overlay, edgeToInsert);
     } else {
       // No transaction: modify live state directly
-      this._insertEdgeLive(edge, false);
+      this._insertEdgeLive(edgeToInsert, true);
     }
   }
 
