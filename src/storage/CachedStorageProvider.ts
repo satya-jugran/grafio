@@ -74,6 +74,9 @@ export class CachedStorageProvider implements IStorageProvider {
   async insertNode(node: NodeData, transaction?: ITransactionHandle): Promise<void> {
     await this._underlying.insertNode(node, transaction);
 
+    // Skip cache population inside transactions — uncommitted data must not be cached
+    if (transaction) return;
+
     // Populate cache if budget allows (inserts are write-through)
     const stats = await this._cacheManager.getStats();
     if (stats.totalNodes < this._config.maxNodesCount) {
@@ -83,6 +86,7 @@ export class CachedStorageProvider implements IStorageProvider {
 
   async deleteNode(id: string, transaction?: ITransactionHandle): Promise<void> {
     await this._underlying.deleteNode(id, transaction);
+    // Invalidate cache regardless of transaction (it's already deleted from storage)
     await this._cacheManager.invalidateNode(this._graphId, id);
   }
 
@@ -154,6 +158,9 @@ export class CachedStorageProvider implements IStorageProvider {
   async insertEdge(edge: EdgeData, transaction?: ITransactionHandle): Promise<void> {
     await this._underlying.insertEdge(edge, transaction);
 
+    // Skip cache population inside transactions — uncommitted data must not be cached
+    if (transaction) return;
+
     const stats = await this._cacheManager.getStats();
     if (stats.totalEdges < this._config.maxEdgesCount) {
       await this._cacheManager.setEdge(this._graphId, edge.id, edge);
@@ -162,6 +169,7 @@ export class CachedStorageProvider implements IStorageProvider {
 
   async deleteEdge(id: string, transaction?: ITransactionHandle): Promise<void> {
     await this._underlying.deleteEdge(id, transaction);
+    // Invalidate cache regardless of transaction (it's already deleted from storage)
     await this._cacheManager.invalidateEdge(this._graphId, id);
   }
 
