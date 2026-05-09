@@ -1,6 +1,6 @@
 {
   "name": "grafio",
-  "version": "7.0.0",
+  "version": "6.1.0",
   "description": "A graph database with pluggable storage architecture. Supports multiple isolated graphs via graphId partitioning. Ships with a zero-dependency in-memory provider. Includes BFS/DFS traversal, type/property filtering, topological sort, DAG detection, transaction support, and Mermaid export.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
