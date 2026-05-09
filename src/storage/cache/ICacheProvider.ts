@@ -61,4 +61,19 @@ export interface ICacheProvider<T> {
    * Returns the maximum number of entries this cache can hold.
    */
   maxSize(): number;
+
+  /**
+   * Returns all cached values whose keys start with the given prefix.
+   * @param prefix - The prefix to match (e.g., "graph-a:" matches "graph-a:node-1")
+   * @param limit - Optional maximum number of items to return
+   * @returns Array of cached values
+   */
+  getAll(prefix: string, limit?: number): Promise<T[]>;
+
+  /**
+   * Returns the count of entries whose keys start with the given prefix.
+   * @param prefix - The prefix to match
+   * @returns Number of matching entries
+   */
+  count(prefix: string): Promise<number>;
 }

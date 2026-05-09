@@ -168,6 +168,42 @@ export class InMemoryStorageProvider implements IStorageProvider {
   }
 
   // ---------------------------------------------------------------------------
+  // Count queries
+  // ---------------------------------------------------------------------------
+
+  async getTotalNodeCount(transaction?: ITransactionHandle): Promise<number> {
+    const overlay = this._getOverlay(transaction?.id);
+    let count = this._nodes.size;
+
+    if (overlay) {
+      // Add overlay nodes that aren't overriding live nodes
+      for (const [id, node] of overlay.nodes) {
+        if (node && !this._nodes.has(id)) {
+          count++;
+        }
+      }
+    }
+
+    return count;
+  }
+
+  async getTotalEdgeCount(transaction?: ITransactionHandle): Promise<number> {
+    const overlay = this._getOverlay(transaction?.id);
+    let count = this._edges.size;
+
+    if (overlay) {
+      // Add overlay edges that aren't overriding live edges
+      for (const [id, edge] of overlay.edges) {
+        if (edge && !this._edges.has(id)) {
+          count++;
+        }
+      }
+    }
+
+    return count;
+  }
+
+  // ---------------------------------------------------------------------------
   // Node mutations
   // ---------------------------------------------------------------------------
 

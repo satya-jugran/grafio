@@ -69,6 +69,14 @@ export class CachedStorageProvider implements IStorageProvider {
     await this._cacheManager.invalidateAllForGraph(this._graphId);
   }
 
+  async getTotalNodeCount(transaction?: ITransactionHandle): Promise<number> {
+    return this._underlying.getTotalNodeCount(transaction);
+  }
+
+  async getTotalEdgeCount(transaction?: ITransactionHandle): Promise<number> {
+    return this._underlying.getTotalEdgeCount(transaction);
+  }
+
   // ─── Node mutations ─────────────────────────────────────────────────────────
 
   async insertNode(node: NodeData, transaction?: ITransactionHandle): Promise<void> {
@@ -131,7 +139,34 @@ export class CachedStorageProvider implements IStorageProvider {
     orderBy?: IOrderBy,
     transaction?: ITransactionHandle
   ): Promise<NodeData[]> {
-    // Collection queries are NOT cached — delegate directly
+    // Bypass cache in transactions — must read uncommitted state
+    if (transaction) {
+      return this._underlying.getAllNodes(limit, orderBy, transaction);
+    }
+
+    // Case 1: No orderBy → try cache for any cached items
+    if (orderBy === undefined) {
+      const cachedCount = await this._cacheManager.totalCount(this._graphId, 'node');
+      if (cachedCount > 0) {
+        if (limit !== undefined && limit <= cachedCount) {
+          return this._cacheManager.getAllNodes(this._graphId, limit);
+        } else {
+          return this._cacheManager.getAllNodes(this._graphId);
+        }
+      }
+    }
+    // Case 2: Has orderBy → only use cache if complete
+    else {
+      const cachedCount = await this._cacheManager.totalCount(this._graphId, 'node');
+      const totalCount = await this._underlying.getTotalNodeCount();
+      if (cachedCount === totalCount && cachedCount > 0) {
+        let nodes = await this._cacheManager.getAllNodes(this._graphId);
+        nodes = this._sortNodes(nodes, orderBy);
+        return limit ? nodes.slice(0, limit) : nodes;
+      }
+    }
+
+    // Fall through to underlying provider
     return this._underlying.getAllNodes(limit, orderBy, transaction);
   }
 
@@ -207,6 +242,34 @@ export class CachedStorageProvider implements IStorageProvider {
   }
 
   async getAllEdges(limit?: number, orderBy?: IOrderBy, transaction?: ITransactionHandle): Promise<EdgeData[]> {
+    // Bypass cache in transactions — must read uncommitted state
+    if (transaction) {
+      return this._underlying.getAllEdges(limit, orderBy, transaction);
+    }
+
+    // Case 1: No orderBy → try cache for any cached items
+    if (orderBy === undefined) {
+      const cachedCount = await this._cacheManager.totalCount(this._graphId, 'edge');
+      if (cachedCount > 0) {
+        if (limit !== undefined && limit <= cachedCount) {
+          return this._cacheManager.getAllEdges(this._graphId, limit);
+        } else {
+          return this._cacheManager.getAllEdges(this._graphId);
+        }
+      }
+    }
+    // Case 2: Has orderBy → only use cache if complete
+    else {
+      const cachedCount = await this._cacheManager.totalCount(this._graphId, 'edge');
+      const totalCount = await this._underlying.getTotalEdgeCount();
+      if (cachedCount === totalCount && cachedCount > 0) {
+        let edges = await this._cacheManager.getAllEdges(this._graphId);
+        edges = this._sortEdges(edges, orderBy);
+        return limit ? edges.slice(0, limit) : edges;
+      }
+    }
+
+    // Fall through to underlying provider
     return this._underlying.getAllEdges(limit, orderBy, transaction);
   }
 
@@ -409,5 +472,27 @@ export class CachedStorageProvider implements IStorageProvider {
     } else {
       await this._cacheManager.invalidateEdge(this._graphId, id);
     }
+  }
+
+  private _sortNodes(nodes: NodeData[], orderBy: IOrderBy): NodeData[] {
+    return nodes.sort((a, b) => {
+      const aVal = a[orderBy.field];
+      const bVal = b[orderBy.field];
+      if (aVal === undefined && bVal === undefined) return 0;
+      if (aVal === undefined) return orderBy.direction === 'asc' ? 1 : -1;
+      if (bVal === undefined) return orderBy.direction === 'asc' ? -1 : 1;
+      return orderBy.direction === 'asc' ? aVal - bVal : bVal - aVal;
+    });
+  }
+
+  private _sortEdges(edges: EdgeData[], orderBy: IOrderBy): EdgeData[] {
+    return edges.sort((a, b) => {
+      const aVal = a[orderBy.field];
+      const bVal = b[orderBy.field];
+      if (aVal === undefined && bVal === undefined) return 0;
+      if (aVal === undefined) return orderBy.direction === 'asc' ? 1 : -1;
+      if (bVal === undefined) return orderBy.direction === 'asc' ? -1 : 1;
+      return orderBy.direction === 'asc' ? aVal - bVal : bVal - aVal;
+    });
   }
 }

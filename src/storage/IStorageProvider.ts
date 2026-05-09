@@ -107,6 +107,13 @@ export interface IStorageProvider {
    */
   getNodesByProperty(key: string, value: unknown, nodeType?: string, transaction?: ITransactionHandle): Promise<NodeData[]>;
 
+  /**
+   * Returns the total number of nodes in storage.
+   * Used by CachedStorageProvider to determine cache completeness.
+   * @param transaction - Optional transaction handle for transactional storage providers
+   */
+  getTotalNodeCount(transaction?: ITransactionHandle): Promise<number>;
+
   // ---------------------------------------------------------------------------
   // Edge mutations
   // ---------------------------------------------------------------------------
@@ -161,6 +168,13 @@ export interface IStorageProvider {
    * @param transaction - Optional transaction handle for transactional storage providers
    */
   getEdgesByProperty(key: string, value: unknown, edgeType?: string, transaction?: ITransactionHandle): Promise<EdgeData[]>;
+
+  /**
+   * Returns the total number of edges in storage.
+   * Used by CachedStorageProvider to determine cache completeness.
+   * @param transaction - Optional transaction handle for transactional storage providers
+   */
+  getTotalEdgeCount(transaction?: ITransactionHandle): Promise<number>;
 
   /**
    * Returns all edges whose `sourceId` equals the given node id.

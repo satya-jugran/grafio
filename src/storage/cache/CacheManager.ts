@@ -281,6 +281,40 @@ export class CacheManager {
     };
   }
 
+  /**
+   * Returns all cached nodes for a specific graphId.
+   * @param graphId - The graph partition key
+   * @param limit - Optional maximum number of nodes to return
+   */
+  async getAllNodes(graphId: string, limit?: number): Promise<NodeData[]> {
+    const prefix = `${graphId}:`;
+    return this._nodeCache.getAll(prefix, limit);
+  }
+
+  /**
+   * Returns all cached edges for a specific graphId.
+   * @param graphId - The graph partition key
+   * @param limit - Optional maximum number of edges to return
+   */
+  async getAllEdges(graphId: string, limit?: number): Promise<EdgeData[]> {
+    const prefix = `${graphId}:`;
+    return this._edgeCache.getAll(prefix, limit);
+  }
+
+  /**
+   * Returns the count of cached nodes or edges for a specific graphId.
+   * @param graphId - The graph partition key
+   * @param type - Either 'node' or 'edge'
+   */
+  async totalCount(graphId: string, type: 'node' | 'edge'): Promise<number> {
+    const prefix = `${graphId}:`;
+    if (type === 'node') {
+      return this._nodeCache.count(prefix);
+    } else {
+      return this._edgeCache.count(prefix);
+    }
+  }
+
   // ─── Private helpers ───────────────────────────────────────────────────────
 
   private _nodeKey(graphId: string, nodeId: string): string {

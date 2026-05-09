@@ -143,6 +143,32 @@ export class InMemoryCache<T> implements ICacheProvider<T> {
     return this._maxSize;
   }
 
+  async getAll(prefix: string, limit?: number): Promise<T[]> {
+    const results: T[] = [];
+    let count = 0;
+    const limitNum = limit ?? Infinity;
+
+    for (const [, node] of this._map) {
+      if (count >= limitNum) break;
+      if (node.key.startsWith(prefix)) {
+        results.push(node.value);
+        count++;
+      }
+    }
+
+    return results;
+  }
+
+  async count(prefix: string): Promise<number> {
+    let count = 0;
+    for (const [, node] of this._map) {
+      if (node.key.startsWith(prefix)) {
+        count++;
+      }
+    }
+    return count;
+  }
+
   // ─── Private helpers ───────────────────────────────────────────────────────
 
   /**
