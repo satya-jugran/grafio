@@ -187,6 +187,43 @@ describe('InMemoryCache', () => {
     });
   });
 
+  describe('invalidateByPrefix()', () => {
+    it('should remove only keys with matching prefix', async () => {
+      const cache = new InMemoryCache<string>(10);
+      await cache.set('graph-a:node-1', 'value-1');
+      await cache.set('graph-a:node-2', 'value-2');
+      await cache.set('graph-b:node-1', 'value-3');
+
+      await cache.invalidateByPrefix('graph-a:');
+
+      expect(await cache.size()).toBe(1);
+      expect(await cache.has('graph-a:node-1')).toBe(false);
+      expect(await cache.has('graph-a:node-2')).toBe(false);
+      expect(await cache.has('graph-b:node-1')).toBe(true);
+    });
+
+    it('should be safe when no keys match prefix', async () => {
+      const cache = new InMemoryCache<string>(3);
+      await cache.set('a', '1');
+      await cache.set('b', '2');
+
+      await cache.invalidateByPrefix('nonexistent:');
+
+      expect(await cache.size()).toBe(2);
+    });
+
+    it('should handle empty prefix (matches all keys)', async () => {
+      const cache = new InMemoryCache<string>(10);
+      await cache.set('a:node-1', 'value-1');
+      await cache.set('b:node-1', 'value-2');
+
+      // Empty prefix should match all keys
+      await cache.invalidateByPrefix('');
+
+      expect(await cache.size()).toBe(0);
+    });
+  });
+
   describe('constructor validation', () => {
     it('should accept maxSize of 1', async () => {
       const cache = new InMemoryCache<string>(1);

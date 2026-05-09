@@ -318,16 +318,16 @@ export class CacheManager {
    * This is expensive (O(n)) but correct for bulk invalidation.
    */
   private async _invalidateNodesByPrefix(graphId: string): Promise<void> {
-    // Since InMemoryCache doesn't support prefix iteration, we track keys
-    // For now, invalidateAll is the primary bulk operation and this is a fallback
-    await this._nodeCache.invalidateAll();
+    // Use prefix-based invalidation to only evict keys for this graphId
+    await this._nodeCache.invalidateByPrefix(graphId);
   }
 
   /**
    * Evicts all edges belonging to a specific graphId from the edge cache.
    */
   private async _invalidateEdgesByPrefix(graphId: string): Promise<void> {
-    await this._edgeCache.invalidateAll();
+    // Use prefix-based invalidation to only evict keys for this graphId
+    await this._edgeCache.invalidateByPrefix(graphId);
   }
 
   /**

@@ -47,6 +47,12 @@ export interface ICacheProvider<T> {
   invalidateAll(): Promise<void>;
 
   /**
+   * Removes all entries whose keys start with the given prefix.
+   * @param prefix - The prefix to match (e.g., "graph-a:" matches "graph-a:node-1")
+   */
+  invalidateByPrefix(prefix: string): Promise<void>;
+
+  /**
    * Returns the current number of entries in the cache.
    */
   size(): Promise<number>;

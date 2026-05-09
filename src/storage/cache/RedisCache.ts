@@ -161,6 +161,39 @@ export class RedisCache<T> implements ICacheProvider<T> {
     this._size = 0;
   }
 
+  async invalidateByPrefix(prefix: string): Promise<void> {
+    const redis = await this._ensureRedis();
+
+    // Convert CacheManager prefix (e.g., "graph-a:") to Redis pattern
+    // Redis key format: grafio:{type}:{graphId}:{id}
+    // CacheManager passes prefix like "graph-a:" which is the graphId portion
+    // We need to match "grafio:{type}:graph-a:*"
+    let pattern: string;
+    if (prefix.includes('grafio:')) {
+      // Already a full Redis key pattern
+      pattern = prefix + '*';
+    } else {
+      // Assume it's just the graphId portion
+      // Remove trailing colon if present
+      const cleanPrefix = prefix.endsWith(':') ? prefix.slice(0, -1) : prefix;
+      pattern = `grafio:${this._type}:${cleanPrefix}:*`;
+    }
+
+    let cursor = '0';
+    let deletedCount = 0;
+    do {
+      const [nextCursor, keys] = await redis.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+      cursor = nextCursor;
+
+      if (keys.length > 0) {
+        await redis.del(...keys);
+        deletedCount += keys.length;
+      }
+    } while (cursor !== '0');
+
+    this._size = Math.max(0, this._size - deletedCount);
+  }
+
   async size(): Promise<number> {
     return this._size;
   }

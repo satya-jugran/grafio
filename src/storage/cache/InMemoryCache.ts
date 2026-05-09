@@ -116,6 +116,25 @@ export class InMemoryCache<T> implements ICacheProvider<T> {
     this._lfuCounts.clear();
   }
 
+  async invalidateByPrefix(prefix: string): Promise<void> {
+    // Collect keys to delete first to avoid modifying map during iteration
+    const keysToDelete: string[] = [];
+    for (const key of this._map.keys()) {
+      if (key.startsWith(prefix)) {
+        keysToDelete.push(key);
+      }
+    }
+    // Remove each matching entry
+    for (const key of keysToDelete) {
+      const node = this._map.get(key);
+      if (node) {
+        this._removeNode(node);
+      }
+      this._map.delete(key);
+      this._lfuCounts.delete(key);
+    }
+  }
+
   async size(): Promise<number> {
     return this._map.size;
   }
