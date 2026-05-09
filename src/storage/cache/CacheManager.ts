@@ -130,8 +130,9 @@ export class CacheManager {
    * @param node - The NodeData to cache
    */
   async setNode(graphId: string, nodeId: string, node: NodeData): Promise<void> {
-    // Check TTL expiry for this graphId
-    await this._evictExpiredGraphId(graphId);
+    // Sweep ALL expired graphIds before any writes — this ensures stale entries
+    // are cleaned up even when the cache is not at capacity yet.
+    await this._evictExpiredGraphIds();
 
     // Enforce global budget
     const nodeCacheSize = await this._nodeCache.size();
@@ -196,8 +197,9 @@ export class CacheManager {
    * @param edge - The EdgeData to cache
    */
   async setEdge(graphId: string, edgeId: string, edge: EdgeData): Promise<void> {
-    // Check TTL expiry for this graphId
-    await this._evictExpiredGraphId(graphId);
+    // Sweep ALL expired graphIds before any writes — this ensures stale entries
+    // are cleaned up even when the cache is not at capacity yet.
+    await this._evictExpiredGraphIds();
 
     // Enforce global budget
     const edgeCacheSize = await this._edgeCache.size();
@@ -412,9 +414,27 @@ export class CacheManager {
       await this._invalidateEdgesByPrefix(graphId);
       meta.cachedNodeCount = 0;
       meta.cachedEdgeCount = 0;
-      meta.expiresAt = this._config.graphIdTtlMs
-        ? Date.now() + this._config.graphIdTtlMs
-        : undefined;
+      // Keep expired — do not reset expiresAt. This prevents the bug where
+      // a re-registered graphId would get a fresh TTL instead of staying expired.
+      // The graphId will only get a new expiresAt when explicitly re-registered
+      // via _registerGraphId (called from setNode/setEdge for new entries).
+    }
+  }
+
+  /**
+   * Evicts all expired graphIds from the registry.
+   * Called during global budget eviction to sweep stale partitions.
+   */
+  private async _evictExpiredGraphIds(): Promise<void> {
+    const now = Date.now();
+    for (const [graphId, meta] of this._registry) {
+      if (meta.expiresAt && now > meta.expiresAt) {
+        this._evictionCount++;
+        await this._invalidateNodesByPrefix(graphId);
+        await this._invalidateEdgesByPrefix(graphId);
+        meta.cachedNodeCount = 0;
+        meta.cachedEdgeCount = 0;
+      }
     }
   }
 }

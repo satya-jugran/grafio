@@ -577,7 +577,7 @@ npm install
 # Build TypeScript
 npm run build
 
-# Run tests (367 tests)
+# Run tests
 npm test
 ```
 
@@ -596,6 +596,8 @@ The test suite runs against the built-in `InMemoryStorageProvider` backend:
 - `tests/graph/Graph.clear.test.ts` — Graph clearing
 - `tests/graph/Graph.properties.test.ts` — Property CRUD and validation
 - `tests/graph/GraphToMermaid.test.ts` — Mermaid export
+- `tests/graph/Graph.index.test.ts` — Index operations
+- `tests/graph/Graph.transaction.test.ts` — Transaction support
 
 ### Integration Tests
 - `tests/EducationGraph.inmemory.test.ts` — Education graph via InMemory provider
@@ -603,9 +605,16 @@ The test suite runs against the built-in `InMemoryStorageProvider` backend:
 
 ### Storage Provider Tests
 - `tests/storage/InMemoryGraphFactory.test.ts` — In-memory factory tests
+- `tests/storage/InMemoryStorageProvider.test.ts` — In-memory storage provider unit tests
+- `tests/storage/CachedStorageProvider.test.ts` — Cached storage provider tests
 
 ### Cache Tests
 - `tests/storage/cache/InMemoryCache.test.ts` — In-memory cache unit tests
+- `tests/storage/cache/CacheManager.test.ts` — Cache manager tests
+- `tests/storage/cache/RedisCache.test.ts` — Redis cache tests
+
+### Manager Tests
+- `tests/GraphManager.test.ts` — Graph manager singleton tests
 
 ## License
 

@@ -124,7 +124,7 @@ describe('InMemoryCache', () => {
       await cache.get('c');
       await cache.get('c');
 
-      // 'a' has count=1 (only 1 get), should be evicted
+      // 'a' has count=2 (set + 1 get), lowest frequency, should be evicted
       await cache.set('d', '4');
 
       expect(await cache.has('a')).toBe(false);
