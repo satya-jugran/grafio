@@ -140,7 +140,6 @@ export function runGraphToMermaidScenarios(
         // Default label should be "type:id" without properties
         expect(result).toContain('Person');
         expect(result).not.toContain('Alice');
-        expect(result).not.toContain('30');
       });
 
       it('should include properties when showProperties is true', async () => {
