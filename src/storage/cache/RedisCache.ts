@@ -257,6 +257,51 @@ export class RedisCache<T> implements ICacheProvider<T> {
     return `grafio:${this._type}:${graphId}:*`;
   }
 
+  // ─── Adjacency index (for edge lookups by source/target) ──────────────────
+
+  /**
+   * Redis key for adjacency set.
+   * Format: grafio:adj:{direction}:{graphId}:{nodeId}
+   */
+  private _adjKey(graphId: string, direction: 'source' | 'target', nodeId: string): string {
+    return `grafio:adj:${direction}:${graphId}:${nodeId}`;
+  }
+
+  async addToAdjacencyIndex(graphId: string, direction: 'source' | 'target', nodeId: string, edgeId: string): Promise<void> {
+    const redis = await this._ensureRedis();
+    const key = this._adjKey(graphId, direction, nodeId);
+    await redis.sadd(key, edgeId);
+    if (this._ttlMs) {
+      await redis.pexpire(key, this._ttlMs);
+    }
+  }
+
+  async removeFromAdjacencyIndex(graphId: string, direction: 'source' | 'target', nodeId: string, edgeId: string): Promise<void> {
+    const redis = await this._ensureRedis();
+    const key = this._adjKey(graphId, direction, nodeId);
+    await redis.srem(key, edgeId);
+  }
+
+  async getEdgesByAdjacencyIndex(graphId: string, direction: 'source' | 'target', nodeId: string): Promise<string[]> {
+    const redis = await this._ensureRedis();
+    const key = this._adjKey(graphId, direction, nodeId);
+    return redis.smembers(key);
+  }
+
+  async invalidateAdjacencyIndex(graphId: string): Promise<void> {
+    const redis = await this._ensureRedis();
+    const pattern = `grafio:adj:*:${graphId}:*`;
+
+    let cursor = '0';
+    do {
+      const [nextCursor, keys] = await redis.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+      cursor = nextCursor;
+      if (keys.length > 0) {
+        await redis.del(...keys);
+      }
+    } while (cursor !== '0');
+  }
+
   // ─── Private helpers ───────────────────────────────────────────────────────
 
   /**

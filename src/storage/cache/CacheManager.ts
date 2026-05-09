@@ -246,6 +246,8 @@ export class CacheManager {
       // Evict all nodes by prefix (inefficient but correct for now)
       await this._invalidateNodesByPrefix(graphId);
       await this._invalidateEdgesByPrefix(graphId);
+      // Also invalidate adjacency index
+      await this._edgeCache.invalidateAdjacencyIndex(graphId);
       meta.cachedNodeCount = 0;
       meta.cachedEdgeCount = 0;
     }
@@ -313,6 +315,38 @@ export class CacheManager {
     } else {
       return this._edgeCache.count(prefix);
     }
+  }
+
+  // ─── Adjacency index ───────────────────────────────────────────────────────
+
+  /**
+   * Adds an edge to the adjacency index for a source or target node.
+   * Used for getEdgesBySource/getEdgesByTarget cache optimization.
+   */
+  async addEdgeToAdjacencyIndex(graphId: string, direction: 'source' | 'target', nodeId: string, edgeId: string): Promise<void> {
+    // Only edge cache needs adjacency index for now
+    await this._edgeCache.addToAdjacencyIndex(graphId, direction, nodeId, edgeId);
+  }
+
+  /**
+   * Removes an edge from the adjacency index.
+   */
+  async removeEdgeFromAdjacencyIndex(graphId: string, direction: 'source' | 'target', nodeId: string, edgeId: string): Promise<void> {
+    await this._edgeCache.removeFromAdjacencyIndex(graphId, direction, nodeId, edgeId);
+  }
+
+  /**
+   * Gets edge ids from the adjacency index for a source or target node.
+   */
+  async getEdgeIdsByAdjacencyIndex(graphId: string, direction: 'source' | 'target', nodeId: string): Promise<string[]> {
+    return this._edgeCache.getEdgesByAdjacencyIndex(graphId, direction, nodeId);
+  }
+
+  /**
+   * Removes all adjacency index entries for a graphId.
+   */
+  async invalidateAdjacencyIndex(graphId: string): Promise<void> {
+    await this._edgeCache.invalidateAdjacencyIndex(graphId);
   }
 
   // ─── Private helpers ───────────────────────────────────────────────────────

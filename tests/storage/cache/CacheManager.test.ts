@@ -391,4 +391,172 @@ describe('CacheManager', () => {
       expect(stats.hitRate).toBeCloseTo(0.666, 2);
     });
   });
+
+  describe('getAllNodes()', () => {
+    it('should return all nodes for a graphId', async () => {
+      const manager = new CacheManager(defaultConfig);
+      await manager.setNode('graph-a', 'node-1', { id: 'node-1', type: 'Test', properties: {} });
+      await manager.setNode('graph-a', 'node-2', { id: 'node-2', type: 'Test', properties: {} });
+      await manager.setNode('graph-b', 'node-3', { id: 'node-3', type: 'Test', properties: {} });
+
+      const nodes = await manager.getAllNodes('graph-a');
+
+      expect(nodes).toHaveLength(2);
+      expect(nodes.map(n => n.id).sort()).toEqual(['node-1', 'node-2']);
+    });
+
+    it('should return limited results when limit is specified', async () => {
+      const manager = new CacheManager(defaultConfig);
+      await manager.setNode('graph-a', 'node-1', { id: 'node-1', type: 'Test', properties: {} });
+      await manager.setNode('graph-a', 'node-2', { id: 'node-2', type: 'Test', properties: {} });
+      await manager.setNode('graph-a', 'node-3', { id: 'node-3', type: 'Test', properties: {} });
+
+      const nodes = await manager.getAllNodes('graph-a', 2);
+
+      expect(nodes).toHaveLength(2);
+    });
+
+    it('should return empty array when no nodes exist', async () => {
+      const manager = new CacheManager(defaultConfig);
+
+      const nodes = await manager.getAllNodes('nonexistent');
+
+      expect(nodes).toHaveLength(0);
+    });
+  });
+
+  describe('getAllEdges()', () => {
+    it('should return all edges for a graphId', async () => {
+      const manager = new CacheManager(defaultConfig);
+      await manager.setEdge('graph-a', 'edge-1', { id: 'edge-1', type: 'Test', sourceId: 'n1', targetId: 'n2', properties: {} });
+      await manager.setEdge('graph-a', 'edge-2', { id: 'edge-2', type: 'Test', sourceId: 'n3', targetId: 'n4', properties: {} });
+      await manager.setEdge('graph-b', 'edge-3', { id: 'edge-3', type: 'Test', sourceId: 'n5', targetId: 'n6', properties: {} });
+
+      const edges = await manager.getAllEdges('graph-a');
+
+      expect(edges).toHaveLength(2);
+      expect(edges.map(e => e.id).sort()).toEqual(['edge-1', 'edge-2']);
+    });
+
+    it('should return limited results when limit is specified', async () => {
+      const manager = new CacheManager(defaultConfig);
+      await manager.setEdge('graph-a', 'edge-1', { id: 'edge-1', type: 'Test', sourceId: 'n1', targetId: 'n2', properties: {} });
+      await manager.setEdge('graph-a', 'edge-2', { id: 'edge-2', type: 'Test', sourceId: 'n3', targetId: 'n4', properties: {} });
+
+      const edges = await manager.getAllEdges('graph-a', 1);
+
+      expect(edges).toHaveLength(1);
+    });
+
+    it('should return empty array when no edges exist', async () => {
+      const manager = new CacheManager(defaultConfig);
+
+      const edges = await manager.getAllEdges('nonexistent');
+
+      expect(edges).toHaveLength(0);
+    });
+  });
+
+  describe('totalCount()', () => {
+    it('should return correct node count', async () => {
+      const manager = new CacheManager(defaultConfig);
+      await manager.setNode('graph-a', 'node-1', { id: 'node-1', type: 'Test', properties: {} });
+      await manager.setNode('graph-a', 'node-2', { id: 'node-2', type: 'Test', properties: {} });
+
+      const count = await manager.totalCount('graph-a', 'node');
+
+      expect(count).toBe(2);
+    });
+
+    it('should return correct edge count', async () => {
+      const manager = new CacheManager(defaultConfig);
+      await manager.setEdge('graph-a', 'edge-1', { id: 'edge-1', type: 'Test', sourceId: 'n1', targetId: 'n2', properties: {} });
+      await manager.setEdge('graph-a', 'edge-2', { id: 'edge-2', type: 'Test', sourceId: 'n3', targetId: 'n4', properties: {} });
+
+      const count = await manager.totalCount('graph-a', 'edge');
+
+      expect(count).toBe(2);
+    });
+
+    it('should return 0 for nonexistent graphId', async () => {
+      const manager = new CacheManager(defaultConfig);
+
+      const nodeCount = await manager.totalCount('nonexistent', 'node');
+      const edgeCount = await manager.totalCount('nonexistent', 'edge');
+
+      expect(nodeCount).toBe(0);
+      expect(edgeCount).toBe(0);
+    });
+  });
+
+  describe('adjacency index operations', () => {
+    it('should add and retrieve edge IDs by source', async () => {
+      const manager = new CacheManager(defaultConfig);
+      await manager.addEdgeToAdjacencyIndex('graph-a', 'source', 'node-1', 'edge-1');
+      await manager.addEdgeToAdjacencyIndex('graph-a', 'source', 'node-1', 'edge-2');
+
+      const edgeIds = await manager.getEdgeIdsByAdjacencyIndex('graph-a', 'source', 'node-1');
+
+      expect(edgeIds).toHaveLength(2);
+      expect(edgeIds.sort()).toEqual(['edge-1', 'edge-2']);
+    });
+
+    it('should add and retrieve edge IDs by target', async () => {
+      const manager = new CacheManager(defaultConfig);
+      await manager.addEdgeToAdjacencyIndex('graph-a', 'target', 'node-2', 'edge-1');
+      await manager.addEdgeToAdjacencyIndex('graph-a', 'target', 'node-2', 'edge-3');
+
+      const edgeIds = await manager.getEdgeIdsByAdjacencyIndex('graph-a', 'target', 'node-2');
+
+      expect(edgeIds).toHaveLength(2);
+      expect(edgeIds.sort()).toEqual(['edge-1', 'edge-3']);
+    });
+
+    it('should remove edge from adjacency index', async () => {
+      const manager = new CacheManager(defaultConfig);
+      await manager.addEdgeToAdjacencyIndex('graph-a', 'source', 'node-1', 'edge-1');
+      await manager.addEdgeToAdjacencyIndex('graph-a', 'source', 'node-1', 'edge-2');
+
+      await manager.removeEdgeFromAdjacencyIndex('graph-a', 'source', 'node-1', 'edge-1');
+
+      const edgeIds = await manager.getEdgeIdsByAdjacencyIndex('graph-a', 'source', 'node-1');
+      expect(edgeIds).toHaveLength(1);
+      expect(edgeIds).toContain('edge-2');
+    });
+
+    it('should return empty array for non-existent adjacency', async () => {
+      const manager = new CacheManager(defaultConfig);
+
+      const edgeIds = await manager.getEdgeIdsByAdjacencyIndex('graph-a', 'source', 'nonexistent');
+
+      expect(edgeIds).toHaveLength(0);
+    });
+
+    it('should invalidate all adjacency entries for a graphId', async () => {
+      const manager = new CacheManager(defaultConfig);
+      await manager.addEdgeToAdjacencyIndex('graph-a', 'source', 'node-1', 'edge-1');
+      await manager.addEdgeToAdjacencyIndex('graph-a', 'target', 'node-2', 'edge-2');
+      await manager.addEdgeToAdjacencyIndex('graph-b', 'source', 'node-3', 'edge-3');
+
+      await manager.invalidateAdjacencyIndex('graph-a');
+
+      const edgeIdsA = await manager.getEdgeIdsByAdjacencyIndex('graph-a', 'source', 'node-1');
+      expect(edgeIdsA).toHaveLength(0);
+
+      // graph-b adjacency should remain
+      const edgeIdsB = await manager.getEdgeIdsByAdjacencyIndex('graph-b', 'source', 'node-3');
+      expect(edgeIdsB).toHaveLength(1);
+    });
+
+    it('should invalidate adjacency when invalidateAllForGraph is called', async () => {
+      const manager = new CacheManager(defaultConfig);
+      await manager.setEdge('graph-a', 'edge-1', { id: 'edge-1', type: 'Test', sourceId: 'node-1', targetId: 'node-2', properties: {} });
+      await manager.addEdgeToAdjacencyIndex('graph-a', 'source', 'node-1', 'edge-1');
+
+      await manager.invalidateAllForGraph('graph-a');
+
+      const edgeIds = await manager.getEdgeIdsByAdjacencyIndex('graph-a', 'source', 'node-1');
+      expect(edgeIds).toHaveLength(0);
+    });
+  });
 });

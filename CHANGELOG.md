@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.2.0] - 2026-05-09
+
+### ✨ New Features
+
+1. **Cache Optimization for getAllNodes/getAllEdges**
+   - Added `getTotalNodeCount()` and `getTotalEdgeCount()` to `IStorageProvider` interface
+   - Added `getAll(prefix, limit?)` and `count(prefix)` to `ICacheProvider` interface
+   - `CachedStorageProvider.getAllNodes()` and `getAllEdges()` now serve from cache when `orderBy` is undefined
+   - When `orderBy` is provided and cache is complete (`cachedCount === totalCount`), results are served from cache with in-memory sorting
+   - Sorting handles `undefined` fields: undefined sorts to END in ascending, to START in descending
+
+2. **Adjacency Index for Edge Lookups**
+   - Added adjacency index methods to `ICacheProvider` for O(1) edge lookups by source/target
+   - `InMemoryCache` uses `Map<string, Set<string>>` for adjacency tracking
+   - `RedisCache` uses Redis `SET` data structure for distributed adjacency index
+   - `CachedStorageProvider.getEdgesBySource()` and `getEdgesByTarget()` use adjacency index with individual `getEdge()` calls
+   - Adjacency index is populated during `warmCache()` and invalidated on `clear()`
+
+3. **Test Coverage Additions**
+   - 172 tests covering CachedStorageProvider, CacheManager, InMemoryCache, and RedisCache
+   - Tests for cache optimization branches (limit, sorting, undefined fields)
+   - Tests for adjacency index operations (add, remove, retrieve, invalidate)
+
 ## [6.1.0] - 2026-05-08
 
 ### ✨ New Features

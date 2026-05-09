@@ -42,6 +42,10 @@ export class InMemoryCache<T> implements ICacheProvider<T> {
   // LFU tracking: key → access count
   private readonly _lfuCounts: Map<string, number> = new Map();
 
+  // Adjacency index: graphId:nodeId → Set of edge ids
+  private readonly _adjBySource: Map<string, Set<string>> = new Map();
+  private readonly _adjByTarget: Map<string, Set<string>> = new Map();
+
   constructor(maxSize: number, strategy: EvictionStrategy = 'LRU') {
     if (maxSize <= 0) {
       throw new Error(`maxSize must be a positive integer, got: ${maxSize}`);
@@ -167,6 +171,50 @@ export class InMemoryCache<T> implements ICacheProvider<T> {
       }
     }
     return count;
+  }
+
+  // ─── Adjacency index (for edge lookups by source/target) ──────────────────
+
+  async addToAdjacencyIndex(graphId: string, direction: 'source' | 'target', nodeId: string, edgeId: string): Promise<void> {
+    const key = `${graphId}:${nodeId}`;
+    const index = direction === 'source' ? this._adjBySource : this._adjByTarget;
+    if (!index.has(key)) {
+      index.set(key, new Set());
+    }
+    index.get(key)!.add(edgeId);
+  }
+
+  async removeFromAdjacencyIndex(graphId: string, direction: 'source' | 'target', nodeId: string, edgeId: string): Promise<void> {
+    const key = `${graphId}:${nodeId}`;
+    const index = direction === 'source' ? this._adjBySource : this._adjByTarget;
+    const set = index.get(key);
+    if (set) {
+      set.delete(edgeId);
+      if (set.size === 0) {
+        index.delete(key);
+      }
+    }
+  }
+
+  async getEdgesByAdjacencyIndex(graphId: string, direction: 'source' | 'target', nodeId: string): Promise<string[]> {
+    const key = `${graphId}:${nodeId}`;
+    const index = direction === 'source' ? this._adjBySource : this._adjByTarget;
+    const set = index.get(key);
+    return set ? Array.from(set) : [];
+  }
+
+  async invalidateAdjacencyIndex(graphId: string): Promise<void> {
+    const prefix = `${graphId}:`;
+    for (const key of this._adjBySource.keys()) {
+      if (key.startsWith(prefix)) {
+        this._adjBySource.delete(key);
+      }
+    }
+    for (const key of this._adjByTarget.keys()) {
+      if (key.startsWith(prefix)) {
+        this._adjByTarget.delete(key);
+      }
+    }
   }
 
   // ─── Private helpers ───────────────────────────────────────────────────────

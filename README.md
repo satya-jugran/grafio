@@ -606,12 +606,12 @@ The test suite runs against the built-in `InMemoryStorageProvider` backend:
 ### Storage Provider Tests
 - `tests/storage/InMemoryGraphFactory.test.ts` — In-memory factory tests
 - `tests/storage/InMemoryStorageProvider.test.ts` — In-memory storage provider unit tests
-- `tests/storage/CachedStorageProvider.test.ts` — Cached storage provider tests
+- `tests/storage/CachedStorageProvider.test.ts` — Cached storage provider tests (cache optimization, adjacency index, sorting)
 
 ### Cache Tests
-- `tests/storage/cache/InMemoryCache.test.ts` — In-memory cache unit tests
-- `tests/storage/cache/CacheManager.test.ts` — Cache manager tests
-- `tests/storage/cache/RedisCache.test.ts` — Redis cache tests
+- `tests/storage/cache/InMemoryCache.test.ts` — In-memory cache unit tests (getAll, count, adjacency index)
+- `tests/storage/cache/CacheManager.test.ts` — Cache manager tests (adjacency index, totalCount)
+- `tests/storage/cache/RedisCache.test.ts` — Redis cache tests (getAll, count, adjacency index)
 
 ### Manager Tests
 - `tests/GraphManager.test.ts` — Graph manager singleton tests

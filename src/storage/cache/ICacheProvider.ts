@@ -76,4 +76,39 @@ export interface ICacheProvider<T> {
    * @returns Number of matching entries
    */
   count(prefix: string): Promise<number>;
+
+  // ─── Adjacency index (for edge lookups by source/target) ─────────────────
+
+  /**
+   * Adds an edge to the adjacency index for a source or target node.
+   * @param graphId - The graph partition key
+   * @param direction - Either 'source' or 'target'
+   * @param nodeId - The source or target node id
+   * @param edgeId - The edge id to associate
+   */
+  addToAdjacencyIndex(graphId: string, direction: 'source' | 'target', nodeId: string, edgeId: string): Promise<void>;
+
+  /**
+   * Removes an edge from the adjacency index.
+   * @param graphId - The graph partition key
+   * @param direction - Either 'source' or 'target'
+   * @param nodeId - The source or target node id
+   * @param edgeId - The edge id to remove
+   */
+  removeFromAdjacencyIndex(graphId: string, direction: 'source' | 'target', nodeId: string, edgeId: string): Promise<void>;
+
+  /**
+   * Gets all edge ids from the adjacency index for a source or target node.
+   * @param graphId - The graph partition key
+   * @param direction - Either 'source' or 'target'
+   * @param nodeId - The source or target node id
+   * @returns Array of edge ids
+   */
+  getEdgesByAdjacencyIndex(graphId: string, direction: 'source' | 'target', nodeId: string): Promise<string[]>;
+
+  /**
+   * Removes all adjacency index entries for a graphId.
+   * @param graphId - The graph partition key
+   */
+  invalidateAdjacencyIndex(graphId: string): Promise<void>;
 }

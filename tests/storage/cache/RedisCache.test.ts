@@ -229,6 +229,128 @@ describe('RedisCache', () => {
       const result2 = await cache.get('grafio:nodes:graph-y:node-1');
       expect(result2).toBeDefined();
     });
+  
+    describe('getAll', () => {
+      it('should return all values matching prefix', async () => {
+        const cache = createCache();
+  
+        // Use full Redis key format: grafio:{type}:{graphId}:{id}
+        await cache.set('grafio:nodes:graph-1:item-1', { id: 'item-1', name: 'One' } as any);
+        await cache.set('grafio:nodes:graph-1:item-2', { id: 'item-2', name: 'Two' } as any);
+        await cache.set('grafio:nodes:graph-2:item-1', { id: 'item-1', name: 'Other' } as any);
+  
+        const results = await cache.getAll('graph-1');
+        expect(results).toHaveLength(2);
+        expect(results.map((r: any) => r.id).sort()).toEqual(['item-1', 'item-2']);
+      });
+  
+      it('should return limited results when limit is specified', async () => {
+        const cache = createCache();
+  
+        await cache.set('grafio:nodes:graph-limit:item-1', { id: 'item-1' } as any);
+        await cache.set('grafio:nodes:graph-limit:item-2', { id: 'item-2' } as any);
+        await cache.set('grafio:nodes:graph-limit:item-3', { id: 'item-3' } as any);
+  
+        const results = await cache.getAll('graph-limit', 2);
+        expect(results).toHaveLength(2);
+      });
+  
+      it('should return empty array when no matches', async () => {
+        const cache = createCache();
+        const results = await cache.getAll('nonexistent');
+        expect(results).toHaveLength(0);
+      });
+    });
+  
+    describe('count', () => {
+      it('should return count of entries matching prefix', async () => {
+        const cache = createCache();
+  
+        await cache.set('grafio:nodes:graph-count:item-1', { id: 'item-1' } as any);
+        await cache.set('grafio:nodes:graph-count:item-2', { id: 'item-2' } as any);
+        await cache.set('grafio:nodes:graph-count:item-3', { id: 'item-3' } as any);
+        await cache.set('grafio:nodes:graph-other:item-1', { id: 'other-1' } as any);
+  
+        const count = await cache.count('graph-count');
+        expect(count).toBe(3);
+      });
+  
+      it('should return 0 when no entries match', async () => {
+        const cache = createCache();
+        const count = await cache.count('nonexistent');
+        expect(count).toBe(0);
+      });
+    });
+  
+    describe('adjacency index', () => {
+      it('should add and retrieve edges by source', async () => {
+        const cache = createCache();
+  
+        await cache.addToAdjacencyIndex('graph-1', 'source', 'node-A', 'edge-1');
+        await cache.addToAdjacencyIndex('graph-1', 'source', 'node-A', 'edge-2');
+        await cache.addToAdjacencyIndex('graph-1', 'source', 'node-B', 'edge-3');
+  
+        const edgesForA = await cache.getEdgesByAdjacencyIndex('graph-1', 'source', 'node-A');
+        expect(edgesForA).toHaveLength(2);
+        expect(edgesForA.sort()).toEqual(['edge-1', 'edge-2']);
+  
+        const edgesForB = await cache.getEdgesByAdjacencyIndex('graph-1', 'source', 'node-B');
+        expect(edgesForB).toHaveLength(1);
+        expect(edgesForB[0]).toBe('edge-3');
+      });
+  
+      it('should add and retrieve edges by target', async () => {
+        const cache = createCache();
+  
+        await cache.addToAdjacencyIndex('graph-1', 'target', 'node-X', 'edge-1');
+        await cache.addToAdjacencyIndex('graph-1', 'target', 'node-X', 'edge-2');
+        await cache.addToAdjacencyIndex('graph-1', 'target', 'node-Y', 'edge-3');
+  
+        const edgesForX = await cache.getEdgesByAdjacencyIndex('graph-1', 'target', 'node-X');
+        expect(edgesForX).toHaveLength(2);
+        expect(edgesForX.sort()).toEqual(['edge-1', 'edge-2']);
+      });
+  
+      it('should remove edge from adjacency index', async () => {
+        const cache = createCache();
+  
+        await cache.addToAdjacencyIndex('graph-1', 'source', 'node-A', 'edge-1');
+        await cache.addToAdjacencyIndex('graph-1', 'source', 'node-A', 'edge-2');
+  
+        await cache.removeFromAdjacencyIndex('graph-1', 'source', 'node-A', 'edge-1');
+  
+        const edges = await cache.getEdgesByAdjacencyIndex('graph-1', 'source', 'node-A');
+        expect(edges).toHaveLength(1);
+        expect(edges[0]).toBe('edge-2');
+      });
+  
+      it('should return empty array for non-existent adjacency', async () => {
+        const cache = createCache();
+  
+        const edges = await cache.getEdgesByAdjacencyIndex('graph-1', 'source', 'node-Z');
+        expect(edges).toHaveLength(0);
+      });
+  
+      it('should invalidate all adjacency entries for a graphId', async () => {
+        const cache = createCache();
+  
+        await cache.addToAdjacencyIndex('graph-1', 'source', 'node-A', 'edge-1');
+        await cache.addToAdjacencyIndex('graph-1', 'target', 'node-X', 'edge-2');
+        await cache.addToAdjacencyIndex('graph-1', 'source', 'node-B', 'edge-3');
+  
+        await cache.invalidateAdjacencyIndex('graph-1');
+  
+        const edgesBySourceA = await cache.getEdgesByAdjacencyIndex('graph-1', 'source', 'node-A');
+        const edgesByTargetX = await cache.getEdgesByAdjacencyIndex('graph-1', 'target', 'node-X');
+        expect(edgesBySourceA).toHaveLength(0);
+        expect(edgesByTargetX).toHaveLength(0);
+  
+        // Other graphs should not be affected
+        await cache.addToAdjacencyIndex('graph-2', 'source', 'node-A', 'edge-100');
+        const edgesGraph2 = await cache.getEdgesByAdjacencyIndex('graph-2', 'source', 'node-A');
+        expect(edgesGraph2).toHaveLength(1);
+      });
+    });
   });
 
   describe('size() / maxSize()', () => {
