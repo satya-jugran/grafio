@@ -1,6 +1,6 @@
 # grafio
 
-A graph database with **pluggable storage architecture**. Supports **multiple isolated graphs** via `graphId` partitioning. Ships with a zero-dependency in-memory provider. Includes BFS/DFS traversal, type/property filtering, topological sort, DAG detection, transaction support and Mermaid export.
+A graph database with **pluggable storage architecture**. Supports **multiple isolated graphs** via `graphId` partitioning. Ships with a zero-dependency in-memory provider. Includes BFS/DFS traversal, type/property filtering, topological sort, DAG detection, transaction support, cache management and Mermaid export.
 
 > **MongoDB Storage**: For MongoDB-backed persistence, see the separate [`grafio-mongo`](https://www.npmjs.com/package/grafio-mongo) package.
 
