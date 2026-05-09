@@ -140,8 +140,13 @@ export class CacheManager {
     }
 
     const key = this._nodeKey(graphId, nodeId);
+    const isNewEntry = !(await this._nodeCache.has(key));
     await this._nodeCache.set(key, node);
-    this._registerGraphId(graphId, 'node');
+    
+    // Only register new entries to keep per-graphId counts accurate
+    if (isNewEntry) {
+      this._registerGraphId(graphId, 'node');
+    }
     this._touchGraphId(graphId);
   }
 
@@ -201,8 +206,13 @@ export class CacheManager {
     }
 
     const key = this._edgeKey(graphId, edgeId);
+    const isNewEntry = !(await this._edgeCache.has(key));
     await this._edgeCache.set(key, edge);
-    this._registerGraphId(graphId, 'edge');
+    
+    // Only register new entries to keep per-graphId counts accurate
+    if (isNewEntry) {
+      this._registerGraphId(graphId, 'edge');
+    }
     this._touchGraphId(graphId);
   }
 
