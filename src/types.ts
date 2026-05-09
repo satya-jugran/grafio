@@ -4,6 +4,8 @@
 export interface NodeData {
   id: string;
   type: string;
+  createdOn?: number;
+  updatedOn?: number;
   properties: Record<string, unknown>;
 }
 
@@ -15,6 +17,8 @@ export interface EdgeData {
   sourceId: string;
   targetId: string;
   type: string;
+  createdOn?: number;
+  updatedOn?: number;
   properties: Record<string, unknown>;
 }
 

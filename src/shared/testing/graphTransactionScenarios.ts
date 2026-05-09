@@ -50,6 +50,10 @@ export function runGraphTransactionScenarios(
         expect(txn).toBeInstanceOf(GraphTransaction);
       });
 
+      it('should report supportsTransactions as true', async () => {
+        expect(graph.supportsTransactions()).toBe(true);
+      });
+
       it('should report as inactive before begin', async () => {
         const txn = graph.createTransaction();
         expect(txn.isActive()).toBe(false);

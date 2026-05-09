@@ -254,5 +254,20 @@ export function runGraphIndexScenarios(
         expect(results).toHaveLength(0);
       });
     });
+
+    describe('warmCache', () => {
+      it('should warm the cache without error', async () => {
+        await graph.addNode('Person', { name: 'Alice' });
+        await graph.addNode('Person', { name: 'Bob' });
+
+        // warmCache should not throw - it preloads cache if configured
+        await expect(graph.warmCache()).resolves.toBeUndefined();
+      });
+
+      it('should handle warmCache on empty graph', async () => {
+        // warmCache on empty graph should not throw
+        await expect(graph.warmCache()).resolves.toBeUndefined();
+      });
+    });
   });
 }

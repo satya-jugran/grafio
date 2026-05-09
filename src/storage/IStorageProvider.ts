@@ -12,6 +12,16 @@ export interface ITransactionHandle {
 }
 
 /**
+ * Ordering options for collection queries.
+ */
+export interface IOrderBy {
+  /** Field to order by */
+  field: 'createdOn' | 'updatedOn';
+  /** Sort direction */
+  direction: 'asc' | 'desc';
+}
+
+/**
  * Contract that every storage backend must fulfill.
  *
  * All methods are async (v5.0+) to support both synchronous in-memory providers
@@ -75,11 +85,12 @@ export interface IStorageProvider {
   getNode(id: string, transaction?: ITransactionHandle): Promise<NodeData | undefined>;
 
   /**
-   * Returns all stored nodes, optionally limited.
+   * Returns all stored nodes, optionally limited and ordered.
    * @param limit - Maximum number of nodes to return (default: unlimited)
+   * @param orderBy - Optional ordering (e.g., { field: 'updatedOn', direction: 'desc' })
    * @param transaction - Optional transaction handle for transactional storage providers
    */
-  getAllNodes(limit?: number, transaction?: ITransactionHandle): Promise<NodeData[]>;
+  getAllNodes(limit?: number, orderBy?: IOrderBy, transaction?: ITransactionHandle): Promise<NodeData[]>;
 
   /**
    * Returns all nodes whose `type` field matches the given value.
@@ -128,8 +139,13 @@ export interface IStorageProvider {
    */
   getEdge(id: string, transaction?: ITransactionHandle): Promise<EdgeData | undefined>;
 
-  /** Returns all stored edges. */
-  getAllEdges(transaction?: ITransactionHandle): Promise<EdgeData[]>;
+  /**
+   * Returns all stored edges, up to the optional limit, optionally ordered.
+   * @param limit - Optional maximum number of edges to return
+   * @param orderBy - Optional ordering (e.g., { field: 'updatedOn', direction: 'desc' })
+   * @param transaction - Optional transaction handle
+   */
+  getAllEdges(limit?: number, orderBy?: IOrderBy, transaction?: ITransactionHandle): Promise<EdgeData[]>;
 
   /**
    * Returns all edges whose `type` field matches the given value.

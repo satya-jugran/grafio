@@ -1,5 +1,5 @@
 import type { NodeData, EdgeData, GraphData } from '../types';
-import type { IStorageProvider, ITransactionHandle } from './IStorageProvider';
+import type { IStorageProvider, IOrderBy, ITransactionHandle } from './IStorageProvider';
 import {
   NodeAlreadyExistsError,
   EdgeAlreadyExistsError,
@@ -172,17 +172,29 @@ export class InMemoryStorageProvider implements IStorageProvider {
   // ---------------------------------------------------------------------------
 
   async insertNode(node: NodeData, transaction?: ITransactionHandle): Promise<void> {
+    const now = Date.now();
+    // Clone first to avoid mutating the caller's object
+    const nodeToInsert = deepClone(node);
+    
+    // Set createdOn and updatedOn at node level if not already set
+    if (nodeToInsert.createdOn === undefined) {
+      nodeToInsert.createdOn = now;
+    }
+    if (nodeToInsert.updatedOn === undefined) {
+      nodeToInsert.updatedOn = now;
+    }
+
     const overlay = this._getOverlay(transaction?.id);
 
     if (overlay) {
       // Transaction active: write to overlay
-      overlay.nodes.set(node.id, deepClone(node));
+      overlay.nodes.set(nodeToInsert.id, nodeToInsert);
       // Update overlay indexes
-      this._overlayAddToIndex(overlay.nodesByType, node.type, node.id);
-      this._overlayIndexNodeProperties(overlay, node);
+      this._overlayAddToIndex(overlay.nodesByType, nodeToInsert.type, nodeToInsert.id);
+      this._overlayIndexNodeProperties(overlay, nodeToInsert);
     } else {
       // No transaction: modify live state directly
-      this._insertNodeLive(node, false);
+      this._insertNodeLive(nodeToInsert, true);
     }
   }
 
@@ -302,7 +314,7 @@ export class InMemoryStorageProvider implements IStorageProvider {
     return node ? deepClone(node) : undefined;
   }
 
-  async getAllNodes(limit?: number, transaction?: ITransactionHandle): Promise<NodeData[]> {
+  async getAllNodes(limit?: number, orderBy?: IOrderBy, transaction?: ITransactionHandle): Promise<NodeData[]> {
     const overlay = this._getOverlay(transaction?.id);
     const result: NodeData[] = [];
     const seen = new Set<string>();
@@ -313,19 +325,31 @@ export class InMemoryStorageProvider implements IStorageProvider {
         if (node) {
           result.push(deepClone(node));
           seen.add(id);
-          if (limit !== undefined && result.length >= limit) break;
         }
-      }
-      if (limit !== undefined && result.length >= limit) {
-        return result;
       }
     }
 
     // Then add live nodes not overridden by overlay
     for (const [id, node] of this._nodes) {
       if (seen.has(id)) continue;
-      if (limit !== undefined && result.length >= limit) break;
       result.push(deepClone(node));
+    }
+
+    // Apply ordering if specified
+    if (orderBy) {
+      result.sort((a, b) => {
+        const aVal = a[orderBy.field];
+        const bVal = b[orderBy.field];
+        if (aVal === undefined && bVal === undefined) return 0;
+        if (aVal === undefined) return orderBy.direction === 'asc' ? 1 : -1;
+        if (bVal === undefined) return orderBy.direction === 'asc' ? -1 : 1;
+        return orderBy.direction === 'asc' ? aVal - bVal : bVal - aVal;
+      });
+    }
+
+    // Apply limit
+    if (limit !== undefined) {
+      return result.slice(0, limit);
     }
     return result;
   }
@@ -468,19 +492,31 @@ export class InMemoryStorageProvider implements IStorageProvider {
   // ---------------------------------------------------------------------------
 
   async insertEdge(edge: EdgeData, transaction?: ITransactionHandle): Promise<void> {
+    const now = Date.now();
+    // Clone first to avoid mutating the caller's object
+    const edgeToInsert = deepClone(edge);
+    
+    // Set createdOn and updatedOn at edge level if not already set
+    if (edgeToInsert.createdOn === undefined) {
+      edgeToInsert.createdOn = now;
+    }
+    if (edgeToInsert.updatedOn === undefined) {
+      edgeToInsert.updatedOn = now;
+    }
+
     const overlay = this._getOverlay(transaction?.id);
 
     if (overlay) {
       // Transaction active: write to overlay
-      overlay.edges.set(edge.id, deepClone(edge));
+      overlay.edges.set(edgeToInsert.id, edgeToInsert);
       // Update overlay indexes
-      this._overlayAddToIndex(overlay.edgesByType, edge.type, edge.id);
-      this._overlayAddToIndex(overlay.edgesBySource, edge.sourceId, edge.id);
-      this._overlayAddToIndex(overlay.edgesByTarget, edge.targetId, edge.id);
-      this._overlayIndexEdgeProperties(overlay, edge);
+      this._overlayAddToIndex(overlay.edgesByType, edgeToInsert.type, edgeToInsert.id);
+      this._overlayAddToIndex(overlay.edgesBySource, edgeToInsert.sourceId, edgeToInsert.id);
+      this._overlayAddToIndex(overlay.edgesByTarget, edgeToInsert.targetId, edgeToInsert.id);
+      this._overlayIndexEdgeProperties(overlay, edgeToInsert);
     } else {
       // No transaction: modify live state directly
-      this._insertEdgeLive(edge, false);
+      this._insertEdgeLive(edgeToInsert, true);
     }
   }
 
@@ -573,7 +609,7 @@ export class InMemoryStorageProvider implements IStorageProvider {
     return edge ? deepClone(edge) : undefined;
   }
 
-  async getAllEdges(transaction?: ITransactionHandle): Promise<EdgeData[]> {
+  async getAllEdges(limit?: number, orderBy?: IOrderBy, transaction?: ITransactionHandle): Promise<EdgeData[]> {
     const overlay = this._getOverlay(transaction?.id);
     const result: EdgeData[] = [];
     const seen = new Set<string>();
@@ -594,7 +630,20 @@ export class InMemoryStorageProvider implements IStorageProvider {
         result.push(deepClone(edge));
       }
     }
-    return result;
+
+    // Apply ordering if specified
+    if (orderBy) {
+      result.sort((a, b) => {
+        const aVal = a[orderBy.field];
+        const bVal = b[orderBy.field];
+        if (aVal === undefined && bVal === undefined) return 0;
+        if (aVal === undefined) return orderBy.direction === 'asc' ? 1 : -1;
+        if (bVal === undefined) return orderBy.direction === 'asc' ? -1 : 1;
+        return orderBy.direction === 'asc' ? aVal - bVal : bVal - aVal;
+      });
+    }
+
+    return limit !== undefined ? result.slice(0, limit) : result;
   }
 
   async getEdgesByType(type: string, transaction?: ITransactionHandle): Promise<EdgeData[]> {
@@ -815,6 +864,7 @@ export class InMemoryStorageProvider implements IStorageProvider {
     }
 
     record.properties = { ...record.properties, [key]: value };
+    record.updatedOn = Date.now();
 
     if (isOverlay && overlay) {
       const map = target === 'node' ? overlay.nodes : overlay.edges;
@@ -896,6 +946,7 @@ export class InMemoryStorageProvider implements IStorageProvider {
     }
 
     record.properties = { ...record.properties, [key]: value };
+    record.updatedOn = Date.now();
 
     if (isOverlay && overlay) {
       const map = target === 'node' ? overlay.nodes : overlay.edges;
@@ -980,6 +1031,7 @@ export class InMemoryStorageProvider implements IStorageProvider {
     }
 
     delete record.properties[key];
+    record.updatedOn = Date.now();
 
     if (isOverlay && overlay) {
       const map = target === 'node' ? overlay.nodes : overlay.edges;

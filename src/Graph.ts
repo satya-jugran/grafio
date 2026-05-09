@@ -71,6 +71,18 @@ export class Graph {
   }
 
   /**
+   * Warms the cache by pre-loading data according to the configured preloadStrategy.
+   * Only applies when caching is enabled via GraphManager.
+   * @returns Promise that resolves when cache warming is complete
+   */
+  async warmCache(): Promise<void> {
+    const store = this._index._getStore();
+    if (typeof (store as any).warmCache === 'function') {
+      await (store as any).warmCache();
+    }
+  }
+
+  /**
    * Returns all nodes in the graph.
    * @param transaction - Optional transaction for consistent reads within a transaction
    */

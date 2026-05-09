@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.0.0] - 2026-05-08
+
+### ✨ New Features
+
+1. **Caching Layer Implementation**
+   - Added `CacheConfig` for configuring cache behavior (maxNodesCount, maxEdgesCount, evictionStrategy, preloadStrategy)
+   - Added `ICacheProvider` interface with `InMemoryCache` and `RedisCache` implementations
+   - Added `CacheManager` for managing cache across multiple graphId partitions
+   - Added `CachedStorageProvider` wrapper that adds caching to any IStorageProvider
+   - Supports LRU, LFU, and FIFO eviction strategies
+   - Supports 'none', 'all', 'recent', and 'first-n' preload strategies
+
+2. **GraphManager Singleton**
+   - Added `GraphManager` for application-scoped cache initialization
+   - Provides `GraphManager.init()`, `GraphManager.isInitialized()`, `GraphManager.getInstance()`
+   - Manages CacheManager lifecycle and budget enforcement across graphId partitions
+
+3. **Graph.warmCache() Method**
+   - Added `warmCache()` method to Graph class for explicit cache preloading
+   - Delegates to CachedStorageProvider.warmCache() when available
+
+4. **Redis Cache Support**
+   - Added `RedisCache` implementation using ioredis (optional peer dependency)
+   - Supports distributed caching across multiple application instances
+
+5. **createdOn and updatedOn Timestamps**
+   - Added `createdOn` and `updatedOn` as top-level properties on `NodeData` and `EdgeData` (not in properties)
+   - `Node` and `Edge` classes now track creation and update timestamps
+   - `Node.toJSON()` and `Edge.toJSON()` include timestamps in serialization
+   - Storage providers set timestamps on insert and update `updatedOn` on property modifications
+   - `CachedStorageProvider.warmCache()` 'recent' strategy uses `updatedOn` for ordering
+
 ## [6.0.0] - 2026-05-07
 
 ### Breaking Changes
