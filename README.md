@@ -48,92 +48,6 @@ A graph database with **pluggable storage architecture**. Supports **multiple is
 - **Automatic rollback** — discard all changes if an error occurs during the transaction
 - **Copy-on-write snapshots** (in-memory) — isolation without blocking
 
-## Caching
-
-grafio includes a pluggable caching layer that wraps any storage provider for improved read performance.
-
-### Quick Start with Caching
-
-```typescript
-import { Graph, GraphManager, CachedStorageProvider, InMemoryCache, CacheConfig } from 'grafio';
-import { InMemoryStorageProvider } from 'grafio';
-
-// 1. Initialize GraphManager with cache configuration
-GraphManager.init({
-  cache: {
-    maxNodesCount: 10000,
-    maxEdgesCount: 20000,
-    cacheStore: 'in-memory',
-    evictionStrategy: 'LRU',
-    preloadStrategy: 'none',
-  }
-});
-
-// 2. Create a graph (automatically uses caching when configured)
-const graph = new Graph(new InMemoryStorageProvider());
-
-// 3. Warm the cache explicitly (for preload strategies other than 'none')
-await graph.warmCache();
-```
-
-### Cache Configuration Options
-
-| Option | Type | Description | Default |
-|--------|------|-------------|---------|
-| `maxNodesCount` | `number` | Maximum total nodes cached across all graphId partitions | `10000` |
-| `maxEdgesCount` | `number` | Maximum total edges cached across all graphId partitions | `20000` |
-| `cacheStore` | `'in-memory' \| 'redis'` | Cache backend type | `'in-memory'` |
-| `evictionStrategy` | `'LRU' \| 'LFU' \| 'FIFO'` | Per-partition eviction strategy | `'LRU'` |
-| `preloadStrategy` | `'none' \| 'all' \| 'recent' \| 'first-n'` | Strategy to warm cache on startup | `'none'` |
-| `timestampProperty` | `string` | Property name for 'recent' preload sorting | - |
-
-### Preload Strategies
-
-- **`none`** — Cache starts empty; items populate on first read (default)
-- **`all`** — Load all nodes/edges up to budget via storage provider
-- **`recent`** — Load nodes/edges sorted by `timestampProperty` (descending). Requires `timestampProperty`
-- **`first-n`** — Load first N items as returned by storage provider
-
-### Using Redis Cache
-
-```typescript
-import { GraphManager } from 'grafio';
-import { RedisCache } from 'grafio/cache';
-
-GraphManager.init({
-  cache: {
-    maxNodesCount: 50000,
-    maxEdgesCount: 100000,
-    cacheStore: 'redis',
-    evictionStrategy: 'LRU',
-    preloadStrategy: 'all',
-  }
-});
-
-// RedisCache requires ioredis: npm install ioredis
-```
-
-### Manual Cache Wrapping
-
-For fine-grained control, wrap storage providers manually:
-
-```typescript
-import { CachedStorageProvider, InMemoryStorageProvider, CacheManager, CacheConfig } from 'grafio';
-
-const cacheManager = new CacheManager({ /* CacheConfig */ });
-const storage = new InMemoryStorageProvider();
-
-const cachedStorage = new CachedStorageProvider(
-  storage,
-  'my-graph-id',
-  cacheManager,
-  { /* CacheConfig */ }
-);
-
-const graph = new Graph(cachedStorage);
-await cachedStorage.warmCache(); // Preload cache
-```
-
 ## Installation
 
 ```bash
@@ -435,6 +349,92 @@ const hasIt = await graph.hasNode(nodeId, txn);
 // Navigation methods also support transactions and filters via GraphOptions
 const parents = await graph.getParents(nodeId, { transaction: txn });
 const children = await graph.getChildren(nodeId, { filter: { edgeType: 'KNOWS' }, transaction: txn });
+```
+
+## Caching
+
+grafio includes a pluggable caching layer that wraps any storage provider for improved read performance.
+
+### Quick Start with Caching
+
+```typescript
+import { Graph, GraphManager, CachedStorageProvider, InMemoryCache, CacheConfig } from 'grafio';
+import { InMemoryStorageProvider } from 'grafio';
+
+// 1. Initialize GraphManager with cache configuration
+GraphManager.init({
+  cache: {
+    maxNodesCount: 10000,
+    maxEdgesCount: 20000,
+    cacheStore: 'in-memory',
+    evictionStrategy: 'LRU',
+    preloadStrategy: 'none',
+  }
+});
+
+// 2. Create a graph (automatically uses caching when configured)
+const graph = new Graph(new InMemoryStorageProvider());
+
+// 3. Warm the cache explicitly (for preload strategies other than 'none')
+await graph.warmCache();
+```
+
+### Cache Configuration Options
+
+| Option | Type | Description | Default |
+|--------|------|-------------|---------|
+| `maxNodesCount` | `number` | Maximum total nodes cached across all graphId partitions | `10000` |
+| `maxEdgesCount` | `number` | Maximum total edges cached across all graphId partitions | `20000` |
+| `cacheStore` | `'in-memory' \| 'redis'` | Cache backend type | `'in-memory'` |
+| `evictionStrategy` | `'LRU' \| 'LFU' \| 'FIFO'` | Per-partition eviction strategy | `'LRU'` |
+| `preloadStrategy` | `'none' \| 'all' \| 'recent' \| 'first-n'` | Strategy to warm cache on startup | `'none'` |
+| `timestampProperty` | `string` | Property name for 'recent' preload sorting | - |
+
+### Preload Strategies
+
+- **`none`** — Cache starts empty; items populate on first read (default)
+- **`all`** — Load all nodes/edges up to budget via storage provider
+- **`recent`** — Load nodes/edges sorted by `timestampProperty` (descending). Requires `timestampProperty`
+- **`first-n`** — Load first N items as returned by storage provider
+
+### Using Redis Cache
+
+```typescript
+import { GraphManager } from 'grafio';
+import { RedisCache } from 'grafio/cache';
+
+GraphManager.init({
+  cache: {
+    maxNodesCount: 50000,
+    maxEdgesCount: 100000,
+    cacheStore: 'redis',
+    evictionStrategy: 'LRU',
+    preloadStrategy: 'all',
+  }
+});
+
+// RedisCache requires ioredis: npm install ioredis
+```
+
+### Manual Cache Wrapping
+
+For fine-grained control, wrap storage providers manually:
+
+```typescript
+import { CachedStorageProvider, InMemoryStorageProvider, CacheManager, CacheConfig } from 'grafio';
+
+const cacheManager = new CacheManager({ /* CacheConfig */ });
+const storage = new InMemoryStorageProvider();
+
+const cachedStorage = new CachedStorageProvider(
+  storage,
+  'my-graph-id',
+  cacheManager,
+  { /* CacheConfig */ }
+);
+
+const graph = new Graph(cachedStorage);
+await cachedStorage.warmCache(); // Preload cache
 ```
 
 ## Error Handling
