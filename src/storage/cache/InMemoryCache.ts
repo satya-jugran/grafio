@@ -118,6 +118,9 @@ export class InMemoryCache<T> implements ICacheProvider<T> {
     this._head = null;
     this._tail = null;
     this._lfuCounts.clear();
+    // Clear adjacency indices
+    this._adjBySource.clear();
+    this._adjByTarget.clear();
   }
 
   async invalidateByPrefix(prefix: string): Promise<void> {
@@ -136,6 +139,24 @@ export class InMemoryCache<T> implements ICacheProvider<T> {
       }
       this._map.delete(key);
       this._lfuCounts.delete(key);
+    }
+    // Also clear adjacency entries for this graphId (prefix format: grafio:{type}:{graphId})
+    // Extract graphId from prefix like "grafio:nodes:graph-1" or "grafio:edges:graph-1"
+    const parts = prefix.split(':');
+    if (parts.length >= 3) {
+      const graphId = parts[2];
+      // Clear source adjacency entries for this graphId
+      for (const key of this._adjBySource.keys()) {
+        if (key.startsWith(graphId)) {
+          this._adjBySource.delete(key);
+        }
+      }
+      // Clear target adjacency entries for this graphId
+      for (const key of this._adjByTarget.keys()) {
+        if (key.startsWith(graphId)) {
+          this._adjByTarget.delete(key);
+        }
+      }
     }
   }
 
