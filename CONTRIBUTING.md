@@ -15,7 +15,7 @@ This CLA ensures that contributions are submitted under GPL-3.0 licensing terms 
 1. **Fork the repository** on GitHub
 2. **Clone your fork** locally:
    ```bash
-   git clone https://github.com/YOUR_USERNAME/grafio.git
+   git clone https://github.com/satya-jugran/grafio.git
    cd grafio
    ```
 3. **Install dependencies**:
