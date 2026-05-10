@@ -293,6 +293,7 @@ export class CacheManager {
    * @param limit - Optional maximum number of nodes to return
    */
   async getAllNodes(graphId: string, limit?: number): Promise<NodeData[]> {
+    this._touchGraphId(graphId);
     const prefix = `grafio:nodes:${graphId}`;
     return this._nodeCache.getAll(prefix, limit);
   }
@@ -303,6 +304,7 @@ export class CacheManager {
    * @param limit - Optional maximum number of edges to return
    */
   async getAllEdges(graphId: string, limit?: number): Promise<EdgeData[]> {
+    this._touchGraphId(graphId);
     const prefix = `grafio:edges:${graphId}`;
     return this._edgeCache.getAll(prefix, limit);
   }
@@ -313,6 +315,7 @@ export class CacheManager {
    * @param type - Either 'node' or 'edge'
    */
   async totalCount(graphId: string, type: 'node' | 'edge'): Promise<number> {
+    this._touchGraphId(graphId);
     const prefix = `grafio:${type}s:${graphId}`;
     if (type === 'node') {
       return this._nodeCache.count(prefix);
