@@ -259,6 +259,10 @@ export class CacheManager {
   async invalidateAll(): Promise<void> {
     await this._nodeCache.invalidateAll();
     await this._edgeCache.invalidateAll();
+    // Also clear all adjacency indices for all known graphIds
+    for (const graphId of this._registry.keys()) {
+      await this._edgeCache.invalidateAdjacencyIndex(graphId);
+    }
     this._registry.clear();
     this._hitCount = 0;
     this._missCount = 0;
@@ -445,6 +449,8 @@ export class CacheManager {
 
     this._evictionCount++;
     await this._invalidateEdgesByPrefix(oldest);
+    // Also invalidate adjacency index for this graphId
+    await this._edgeCache.invalidateAdjacencyIndex(oldest);
 
     const meta = this._registry.get(oldest);
     if (meta) {
@@ -480,6 +486,8 @@ export class CacheManager {
       this._evictionCount++;
       await this._invalidateNodesByPrefix(graphId);
       await this._invalidateEdgesByPrefix(graphId);
+      // Also invalidate adjacency index for this graphId
+      await this._edgeCache.invalidateAdjacencyIndex(graphId);
       meta.cachedNodeCount = 0;
       meta.cachedEdgeCount = 0;
       // Keep expired — do not reset expiresAt. This prevents the bug where
