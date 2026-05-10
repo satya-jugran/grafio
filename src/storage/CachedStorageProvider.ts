@@ -323,7 +323,11 @@ export class CachedStorageProvider implements IStorageProvider {
           edges.push(edge);
         }
       }
-      return edges;
+      // If we got at least some edges from cache, return them
+      // If all edges were evicted from cache (foundCount === 0), fall back to underlying
+      if (edges.length > 0) {
+        return edges;
+      }
     }
 
     // Adjacency index returned empty - could be genuinely no edges, or cache not warmed
@@ -352,7 +356,11 @@ export class CachedStorageProvider implements IStorageProvider {
           edges.push(edge);
         }
       }
-      return edges;
+      // If we got at least some edges from cache, return them
+      // If all edges were evicted from cache (foundCount === 0), fall back to underlying
+      if (edges.length > 0) {
+        return edges;
+      }
     }
 
     // Adjacency index returned empty - could be genuinely no edges, or cache not warmed
