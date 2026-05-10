@@ -144,10 +144,11 @@ export class CachedStorageProvider implements IStorageProvider {
       return this._underlying.getAllNodes(limit, orderBy, transaction);
     }
 
-    // Case 1: No orderBy → try cache for any cached items
+    // Case 1: No orderBy → only use cache if complete
     if (orderBy === undefined) {
       const cachedCount = await this._cacheManager.totalCount(this._graphId, 'node');
-      if (cachedCount > 0) {
+      const totalCount = await this._underlying.getTotalNodeCount();
+      if (cachedCount === totalCount && cachedCount > 0) {
         if (limit !== undefined && limit <= cachedCount) {
           return this._cacheManager.getAllNodes(this._graphId, limit);
         } else {
@@ -258,10 +259,11 @@ export class CachedStorageProvider implements IStorageProvider {
       return this._underlying.getAllEdges(limit, orderBy, transaction);
     }
 
-    // Case 1: No orderBy → try cache for any cached items
+    // Case 1: No orderBy → only use cache if complete
     if (orderBy === undefined) {
       const cachedCount = await this._cacheManager.totalCount(this._graphId, 'edge');
-      if (cachedCount > 0) {
+      const totalCount = await this._underlying.getTotalEdgeCount();
+      if (cachedCount === totalCount && cachedCount > 0) {
         if (limit !== undefined && limit <= cachedCount) {
           return this._cacheManager.getAllEdges(this._graphId, limit);
         } else {
