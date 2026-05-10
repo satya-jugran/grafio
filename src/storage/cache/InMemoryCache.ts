@@ -42,6 +42,10 @@ export class InMemoryCache<T> implements ICacheProvider<T> {
   // LFU tracking: key → access count
   private readonly _lfuCounts: Map<string, number> = new Map();
 
+  // Adjacency index: graphId:nodeId → Set of edge ids
+  private readonly _adjBySource: Map<string, Set<string>> = new Map();
+  private readonly _adjByTarget: Map<string, Set<string>> = new Map();
+
   constructor(maxSize: number, strategy: EvictionStrategy = 'LRU') {
     if (maxSize <= 0) {
       throw new Error(`maxSize must be a positive integer, got: ${maxSize}`);
@@ -114,6 +118,9 @@ export class InMemoryCache<T> implements ICacheProvider<T> {
     this._head = null;
     this._tail = null;
     this._lfuCounts.clear();
+    // Clear adjacency indices
+    this._adjBySource.clear();
+    this._adjByTarget.clear();
   }
 
   async invalidateByPrefix(prefix: string): Promise<void> {
@@ -133,6 +140,24 @@ export class InMemoryCache<T> implements ICacheProvider<T> {
       this._map.delete(key);
       this._lfuCounts.delete(key);
     }
+    // Also clear adjacency entries for this graphId (prefix format: grafio:{type}:{graphId})
+    // Extract graphId from prefix like "grafio:nodes:graph-1" or "grafio:edges:graph-1"
+    const parts = prefix.split(':');
+    if (parts.length >= 3) {
+      const graphId = parts[2];
+      // Clear source adjacency entries for this graphId
+      for (const key of this._adjBySource.keys()) {
+        if (key.startsWith(graphId)) {
+          this._adjBySource.delete(key);
+        }
+      }
+      // Clear target adjacency entries for this graphId
+      for (const key of this._adjByTarget.keys()) {
+        if (key.startsWith(graphId)) {
+          this._adjByTarget.delete(key);
+        }
+      }
+    }
   }
 
   async size(): Promise<number> {
@@ -141,6 +166,76 @@ export class InMemoryCache<T> implements ICacheProvider<T> {
 
   maxSize(): number {
     return this._maxSize;
+  }
+
+  async getAll(prefix: string, limit?: number): Promise<T[]> {
+    const results: T[] = [];
+    let count = 0;
+    const limitNum = limit ?? Infinity;
+
+    for (const [, node] of this._map) {
+      if (count >= limitNum) break;
+      if (node.key.startsWith(prefix)) {
+        results.push(node.value);
+        count++;
+      }
+    }
+
+    return results;
+  }
+
+  async count(prefix: string): Promise<number> {
+    let count = 0;
+    for (const [, node] of this._map) {
+      if (node.key.startsWith(prefix)) {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  // ─── Adjacency index (for edge lookups by source/target) ──────────────────
+
+  async addToAdjacencyIndex(graphId: string, direction: 'source' | 'target', nodeId: string, edgeId: string): Promise<void> {
+    const key = `${graphId}:${nodeId}`;
+    const index = direction === 'source' ? this._adjBySource : this._adjByTarget;
+    if (!index.has(key)) {
+      index.set(key, new Set());
+    }
+    index.get(key)!.add(edgeId);
+  }
+
+  async removeFromAdjacencyIndex(graphId: string, direction: 'source' | 'target', nodeId: string, edgeId: string): Promise<void> {
+    const key = `${graphId}:${nodeId}`;
+    const index = direction === 'source' ? this._adjBySource : this._adjByTarget;
+    const set = index.get(key);
+    if (set) {
+      set.delete(edgeId);
+      if (set.size === 0) {
+        index.delete(key);
+      }
+    }
+  }
+
+  async getEdgesByAdjacencyIndex(graphId: string, direction: 'source' | 'target', nodeId: string): Promise<string[]> {
+    const key = `${graphId}:${nodeId}`;
+    const index = direction === 'source' ? this._adjBySource : this._adjByTarget;
+    const set = index.get(key);
+    return set ? Array.from(set) : [];
+  }
+
+  async invalidateAdjacencyIndex(graphId: string): Promise<void> {
+    const prefix = `${graphId}:`;
+    for (const key of this._adjBySource.keys()) {
+      if (key.startsWith(prefix)) {
+        this._adjBySource.delete(key);
+      }
+    }
+    for (const key of this._adjByTarget.keys()) {
+      if (key.startsWith(prefix)) {
+        this._adjByTarget.delete(key);
+      }
+    }
   }
 
   // ─── Private helpers ───────────────────────────────────────────────────────

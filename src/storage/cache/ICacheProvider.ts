@@ -61,4 +61,54 @@ export interface ICacheProvider<T> {
    * Returns the maximum number of entries this cache can hold.
    */
   maxSize(): number;
+
+  /**
+   * Returns all cached values whose keys start with the given prefix.
+   * @param prefix - The prefix to match (e.g., "graph-a:" matches "graph-a:node-1")
+   * @param limit - Optional maximum number of items to return
+   * @returns Array of cached values
+   */
+  getAll(prefix: string, limit?: number): Promise<T[]>;
+
+  /**
+   * Returns the count of entries whose keys start with the given prefix.
+   * @param prefix - The prefix to match
+   * @returns Number of matching entries
+   */
+  count(prefix: string): Promise<number>;
+
+  // ─── Adjacency index (for edge lookups by source/target) ─────────────────
+
+  /**
+   * Adds an edge to the adjacency index for a source or target node.
+   * @param graphId - The graph partition key
+   * @param direction - Either 'source' or 'target'
+   * @param nodeId - The source or target node id
+   * @param edgeId - The edge id to associate
+   */
+  addToAdjacencyIndex(graphId: string, direction: 'source' | 'target', nodeId: string, edgeId: string): Promise<void>;
+
+  /**
+   * Removes an edge from the adjacency index.
+   * @param graphId - The graph partition key
+   * @param direction - Either 'source' or 'target'
+   * @param nodeId - The source or target node id
+   * @param edgeId - The edge id to remove
+   */
+  removeFromAdjacencyIndex(graphId: string, direction: 'source' | 'target', nodeId: string, edgeId: string): Promise<void>;
+
+  /**
+   * Gets all edge ids from the adjacency index for a source or target node.
+   * @param graphId - The graph partition key
+   * @param direction - Either 'source' or 'target'
+   * @param nodeId - The source or target node id
+   * @returns Array of edge ids
+   */
+  getEdgesByAdjacencyIndex(graphId: string, direction: 'source' | 'target', nodeId: string): Promise<string[]>;
+
+  /**
+   * Removes all adjacency index entries for a graphId.
+   * @param graphId - The graph partition key
+   */
+  invalidateAdjacencyIndex(graphId: string): Promise<void>;
 }

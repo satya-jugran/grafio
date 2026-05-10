@@ -168,6 +168,54 @@ export class InMemoryStorageProvider implements IStorageProvider {
   }
 
   // ---------------------------------------------------------------------------
+  // Count queries
+  // ---------------------------------------------------------------------------
+
+  async getTotalNodeCount(transaction?: ITransactionHandle): Promise<number> {
+    const overlay = this._getOverlay(transaction?.id);
+    let count = this._nodes.size;
+
+    if (overlay) {
+      // Add overlay nodes that aren't overriding live nodes (new inserts)
+      for (const [id, node] of overlay.nodes) {
+        if (node && !this._nodes.has(id)) {
+          count++;
+        }
+      }
+      // Subtract overlay nodes with null that are deleting live nodes
+      for (const [id, node] of overlay.nodes) {
+        if (node === null && this._nodes.has(id)) {
+          count--;
+        }
+      }
+    }
+
+    return count;
+  }
+
+  async getTotalEdgeCount(transaction?: ITransactionHandle): Promise<number> {
+    const overlay = this._getOverlay(transaction?.id);
+    let count = this._edges.size;
+
+    if (overlay) {
+      // Add overlay edges that aren't overriding live edges (new inserts)
+      for (const [id, edge] of overlay.edges) {
+        if (edge && !this._edges.has(id)) {
+          count++;
+        }
+      }
+      // Subtract overlay edges with null that are deleting live edges
+      for (const [id, edge] of overlay.edges) {
+        if (edge === null && this._edges.has(id)) {
+          count--;
+        }
+      }
+    }
+
+    return count;
+  }
+
+  // ---------------------------------------------------------------------------
   // Node mutations
   // ---------------------------------------------------------------------------
 

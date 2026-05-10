@@ -202,6 +202,106 @@ export class RedisCache<T> implements ICacheProvider<T> {
     return this._maxSize;
   }
 
+  async getAll(prefix: string, limit?: number): Promise<T[]> {
+    const redis = await this._ensureRedis();
+    const results: T[] = [];
+    const limitNum = limit ?? Infinity;
+
+    // prefix format: "graphId:" → need to translate to redis pattern "grafio:{type}:{graphId}:*"
+    const redisPattern = this._prefixToRedisPattern(prefix);
+
+    let cursor = '0';
+    do {
+      const [nextCursor, keys] = await redis.scan(cursor, 'MATCH', redisPattern, 'COUNT', 100);
+      cursor = nextCursor;
+
+      for (const key of keys) {
+        if (results.length >= limitNum) break;
+        const raw = await redis.get(key);
+        if (raw) {
+          try {
+            results.push(JSON.parse(raw) as T);
+          } catch {
+            // Skip invalid JSON
+          }
+        }
+      }
+    } while (cursor !== '0' && results.length < limitNum);
+
+    return results;
+  }
+
+  async count(prefix: string): Promise<number> {
+    const redis = await this._ensureRedis();
+    const redisPattern = this._prefixToRedisPattern(prefix);
+
+    let count = 0;
+    let cursor = '0';
+    do {
+      const [nextCursor, keys] = await redis.scan(cursor, 'MATCH', redisPattern, 'COUNT', 100);
+      cursor = nextCursor;
+      count += keys.length;
+    } while (cursor !== '0');
+
+    return count;
+  }
+
+  /**
+   * Translates a cache prefix (e.g. "graph-a:") to a Redis key pattern.
+   * Cache prefix: "{graphId}:"
+   * Redis key: "grafio:{type}:{graphId}:*"
+   */
+  private _prefixToRedisPattern(prefix: string): string {
+    // prefix is like "graph-a:" → extract graphId
+    const graphId = prefix.endsWith(':') ? prefix.slice(0, -1) : prefix;
+    return `grafio:${this._type}:${graphId}:*`;
+  }
+
+  // ─── Adjacency index (for edge lookups by source/target) ──────────────────
+
+  /**
+   * Redis key for adjacency set.
+   * Format: grafio:adj:{direction}:{graphId}:{nodeId}
+   */
+  private _adjKey(graphId: string, direction: 'source' | 'target', nodeId: string): string {
+    return `grafio:adj:${direction}:${graphId}:${nodeId}`;
+  }
+
+  async addToAdjacencyIndex(graphId: string, direction: 'source' | 'target', nodeId: string, edgeId: string): Promise<void> {
+    const redis = await this._ensureRedis();
+    const key = this._adjKey(graphId, direction, nodeId);
+    await redis.sadd(key, edgeId);
+    if (this._ttlMs) {
+      await redis.pexpire(key, this._ttlMs);
+    }
+  }
+
+  async removeFromAdjacencyIndex(graphId: string, direction: 'source' | 'target', nodeId: string, edgeId: string): Promise<void> {
+    const redis = await this._ensureRedis();
+    const key = this._adjKey(graphId, direction, nodeId);
+    await redis.srem(key, edgeId);
+  }
+
+  async getEdgesByAdjacencyIndex(graphId: string, direction: 'source' | 'target', nodeId: string): Promise<string[]> {
+    const redis = await this._ensureRedis();
+    const key = this._adjKey(graphId, direction, nodeId);
+    return redis.smembers(key);
+  }
+
+  async invalidateAdjacencyIndex(graphId: string): Promise<void> {
+    const redis = await this._ensureRedis();
+    const pattern = `grafio:adj:*:${graphId}:*`;
+
+    let cursor = '0';
+    do {
+      const [nextCursor, keys] = await redis.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+      cursor = nextCursor;
+      if (keys.length > 0) {
+        await redis.del(...keys);
+      }
+    } while (cursor !== '0');
+  }
+
   // ─── Private helpers ───────────────────────────────────────────────────────
 
   /**

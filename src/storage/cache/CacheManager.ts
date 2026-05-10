@@ -246,6 +246,8 @@ export class CacheManager {
       // Evict all nodes by prefix (inefficient but correct for now)
       await this._invalidateNodesByPrefix(graphId);
       await this._invalidateEdgesByPrefix(graphId);
+      // Also invalidate adjacency index
+      await this._edgeCache.invalidateAdjacencyIndex(graphId);
       meta.cachedNodeCount = 0;
       meta.cachedEdgeCount = 0;
     }
@@ -257,6 +259,10 @@ export class CacheManager {
   async invalidateAll(): Promise<void> {
     await this._nodeCache.invalidateAll();
     await this._edgeCache.invalidateAll();
+    // Also clear all adjacency indices for all known graphIds
+    for (const graphId of this._registry.keys()) {
+      await this._edgeCache.invalidateAdjacencyIndex(graphId);
+    }
     this._registry.clear();
     this._hitCount = 0;
     this._missCount = 0;
@@ -281,14 +287,83 @@ export class CacheManager {
     };
   }
 
+  /**
+   * Returns all cached nodes for a specific graphId.
+   * @param graphId - The graph partition key
+   * @param limit - Optional maximum number of nodes to return
+   */
+  async getAllNodes(graphId: string, limit?: number): Promise<NodeData[]> {
+    this._touchGraphId(graphId);
+    const prefix = `grafio:nodes:${graphId}`;
+    return this._nodeCache.getAll(prefix, limit);
+  }
+
+  /**
+   * Returns all cached edges for a specific graphId.
+   * @param graphId - The graph partition key
+   * @param limit - Optional maximum number of edges to return
+   */
+  async getAllEdges(graphId: string, limit?: number): Promise<EdgeData[]> {
+    this._touchGraphId(graphId);
+    const prefix = `grafio:edges:${graphId}`;
+    return this._edgeCache.getAll(prefix, limit);
+  }
+
+  /**
+   * Returns the count of cached nodes or edges for a specific graphId.
+   * @param graphId - The graph partition key
+   * @param type - Either 'node' or 'edge'
+   */
+  async totalCount(graphId: string, type: 'node' | 'edge'): Promise<number> {
+    this._touchGraphId(graphId);
+    const prefix = `grafio:${type}s:${graphId}`;
+    if (type === 'node') {
+      return this._nodeCache.count(prefix);
+    } else {
+      return this._edgeCache.count(prefix);
+    }
+  }
+
+  // ─── Adjacency index ───────────────────────────────────────────────────────
+
+  /**
+   * Adds an edge to the adjacency index for a source or target node.
+   * Used for getEdgesBySource/getEdgesByTarget cache optimization.
+   */
+  async addEdgeToAdjacencyIndex(graphId: string, direction: 'source' | 'target', nodeId: string, edgeId: string): Promise<void> {
+    // Only edge cache needs adjacency index for now
+    await this._edgeCache.addToAdjacencyIndex(graphId, direction, nodeId, edgeId);
+  }
+
+  /**
+   * Removes an edge from the adjacency index.
+   */
+  async removeEdgeFromAdjacencyIndex(graphId: string, direction: 'source' | 'target', nodeId: string, edgeId: string): Promise<void> {
+    await this._edgeCache.removeFromAdjacencyIndex(graphId, direction, nodeId, edgeId);
+  }
+
+  /**
+   * Gets edge ids from the adjacency index for a source or target node.
+   */
+  async getEdgeIdsByAdjacencyIndex(graphId: string, direction: 'source' | 'target', nodeId: string): Promise<string[]> {
+    return this._edgeCache.getEdgesByAdjacencyIndex(graphId, direction, nodeId);
+  }
+
+  /**
+   * Removes all adjacency index entries for a graphId.
+   */
+  async invalidateAdjacencyIndex(graphId: string): Promise<void> {
+    await this._edgeCache.invalidateAdjacencyIndex(graphId);
+  }
+
   // ─── Private helpers ───────────────────────────────────────────────────────
 
   private _nodeKey(graphId: string, nodeId: string): string {
-    return `${graphId}:${nodeId}`;
+    return `grafio:nodes:${graphId}:${nodeId}`;
   }
 
   private _edgeKey(graphId: string, edgeId: string): string {
-    return `${graphId}:${edgeId}`;
+    return `grafio:edges:${graphId}:${edgeId}`;
   }
 
   private _registerGraphId(graphId: string, type: 'node' | 'edge'): void {
@@ -339,7 +414,8 @@ export class CacheManager {
    */
   private async _invalidateNodesByPrefix(graphId: string): Promise<void> {
     // Use prefix-based invalidation to only evict keys for this graphId
-    await this._nodeCache.invalidateByPrefix(graphId);
+    // Key format is grafio:nodes:{graphId}:{nodeId}, so use full prefix
+    await this._nodeCache.invalidateByPrefix(`grafio:nodes:${graphId}`);
   }
 
   /**
@@ -347,7 +423,8 @@ export class CacheManager {
    */
   private async _invalidateEdgesByPrefix(graphId: string): Promise<void> {
     // Use prefix-based invalidation to only evict keys for this graphId
-    await this._edgeCache.invalidateByPrefix(graphId);
+    // Key format is grafio:edges:{graphId}:{edgeId}, so use full prefix
+    await this._edgeCache.invalidateByPrefix(`grafio:edges:${graphId}`);
   }
 
   /**
@@ -377,6 +454,8 @@ export class CacheManager {
 
     this._evictionCount++;
     await this._invalidateEdgesByPrefix(oldest);
+    // Also invalidate adjacency index for this graphId
+    await this._edgeCache.invalidateAdjacencyIndex(oldest);
 
     const meta = this._registry.get(oldest);
     if (meta) {
@@ -412,6 +491,8 @@ export class CacheManager {
       this._evictionCount++;
       await this._invalidateNodesByPrefix(graphId);
       await this._invalidateEdgesByPrefix(graphId);
+      // Also invalidate adjacency index for this graphId
+      await this._edgeCache.invalidateAdjacencyIndex(graphId);
       meta.cachedNodeCount = 0;
       meta.cachedEdgeCount = 0;
       // Keep expired — do not reset expiresAt. This prevents the bug where
