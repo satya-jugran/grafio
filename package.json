@@ -56,11 +56,12 @@
     "mermaid"
   ],
   "author": "Satya Jugran",
-  "license": "MIT",
+  "license": "GPL-3.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/satya-jugran/grafio"
   },
+  "funding": "https://ko-fi.com/satyajugran",
   "devDependencies": {
     "@types/jest": "^29.5.0",
     "@types/node": "^25.6.0",

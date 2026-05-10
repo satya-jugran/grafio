@@ -616,6 +616,6 @@ The test suite runs against the built-in `InMemoryStorageProvider` backend:
 ### Manager Tests
 - `tests/GraphManager.test.ts` — Graph manager singleton tests
 
-## License
+## Contributing
 
-GPL
+We welcome contributions! Please read our [Code of Conduct](./CODE_OF_CONDUCT.md) and [Contributing Guide](./CONTRIBUTING.md) before contributing to help keep our community welcoming and inclusive.
