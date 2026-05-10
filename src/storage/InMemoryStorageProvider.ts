@@ -176,10 +176,16 @@ export class InMemoryStorageProvider implements IStorageProvider {
     let count = this._nodes.size;
 
     if (overlay) {
-      // Add overlay nodes that aren't overriding live nodes
+      // Add overlay nodes that aren't overriding live nodes (new inserts)
       for (const [id, node] of overlay.nodes) {
         if (node && !this._nodes.has(id)) {
           count++;
+        }
+      }
+      // Subtract overlay nodes with null that are deleting live nodes
+      for (const [id, node] of overlay.nodes) {
+        if (node === null && this._nodes.has(id)) {
+          count--;
         }
       }
     }
@@ -192,10 +198,16 @@ export class InMemoryStorageProvider implements IStorageProvider {
     let count = this._edges.size;
 
     if (overlay) {
-      // Add overlay edges that aren't overriding live edges
+      // Add overlay edges that aren't overriding live edges (new inserts)
       for (const [id, edge] of overlay.edges) {
         if (edge && !this._edges.has(id)) {
           count++;
+        }
+      }
+      // Subtract overlay edges with null that are deleting live edges
+      for (const [id, edge] of overlay.edges) {
+        if (edge === null && this._edges.has(id)) {
+          count--;
         }
       }
     }
