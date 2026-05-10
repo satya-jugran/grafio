@@ -293,7 +293,7 @@ export class CacheManager {
    * @param limit - Optional maximum number of nodes to return
    */
   async getAllNodes(graphId: string, limit?: number): Promise<NodeData[]> {
-    const prefix = `${graphId}:`;
+    const prefix = `grafio:nodes:${graphId}`;
     return this._nodeCache.getAll(prefix, limit);
   }
 
@@ -303,7 +303,7 @@ export class CacheManager {
    * @param limit - Optional maximum number of edges to return
    */
   async getAllEdges(graphId: string, limit?: number): Promise<EdgeData[]> {
-    const prefix = `${graphId}:`;
+    const prefix = `grafio:edges:${graphId}`;
     return this._edgeCache.getAll(prefix, limit);
   }
 
@@ -313,7 +313,7 @@ export class CacheManager {
    * @param type - Either 'node' or 'edge'
    */
   async totalCount(graphId: string, type: 'node' | 'edge'): Promise<number> {
-    const prefix = `${graphId}:`;
+    const prefix = `grafio:${type}s:${graphId}`;
     if (type === 'node') {
       return this._nodeCache.count(prefix);
     } else {
@@ -356,11 +356,11 @@ export class CacheManager {
   // ─── Private helpers ───────────────────────────────────────────────────────
 
   private _nodeKey(graphId: string, nodeId: string): string {
-    return `${graphId}:${nodeId}`;
+    return `grafio:nodes:${graphId}:${nodeId}`;
   }
 
   private _edgeKey(graphId: string, edgeId: string): string {
-    return `${graphId}:${edgeId}`;
+    return `grafio:edges:${graphId}:${edgeId}`;
   }
 
   private _registerGraphId(graphId: string, type: 'node' | 'edge'): void {
@@ -411,7 +411,8 @@ export class CacheManager {
    */
   private async _invalidateNodesByPrefix(graphId: string): Promise<void> {
     // Use prefix-based invalidation to only evict keys for this graphId
-    await this._nodeCache.invalidateByPrefix(graphId);
+    // Key format is grafio:nodes:{graphId}:{nodeId}, so use full prefix
+    await this._nodeCache.invalidateByPrefix(`grafio:nodes:${graphId}`);
   }
 
   /**
@@ -419,7 +420,8 @@ export class CacheManager {
    */
   private async _invalidateEdgesByPrefix(graphId: string): Promise<void> {
     // Use prefix-based invalidation to only evict keys for this graphId
-    await this._edgeCache.invalidateByPrefix(graphId);
+    // Key format is grafio:edges:{graphId}:{edgeId}, so use full prefix
+    await this._edgeCache.invalidateByPrefix(`grafio:edges:${graphId}`);
   }
 
   /**
