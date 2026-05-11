@@ -502,13 +502,24 @@ export class Parser {
     while (true) {
       const token = this._peek();
 
-      // Check for postfix operators first (IS NULL, IN).
+      // Check for postfix operators first (IS NULL, IN, NOT IN).
       if (token.kind === TokenKind.IS) {
         left = this._parseIsNull(left);
         continue;
       }
+      // NOT IN — handled as a combined postfix to avoid the ambiguity
+      // of NOT being both a prefix and part of the IN predicate.
+      if (token.kind === TokenKind.NOT && this._peek(1)?.kind === TokenKind.IN) {
+        this._advance(); // consume NOT
+        this._advance(); // consume IN
+        const list = this._parseExpression(Prec.COMPARISON as Prec);
+        left = { kind: 'In', expression: left, list, not: true } as InExpr;
+        continue;
+      }
       if (token.kind === TokenKind.IN) {
-        left = this._parseInExpr(left);
+        this._advance();
+        const list = this._parseExpression(Prec.COMPARISON as Prec);
+        left = { kind: 'In', expression: left, list, not: false } as InExpr;
         continue;
       }
 
@@ -633,14 +644,6 @@ export class Parser {
     if (not) this._advance();
     this._consume(TokenKind.NULL, "Expected 'NULL' after 'IS'");
     return { kind: 'IsNull', expression, not };
-  }
-
-  /** Parse `[NOT] IN expression` postfix. */
-  private _parseInExpr(expression: Expression): Expression {
-    const not = this._peek(-1)?.kind === TokenKind.NOT;
-    this._advance(); // consume IN
-    const list = this._parseExpression(Prec.COMPARISON as Prec);
-    return { kind: 'In', expression, list, not };
   }
 
   // ── Helpers ─────────────────────────────────────────────────────

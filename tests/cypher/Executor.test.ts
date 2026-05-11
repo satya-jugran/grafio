@@ -320,6 +320,18 @@ describe('Executor', () => {
       );
       expect(result.rows).toHaveLength(2);
     });
+
+    it('filters with NOT IN', async () => {
+      const graph = await buildSocialGraph();
+      const result = await executeQuery(
+        "MATCH (p:Person) WHERE p.name NOT IN ['Alice', 'Bob'] RETURN p.name AS name ORDER BY p.name ASC",
+        {},
+        graph,
+      );
+      // Only Charlie is not in the list
+      expect(result.rows).toHaveLength(1);
+      expect(result.rows[0].name).toBe('Charlie');
+    });
   });
 
   // ── Parameters ─────────────────────────────────────────────────

@@ -225,6 +225,13 @@ describe('Parser', () => {
       expect(ast.where!.expression.kind).toBe('In');
     });
 
+    it('parses WHERE with NOT IN', () => {
+      const ast = parse("MATCH (p:Person) WHERE p.name NOT IN ['Alice', 'Bob'] RETURN p");
+      const expr = ast.where!.expression;
+      expect(expr.kind).toBe('In');
+      expect((expr as any).not).toBe(true);
+    });
+
     it('parses WHERE with param', () => {
       const ast = parse('MATCH (p:Person) WHERE p.name = $name RETURN p');
       const bin = ast.where!.expression;
