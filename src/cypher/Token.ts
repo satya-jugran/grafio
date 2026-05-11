@@ -75,7 +75,6 @@ export const enum TokenKind {
   ARROW_RIGHT = 'ARROW_RIGHT',
   /** `<--` or `<-` */
   ARROW_LEFT = 'ARROW_LEFT',
-  DASH = 'DASH',
   EQ = 'EQ',
   NEQ = 'NEQ',
   LT = 'LT',
