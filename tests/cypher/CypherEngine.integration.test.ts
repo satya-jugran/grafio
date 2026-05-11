@@ -220,13 +220,13 @@ describe('CypherEngine Integration', () => {
     });
 
     it('returns DISTINCT results', async () => {
-      // All students enrolled in any course
+      // All students enrolled in any course — DISTINCT deduplicates.
       const result = await engine.execute(
-        'MATCH (s:Student)-[:ENROLLED]->(c:Course) RETURN s.name AS student ORDER BY s.name ASC',
+        'MATCH (s:Student)-[:ENROLLED]->(c:Course) RETURN DISTINCT s.name AS student ORDER BY s.name ASC',
       );
       const names = result.rows.map((r) => r.student);
-      // Alice appears in 2 courses, Bob in 2, Charlie in 2
-      expect(names).toEqual(['Alice', 'Alice', 'Bob', 'Bob', 'Charlie', 'Charlie']);
+      // Alice, Bob, Charlie — each appears once despite being enrolled in multiple courses
+      expect(names).toEqual(['Alice', 'Bob', 'Charlie']);
     });
   });
 

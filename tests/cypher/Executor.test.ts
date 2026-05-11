@@ -257,6 +257,20 @@ describe('Executor', () => {
       expect(result.rows[0].name).toBe('Alice');
       expect(result.rows[0].age).toBe(30);
     });
+
+    it('deduplicates with RETURN DISTINCT', async () => {
+      const graph = await buildChainGraph();
+      // A → B → C → D; scanning all Person nodes and expanding edges produces
+      // duplicates (same target reached via different paths)
+      const result = await executeQuery(
+        'MATCH (a:Person)-[*1..3]->(b:Person) WHERE a.name = $name RETURN DISTINCT b.name AS name ORDER BY b.name ASC',
+        { name: 'A' },
+        graph,
+      );
+      const names = result.rows.map((r) => r.name);
+      // B, C, D — each appears exactly once despite multi-hop duplicates
+      expect(names).toEqual(['B', 'C', 'D']);
+    });
   });
 
   // ── ORDER BY ───────────────────────────────────────────────────

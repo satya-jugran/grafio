@@ -247,13 +247,45 @@ export class Executor {
     rows: Row[],
     params: Record<string, unknown>,
   ): Row[] {
-    return rows.map((row) => {
+    const projected = rows.map((row) => {
       const newRow = new Map<string, unknown>();
       for (const col of step.columns) {
         newRow.set(col.alias, this._evaluate(col.expression, row, params));
       }
       return newRow;
     });
+
+    if (!step.distinct) return projected;
+
+    // Deduplicate: use a Set of composite keys built from column values.
+    // For Node/Edge objects we use the .id field; for primitives, String().
+    const seen = new Set<string>();
+    const deduped: Row[] = [];
+
+    for (const row of projected) {
+      const keyParts: string[] = [];
+      for (const col of step.columns) {
+        const value = row.get(col.alias);
+        if (value === null) {
+          keyParts.push('\x00null');
+        } else if (value === undefined) {
+          keyParts.push('\x00undef');
+        } else if (typeof value === 'object' && value !== null && 'id' in (value as object)) {
+          // Node or Edge — compare by id.
+          keyParts.push((value as { id: string }).id);
+        } else {
+          keyParts.push(String(value));
+        }
+      }
+      const key = keyParts.join('\x00');
+
+      if (!seen.has(key)) {
+        seen.add(key);
+        deduped.push(row);
+      }
+    }
+
+    return deduped;
   }
 
   // ── SortStep ────────────────────────────────────────────────────

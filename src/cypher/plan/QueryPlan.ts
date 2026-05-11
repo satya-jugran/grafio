@@ -106,6 +106,8 @@ export interface ProjectStep {
   kind: 'ProjectStep';
   /** The expressions to evaluate and their aliases. */
   columns: ProjectColumn[];
+  /** Whether DISTINCT was specified in the RETURN clause. */
+  distinct: boolean;
 }
 
 /**

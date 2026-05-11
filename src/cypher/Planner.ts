@@ -229,7 +229,7 @@ export class Planner {
       alias: item.alias ?? this._deriveAlias(item.expression),
     }));
 
-    return { kind: 'ProjectStep', columns };
+    return { kind: 'ProjectStep', columns, distinct: ast.return.distinct };
   }
 
   // ── Sorting ─────────────────────────────────────────────────────
