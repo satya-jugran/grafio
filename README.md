@@ -23,6 +23,7 @@ A graph database with **pluggable storage architecture**. Supports **multiple is
 - **`RedisCache`** — distributed cache using Redis (via ioredis, optional)
 
 ### Traversal & Querying
+- **Cypher Query Language** — read-only openCypher-compatible query interface (`MATCH`, `WHERE`, `RETURN`, `ORDER BY`, `SKIP`, `LIMIT`)
 - **BFS / DFS traversal** — find paths between nodes
 - **Wildcard traversal** — `traverse('*', target)`, `traverse(source, '*')`, or `traverse(['a','b'], ['x','y'])`
 - **Type filtering** — filter by node types (`['Person', 'Company']`) and edge types (`['KNOWS', 'WORKS_AT']`)
@@ -209,6 +210,106 @@ await graph.traverse('*', '*');
 
 // Find paths for each combination across two arrays
 await graph.traverse(['id1', 'id2'], ['id3', 'id4']);
+```
+
+### CypherEngine — Read-Only Cypher Query Interface
+
+Execute openCypher-compatible queries against your graph:
+
+```typescript
+import { Graph, CypherEngine } from 'grafio';
+import 'grafio/cypher'; // register the deep import path
+
+const graph = new Graph();
+
+// Build your graph...
+const alice = await graph.addNode('Person', { name: 'Alice', age: 30 });
+const bob   = await graph.addNode('Person', { name: 'Bob', age: 25 });
+await graph.addEdge(alice.id, bob.id, 'KNOWS', { since: 2020 });
+
+const engine = new CypherEngine(graph);
+
+// Scan nodes by type
+const result = await engine.query('MATCH (p:Person) RETURN p.name, p.age');
+// result.rows = [{ 'p.name': 'Alice', 'p.age': 30 }, { 'p.name': 'Bob', 'p.age': 25 }]
+
+// Filter with WHERE
+const adults = await engine.query(
+  'MATCH (p:Person) WHERE p.age > 25 RETURN p.name'
+);
+
+// Follow relationships
+const friends = await engine.query(
+  'MATCH (a:Person)-[:KNOWS]->(b:Person) RETURN a.name, b.name'
+);
+
+// Multi-hop traversal
+const network = await engine.query(
+  'MATCH (a:Person)-[:KNOWS*1..2]->(b:Person) RETURN DISTINCT a.name, b.name'
+);
+
+// Parameterized queries
+const byName = await engine.query(
+  'MATCH (p:Person {name: \$name}) RETURN p',
+  { name: 'Alice' }
+);
+
+// Pagination
+const page = await engine.query(
+  'MATCH (p:Person) RETURN p ORDER BY p.age DESC SKIP 0 LIMIT 10'
+);
+```
+
+#### Supported Clauses
+
+| Clause | Support | Notes |
+|--------|---------|-------|
+| `MATCH` | ✅ Read-only patterns | Typed/untyped nodes, directed edges, multi-label `(n:A\|B)`, inline property maps |
+| `WHERE` | ✅ Full expressions | `AND`/`OR`/`NOT`, comparisons, `IN`, `NOT IN`, `IS NULL`, `IS NOT NULL` |
+| `RETURN` | ✅ With `DISTINCT` | Property access, aliases with `AS` |
+| `ORDER BY` | ✅ ASC/DESC | Default ASC when omitted |
+| `SKIP` | ✅ Literal + `$param` | Evaluated at runtime |
+| `LIMIT` | ✅ Literal + `$param` | Evaluated at runtime |
+| `CREATE` / `DELETE` / `SET` / `REMOVE` / `MERGE` | ❌ Rejected | Validation gate prevents execution |
+
+#### Variable-length Edge Syntax
+
+| Syntax | Meaning |
+|--------|---------|
+| `[*]` | Unbounded (up to 100 hops) |
+| `[*1..3]` | 1 to 3 hops (BFS by default) |
+| `[*2]` | Exactly 2 hops |
+| `[*..5]` | Up to 5 hops |
+
+> **Strategy selection**: BFS is used by default for multi-hop expansion. When `LIMIT` is present, DFS is selected automatically for better early-result performance.
+
+#### CypherResult Shape
+
+```typescript
+interface CypherResult {
+  rows: CypherRow[];          // Array of row objects
+  summary: CypherSummary;     // Execution metadata
+}
+
+type CypherRow = Map<string, unknown>;  // Column name → value
+
+interface CypherSummary {
+  queryTimeMs: number;        // Execution duration
+  nodesCreated: number;       // Always 0 (read-only)
+  edgesCreated: number;       // Always 0 (read-only)
+}
+```
+
+#### Error Hierarchy
+
+```
+CypherError (base)
+├── CypherSyntaxError      — Lexer/Parser errors with line:column
+├── CypherNotSupportedError — Unsupported syntax (CREATE, aggregations, etc.)
+├── CypherSemanticError     — Unresolved variables, duplicate bindings
+└── CypherRuntimeError
+    ├── UnboundParameterError — $param not provided in params map
+    └── TypeMismatchError     — Wrong type for operator (e.g., IN on non-list)
 ```
 
 #### Serialization & Admin
