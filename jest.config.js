@@ -6,7 +6,14 @@ module.exports = {
   testMatch: ['**/*.test.ts'],
   moduleFileExtensions: ['ts', 'js', 'json'],
   collectCoverageFrom: ['src/**/*.ts'],
-  coveragePathIgnorePatterns: ['/node_modules/', '/dist/', '/shared/testing/', 'src/index.ts'],
+  coveragePathIgnorePatterns: [
+    '/node_modules/', 
+    '/dist/', 
+    '/shared/testing/', 
+    'src/index.ts',
+    'src/storage/cache/index.ts',
+    'src/cypher/index.ts'
+  ],
   coverageThreshold: {
     global: {
       branches: 80,

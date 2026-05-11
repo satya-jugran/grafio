@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.3.0] - 2026-05-11
+
+### ✨ New Features
+
+1. **Read-Only Cypher Query Interface**
+   - Added a read-only `CypherEngine` that executes openCypher-compatible queries against a `Graph` instance
+   - Supports `MATCH`, `WHERE`, `RETURN` (with `DISTINCT`), `ORDER BY` (ASC/DESC), `SKIP`, and `LIMIT` clauses
+   - **Pattern matching**: typed/untyped nodes (`(n:Person)`), directed edges (`-[:KNOWS]->`), multi-label alternation (`Person|Employee`), inline property maps (`{year: 2024}`)
+   - **Variable-length edges**: `[*1..3]`, `[*2]`, `[*]` with BFS multi-hop traversal (DFS when `LIMIT` is present)
+   - **Expressions**: `AND`/`OR`/`NOT`, comparisons (`=`, `<>`, `<`, `<=`, `>`, `>=`), arithmetic (`+`, `-`, `*`, `/`), `IN`, `NOT IN`, `IS NULL`, `IS NOT NULL`
+   - **Parameterized queries**: `$name` placeholders resolved at execution time
+   - **Deep import path**: `import { CypherEngine } from 'grafio/cypher'`
+   - **Validation gate**: rejects `CREATE`, `DELETE`, `SET`, `REMOVE`, `MERGE`, `DETACH`, aggregations (`COUNT`, `SUM`, etc.), and `WITH`/`UNWIND`
+   - **Architecture**: hand-written lexer, recursive-descent Pratt parser, chain-of-pass semantic analyser, query planner with filter-pushdown, row-based executor
+   - 200 tests across 6 test suites (Lexer, Parser, Semantic, Planner, Executor, Integration)
+
 ## [6.2.0] - 2026-05-09
 
 ### ✨ New Features
