@@ -10,14 +10,12 @@ export { GraphTransaction } from './Graph/GraphTransaction';
 export type { NodeData } from './types';
 export type { EdgeData } from './types';
 export type { GraphData } from './types';
+export type { GraphQueryOptions, IOrderBy, ITransactionHandle } from './types';
 export type { TraversalOptions } from './Graph/TraversalOptions';
 export type { MermaidOptions } from './Graph/GraphToMermaid';
 
 // Storage abstraction
 export type { IStorageProvider } from './storage/IStorageProvider';
-export type { ITransactionHandle } from './storage/IStorageProvider';
-export type { IOrderBy } from './storage/IStorageProvider';
-export type { GraphQueryOptions } from './storage/IStorageProvider';
 export { InMemoryStorageProvider } from './storage/InMemoryStorageProvider';
 export type { InMemoryStorageProviderOptions } from './storage/InMemoryStorageProvider';
 export type { IGraphFactory } from './storage/IGraphFactory';

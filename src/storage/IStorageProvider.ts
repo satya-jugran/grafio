@@ -1,55 +1,7 @@
-import type { NodeData, EdgeData, GraphData } from '../types';
+import type { NodeData, EdgeData, GraphData, GraphQueryOptions, IOrderBy, ITransactionHandle } from '../types';
 
-/**
- * Represents a transaction handle returned by a storage provider.
- * Contains a unique transaction identifier and optional backend-specific context.
- */
-export interface ITransactionHandle {
-  /** Unique transaction identifier */
-  id: string;
-  /** Backend-specific context (e.g., MongoDB ClientSession) */
-  context?: unknown;
-}
-
-/**
- * Ordering options for collection queries.
- */
-export interface IOrderBy {
-  /** Field to order by */
-  field: 'createdOn' | 'updatedOn';
-  /** Sort direction */
-  direction: 'asc' | 'desc';
-}
-
-/**
- * Unified query options for graph node and edge queries.
- * Provides composable filtering, ordering, and pagination.
- */
-export interface GraphQueryOptions {
-  /**
-   * Filter criteria - all conditions must match (AND logic).
-   * If undefined, no filtering is applied.
-   */
-  filter?: {
-    /**
-     * Match nodes/edges with ANY of these types (OR within types).
-     * Example: types: ['User', 'Admin'] matches both User and Admin nodes.
-     */
-    types?: string[];
-    /**
-     * Match nodes/edges where ALL specified property key-value pairs exist.
-     * Example: properties: [{ key: 'active', value: true }] matches nodes
-     * where node.properties.active === true.
-     */
-    properties?: Array<{ key: string; value: unknown }>;
-  };
-  /** Order results by the specified field */
-  orderBy?: IOrderBy;
-  /** Maximum number of results to return */
-  limit?: number;
-  /** Transaction handle for transactional storage providers */
-  transaction?: ITransactionHandle;
-}
+// Re-export for backwards compatibility - these are now defined in types.ts
+export type { GraphQueryOptions, IOrderBy, ITransactionHandle } from '../types';
 
 /**
  * Contract that every storage backend must fulfill.
