@@ -681,8 +681,8 @@ export class Parser {
 
   private _peek(offset: number = 0): Token {
     const idx = this._pos + offset;
-    if (idx >= this._tokens.length) {
-      // Return a synthetic EOF if we run past the array.
+    if (idx < 0 || idx >= this._tokens.length) {
+      // Return a synthetic EOF for out-of-bounds access.
       return { kind: TokenKind.EOF, value: '', line: 0, col: 0 };
     }
     return this._tokens[idx];
