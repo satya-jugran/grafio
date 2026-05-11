@@ -54,6 +54,49 @@ async function buildChainGraph(): Promise<Graph> {
   return g;
 }
 
+/** Helper: build a complex multi-path graph for traversal.
+ *
+ *         A
+ *        ↙ ↘
+ *       B   C
+ *       ↓ ↘ ↓
+ *       D   E
+ *        ↘ ↙
+ *         F
+ *
+ * All edges are KNOWS, all nodes are Person.
+ *
+ * Key: E is a middle node reachable via TWO different 2-hop paths:
+ *   A → C → E  and  A → B → E
+ *
+ * F is reachable via THREE different 3-hop paths:
+ *   A → B → D → F
+ *   A → C → E → F
+ *   A → B → E → F
+ *
+ * This stresses the visited-Map: if E were pruned after the first visit,
+ * the path A→B→E→F would be lost.
+ */
+async function buildDiamondGraph(): Promise<Graph> {
+  const g = new Graph();
+  const a = await g.addNode('Person', { name: 'A' });
+  const b = await g.addNode('Person', { name: 'B' });
+  const c = await g.addNode('Person', { name: 'C' });
+  const d = await g.addNode('Person', { name: 'D' });
+  const e = await g.addNode('Person', { name: 'E' });
+  const f = await g.addNode('Person', { name: 'F' });
+
+  await g.addEdge(a.id, b.id, 'KNOWS', {});
+  await g.addEdge(a.id, c.id, 'KNOWS', {});
+  await g.addEdge(b.id, d.id, 'KNOWS', {});
+  await g.addEdge(b.id, e.id, 'KNOWS', {});  // B → E (second path to E)
+  await g.addEdge(c.id, e.id, 'KNOWS', {});
+  await g.addEdge(d.id, f.id, 'KNOWS', {});
+  await g.addEdge(e.id, f.id, 'KNOWS', {});
+
+  return g;
+}
+
 describe('Executor', () => {
   // ── Node scan ──────────────────────────────────────────────────
   describe('node scan', () => {
@@ -175,6 +218,24 @@ describe('Executor', () => {
       const names = result.rows.map((r) => r.name);
       // Both BFS and DFS should contain B and C (DFS goes deep first, so may find D before C)
       expect(names).toHaveLength(2);
+    });
+
+    it('finds target via multiple paths in complex multi-path graph', async () => {
+      const graph = await buildDiamondGraph();
+      // F is reachable via THREE distinct 3-hop paths:
+      //   A → B → D → F
+      //   A → C → E → F
+      //   A → B → E → F  (this path would be lost if E were pruned after first visit)
+      const result = await executeQuery(
+        "MATCH (a:Person)-[*1..3]->(b:Person) WHERE a.name = 'A' AND b.name = 'F' RETURN b.name AS name",
+        {},
+        graph,
+      );
+      // F should appear 3 times — once per unique path
+      expect(result.rows).toHaveLength(3);
+      for (const row of result.rows) {
+        expect(row.name).toBe('F');
+      }
     });
   });
 

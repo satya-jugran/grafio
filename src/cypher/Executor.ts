@@ -189,10 +189,11 @@ export class Executor {
     sourceNode: Node,
   ): Promise<Row[]> {
     const result: Row[] = [];
-    const visited = new Set<string>([sourceNode.id]);
+    // Track minimum hops at which each node was visited.
+    // Using a map prevents over-pruning: a node reached via a shorter
+    // path should still be explored downstream.
+    const visited = new Map<string, number>([[sourceNode.id, 0]]);
 
-    // Use a shared array as both queue (BFS via shift) and stack (DFS via pop).
-    // Both strategies share the same visited-set cycle detection.
     const frontier: Array<{ node: Node; row: Row; hops: number }> = [
       { node: sourceNode, row, hops: 0 },
     ];
@@ -233,8 +234,11 @@ export class Executor {
           result.push(newRow);
         }
 
-        if (newHops < step.maxHops && !visited.has(targetId)) {
-          visited.add(targetId);
+        // Only skip if we've reached this node at ≤ the current hop count
+        // (nothing new to explore downstream).
+        const prevHops = visited.get(targetId);
+        if (newHops < step.maxHops && (prevHops === undefined || newHops <= prevHops)) {
+          visited.set(targetId, newHops);
           const nextRow = new Map(curRow);
           frontier.push({ node: targetNode, row: nextRow, hops: newHops });
         }
