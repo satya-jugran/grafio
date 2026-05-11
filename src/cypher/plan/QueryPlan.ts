@@ -39,7 +39,7 @@ export type PlanStep =
 /**
  * Scan all nodes of a given label (type).
  *
- * Maps to: {@link Graph.getNodesByType}
+ * Maps to: `graph.getNodes({ filter: { types: [label] } })`
  */
 export interface NodeScanStep {
   kind: 'NodeScanStep';

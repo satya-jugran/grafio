@@ -10,7 +10,6 @@ export { GraphTransaction } from './Graph/GraphTransaction';
 export type { NodeData } from './types';
 export type { EdgeData } from './types';
 export type { GraphData } from './types';
-export type { GraphOptions } from './types';
 export type { TraversalOptions } from './Graph/TraversalOptions';
 export type { MermaidOptions } from './Graph/GraphToMermaid';
 

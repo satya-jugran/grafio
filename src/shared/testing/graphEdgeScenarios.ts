@@ -1,5 +1,5 @@
 import { beforeEach, describe, it, expect } from '@jest/globals';
-import { Graph } from '../../index';
+import { Graph, Node } from '../../index';
 import type { IStorageProvider } from '../../index';
 import { NodeNotFoundError } from '../../errors';
 
@@ -89,18 +89,20 @@ export function runGraphEdgeScenarios(
       await graph.addEdge(bobId, aliceId, 'KNOWS');
       await graph.addEdge(charlieId, aliceId, 'KNOWS');
 
-      const parents = await graph.getParents(aliceId);
+      const edges = await graph.getEdgesTo(aliceId);
+      const parents = await Promise.all(edges.map(e => graph.getNode(e.sourceId)));
       expect(parents).toHaveLength(2);
-      expect(parents.map(n => n.properties.name).sort()).toEqual(['Bob', 'Charlie']);
+      expect(parents.filter((n): n is Node => n !== undefined).map(n => n.properties.name).sort()).toEqual(['Bob', 'Charlie']);
     });
 
     it('should get children of a node', async () => {
       await graph.addEdge(aliceId, bobId, 'KNOWS');
       await graph.addEdge(aliceId, charlieId, 'KNOWS');
 
-      const children = await graph.getChildren(aliceId);
+      const edges = await graph.getEdgesFrom(aliceId);
+      const children = await Promise.all(edges.map(e => graph.getNode(e.targetId)));
       expect(children).toHaveLength(2);
-      expect(children.map(n => n.properties.name).sort()).toEqual(['Bob', 'Charlie']);
+      expect(children.filter((n): n is Node => n !== undefined).map(n => n.properties.name).sort()).toEqual(['Bob', 'Charlie']);
     });
 
     it('should get edges from a node', async () => {
@@ -134,16 +136,16 @@ export function runGraphEdgeScenarios(
       await graph.addEdge(aliceId, charlieId, 'KNOWS');
       await graph.addEdge(bobId, charlieId, 'LIKES');
 
-      const knowsEdges = await graph.getEdgesByType('KNOWS');
+      const knowsEdges = await graph.getEdges({ filter: { types: ['KNOWS'] } });
       expect(knowsEdges).toHaveLength(2);
     });
 
-    it('should throw NodeNotFoundError for getParents on non-existent node', async () => {
-      await expect(graph.getParents('non-existent')).rejects.toThrow(NodeNotFoundError);
+    it('should throw NodeNotFoundError for getEdgesFrom on non-existent node', async () => {
+      await expect(graph.getEdgesFrom('non-existent')).rejects.toThrow(NodeNotFoundError);
     });
 
-    it('should throw NodeNotFoundError for getChildren on non-existent node', async () => {
-      await expect(graph.getChildren('non-existent')).rejects.toThrow(NodeNotFoundError);
+    it('should throw NodeNotFoundError for getEdgesTo on non-existent node', async () => {
+      await expect(graph.getEdgesTo('non-existent')).rejects.toThrow(NodeNotFoundError);
     });
   });
 }

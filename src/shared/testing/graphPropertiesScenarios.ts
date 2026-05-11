@@ -144,7 +144,7 @@ export function runGraphPropertiesScenarios(
         await expect(graph.createIndex('node', 'email')).resolves.toBeUndefined();
 
         // Should be able to query by the indexed property
-        const results = await graph.getNodesByProperty('email', 'alice@example.com');
+        const results = await graph.getNodes({ filter: { properties: [{ key: 'email', value: 'alice@example.com' }] } });
         expect(results).toHaveLength(1);
         expect(results[0].properties.name).toBe('Alice');
       });
@@ -157,7 +157,7 @@ export function runGraphPropertiesScenarios(
         // Create compound index for Person nodes only
         await expect(graph.createIndex('node', 'email', 'Person')).resolves.toBeUndefined();
 
-        const results = await graph.getNodesByProperty('email', 'alice@example.com', { filter: { nodeType: 'Person' } });
+        const results = await graph.getNodes({ filter: { types: ['Person'], properties: [{ key: 'email', value: 'alice@example.com' }] } });
         expect(results).toHaveLength(1);
         expect(results[0].type).toBe('Person');
       });
@@ -169,7 +169,7 @@ export function runGraphPropertiesScenarios(
         // type='*' should create simple index across all types
         await expect(graph.createIndex('node', 'email', '*')).resolves.toBeUndefined();
 
-        const results = await graph.getNodesByProperty('email', 'math@example.com');
+        const results = await graph.getNodes({ filter: { properties: [{ key: 'email', value: 'math@example.com' }] } });
         expect(results).toHaveLength(1);
         expect(results[0].type).toBe('Course');
       });
@@ -186,7 +186,7 @@ export function runGraphPropertiesScenarios(
 
         await expect(graph.createIndex('edge', 'weight')).resolves.toBeUndefined();
 
-        const results = await graph.getEdgesByProperty('weight', 0.8);
+        const results = await graph.getEdges({ filter: { properties: [{ key: 'weight', value: 0.8 }] } });
         expect(results).toHaveLength(1);
         expect(results[0].sourceId).toBe(alice.id);
       });

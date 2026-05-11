@@ -77,7 +77,7 @@ export async function runScenario(
 
 const COL_WIDTHS = {
   category:  14,
-  name:      26,
+  name:      32,
   iters:      9,
   mean:      10,
   p95:        9,

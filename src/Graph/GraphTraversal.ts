@@ -27,18 +27,12 @@ export class GraphTraversal {
     nodeTypes: string[] = ['*'],
     edgeTypes: string[] = ['*']
   ): Promise<string[]> {
-    // Pass single edge type to storage if filter is specific (for compound index usage)
-    const edgeTypeFilter = (edgeTypes.length === 1 && edgeTypes[0] !== '*') ? edgeTypes[0] : undefined;
-    const outEdges = await this._store.getEdgesBySource(nodeId, edgeTypeFilter ? { filter: { types: [edgeTypeFilter] } } : undefined);
+    // Pass edge types to storage for filtering (supports multiple types)
+    const edgeTypeFilter = (edgeTypes.length > 0 && !edgeTypes.includes('*')) ? edgeTypes : undefined;
+    const outEdges = await this._store.getEdgesBySource(nodeId, edgeTypeFilter ? { filter: { types: edgeTypeFilter } } : undefined);
     const children: string[] = [];
 
     for (const edge of outEdges) {
-      // Apply additional edge type filter if wildcard was used
-      const shouldFilterEdge = edgeTypes.length > 0 && !edgeTypes.includes('*');
-      if (shouldFilterEdge && !edgeTypes.includes(edge.type)) {
-        continue;
-      }
-
       // Apply node type filter for target node
       const targetNode = await this._store.getNode(edge.targetId);
       if (!targetNode) continue;

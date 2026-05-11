@@ -115,7 +115,7 @@ export function runGraphIndexScenarios(
       });
     });
 
-    describe('getNodesByProperty with index', () => {
+    describe('getNodes with filter.properties', () => {
       it('should find nodes by property value after creating index', async () => {
         await graph.addNode('Person', { name: 'Alice', email: 'alice@example.com' });
         await graph.addNode('Person', { name: 'Bob', email: 'bob@example.com' });
@@ -123,7 +123,7 @@ export function runGraphIndexScenarios(
 
         await graph.createIndex('node', 'email');
 
-        const results = await graph.getNodesByProperty('email', 'alice@example.com');
+        const results = await graph.getNodes({ filter: { properties: [{ key: 'email', value: 'alice@example.com' }] } });
         expect(results).toHaveLength(1);
         expect(results[0].properties.name).toBe('Alice');
       });
@@ -135,7 +135,7 @@ export function runGraphIndexScenarios(
 
         await graph.createIndex('node', 'email', 'Person');
 
-        const results = await graph.getNodesByProperty('email', 'alice@example.com', { filter: { nodeType: 'Person' } });
+        const results = await graph.getNodes({ filter: { types: ['Person'], properties: [{ key: 'email', value: 'alice@example.com' }] } });
         expect(results).toHaveLength(1);
         expect(results[0].type).toBe('Person');
       });
@@ -145,7 +145,7 @@ export function runGraphIndexScenarios(
 
         await graph.createIndex('node', 'email');
 
-        const results = await graph.getNodesByProperty('email', 'notexist@example.com');
+        const results = await graph.getNodes({ filter: { properties: [{ key: 'email', value: 'notexist@example.com' }] } });
         expect(results).toHaveLength(0);
       });
 
@@ -156,12 +156,12 @@ export function runGraphIndexScenarios(
 
         await graph.createIndex('node', 'city');
 
-        const results = await graph.getNodesByProperty('city', 'NYC');
+        const results = await graph.getNodes({ filter: { properties: [{ key: 'city', value: 'NYC' }] } });
         expect(results).toHaveLength(2);
       });
     });
 
-    describe('getEdgesByProperty with index', () => {
+    describe('getEdges with filter.properties', () => {
       it('should find edges by property value after creating index', async () => {
         const alice = await graph.addNode('Person', { name: 'Alice' });
         const bob = await graph.addNode('Person', { name: 'Bob' });
@@ -172,7 +172,7 @@ export function runGraphIndexScenarios(
 
         await graph.createIndex('edge', 'weight');
 
-        const results = await graph.getEdgesByProperty('weight', 0.8);
+        const results = await graph.getEdges({ filter: { properties: [{ key: 'weight', value: 0.8 }] } });
         expect(results).toHaveLength(1);
         expect(results[0].sourceId).toBe(alice.id);
       });
@@ -187,7 +187,7 @@ export function runGraphIndexScenarios(
 
         await graph.createIndex('edge', 'weight', 'LIKES');
 
-        const results = await graph.getEdgesByProperty('weight', 0.8, { filter: { edgeType: 'LIKES' } });
+        const results = await graph.getEdges({ filter: { types: ['LIKES'], properties: [{ key: 'weight', value: 0.8 }] } });
         expect(results).toHaveLength(1);
       });
 
@@ -199,7 +199,7 @@ export function runGraphIndexScenarios(
 
         await graph.createIndex('edge', 'weight');
 
-        const results = await graph.getEdgesByProperty('weight', 0.5);
+        const results = await graph.getEdges({ filter: { properties: [{ key: 'weight', value: 0.5 }] } });
         expect(results).toHaveLength(0);
       });
 
@@ -214,7 +214,7 @@ export function runGraphIndexScenarios(
 
         await graph.createIndex('edge', 'weight');
 
-        const results = await graph.getEdgesByProperty('weight', 0.8);
+        const results = await graph.getEdges({ filter: { properties: [{ key: 'weight', value: 0.8 }] } });
         expect(results).toHaveLength(2);
       });
     });
@@ -228,7 +228,7 @@ export function runGraphIndexScenarios(
         await expect(graph.createIndex('node', 'nonexistent')).resolves.toBeUndefined();
 
         // Querying for that property should return empty
-        const results = await graph.getNodesByProperty('nonexistent', 'value');
+        const results = await graph.getNodes({ filter: { properties: [{ key: 'nonexistent', value: 'value' }] } });
         expect(results).toHaveLength(0);
       });
 
@@ -239,7 +239,7 @@ export function runGraphIndexScenarios(
 
         await graph.createIndex('node', 'email');
 
-        const results = await graph.getNodesByProperty('email', 'alice@example.com');
+        const results = await graph.getNodes({ filter: { properties: [{ key: 'email', value: 'alice@example.com' }] } });
         expect(results).toHaveLength(1);
       });
 
@@ -250,7 +250,7 @@ export function runGraphIndexScenarios(
         await graph.createIndex('node', 'email', 'Person');
 
         // Querying for Course nodes should not return Person nodes
-        const results = await graph.getNodesByProperty('email', 'alice@example.com', { filter: { nodeType: 'Course' } });
+        const results = await graph.getNodes({ filter: { types: ['Course'], properties: [{ key: 'email', value: 'alice@example.com' }] } });
         expect(results).toHaveLength(0);
       });
     });

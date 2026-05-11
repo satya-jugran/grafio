@@ -128,9 +128,9 @@ export function runGraphNodeScenarios(
       await graph.addNode('Person', { name: 'Bob' });
       await graph.addNode('Course', { name: 'Python' });
 
-      const people = await graph.getNodesByType('Person');
+      const people = await graph.getNodes({ filter: { types: ['Person'] } });
       expect(people).toHaveLength(2);
-      expect(people.map(n => n.properties.name).sort()).toEqual(['Alice', 'Bob']);
+      expect(people.map((n: any) => n.properties.name).sort()).toEqual(['Alice', 'Bob']);
     });
 
     it('should get nodes by property', async () => {
@@ -138,16 +138,16 @@ export function runGraphNodeScenarios(
       await graph.addNode('Person', { name: 'Bob', age: 25 });
       await graph.addNode('Person', { name: 'Charlie', age: 30 });
 
-      const thirties = await graph.getNodesByProperty('age', 30);
+      const thirties = await graph.getNodes({ filter: { properties: [{ key: 'age', value: 30 }] } });
       expect(thirties).toHaveLength(2);
-      expect(thirties.map(n => n.properties.name).sort()).toEqual(['Alice', 'Charlie']);
+      expect(thirties.map((n: any) => n.properties.name).sort()).toEqual(['Alice', 'Charlie']);
     });
 
     it('should return empty array when property value does not match', async () => {
       await graph.addNode('Person', { name: 'Alice', age: 30 });
       await graph.addNode('Person', { name: 'Bob', age: 25 });
 
-      const nonexistent = await graph.getNodesByProperty('age', 50);
+      const nonexistent = await graph.getNodes({ filter: { properties: [{ key: 'age', value: 50 }] } });
       expect(nonexistent).toHaveLength(0);
     });
 
@@ -156,9 +156,9 @@ export function runGraphNodeScenarios(
       await graph.addNode('Person', { name: 'Bob', city: 'LA' });
       await graph.addNode('Person', { name: 'Charlie', city: 'NYC' });
 
-      const nycResidents = await graph.getNodesByProperty('city', 'NYC');
+      const nycResidents = await graph.getNodes({ filter: { properties: [{ key: 'city', value: 'NYC' }] } });
       expect(nycResidents).toHaveLength(2);
-      expect(nycResidents.map(n => n.properties.name).sort()).toEqual(['Alice', 'Charlie']);
+      expect(nycResidents.map((n: any) => n.properties.name).sort()).toEqual(['Alice', 'Charlie']);
     });
   });
 }

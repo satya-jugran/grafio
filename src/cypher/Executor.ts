@@ -8,7 +8,7 @@
  * ### Execution model
  * - Rows are modelled as `Map<string, unknown>` (variable name → value).
  * - Parameter placeholders (`$name`) are resolved from the `params` map.
- * - A {@link NodeScanStep} calls `graph.getNodesByType(label)` or `graph.getNodes()`.
+ * - A {@link NodeScanStep} calls `graph.getNodes({ filter: { types: [label] } })` or `graph.getNodes()`.
  * - An {@link EdgeExpandStep} dispatches on its `strategy` field:
  *   - `'single-hop'` → `getEdgesFrom` / `getEdgesTo`
  *   - `'multi-hop-bfs'` → BFS traversal
@@ -107,7 +107,7 @@ export class Executor {
 
   private async _executeNodeScan(step: NodeScanStep, rows: Row[]): Promise<Row[]> {
     const nodes = step.label
-      ? await this._graph.getNodesByType(step.label)
+      ? await this._graph.getNodes({ filter: { types: [step.label] } })
       : await this._graph.getNodes();
 
     const result: Row[] = [];
@@ -155,9 +155,8 @@ export class Executor {
     row: Row,
     sourceNode: Node,
   ): Promise<Row[]> {
-    // Use Graph API filtering for single type, in-process for multi-type.
-    const filterArg = step.types.length === 1
-      ? { filter: { edgeType: step.types[0] } }
+    const filterArg = step.types.length > 0
+      ? { filter: { types: step.types } }
       : undefined;
 
     const edges =
@@ -167,10 +166,6 @@ export class Executor {
 
     const result: Row[] = [];
     for (const edge of edges) {
-      // In-process filter for multi-type edges (e.g. [:TYPE1|TYPE2]).
-      if (step.types.length > 1 && !this._matchesEdgeTypes(edge, step.types)) {
-        continue;
-      }
       const targetId = step.direction === 'out' ? edge.targetId : edge.sourceId;
       const targetNode = await this._graph.getNode(targetId);
       if (!targetNode) continue;
@@ -207,8 +202,8 @@ export class Executor {
 
       if (hops >= step.maxHops) continue;
 
-      const filterArg = step.types.length === 1
-        ? { filter: { edgeType: step.types[0] } }
+      const filterArg = step.types.length > 0
+        ? { filter: { types: step.types } }
         : undefined;
 
       const edges =
@@ -217,10 +212,6 @@ export class Executor {
           : await this._graph.getEdgesTo(node.id, filterArg);
 
       for (const edge of edges) {
-        // In-process filter for multi-type edges.
-        if (step.types.length > 1 && !this._matchesEdgeTypes(edge, step.types)) {
-          continue;
-        }
         const targetId = step.direction === 'out' ? edge.targetId : edge.sourceId;
         const targetNode = await this._graph.getNode(targetId);
         if (!targetNode) continue;
@@ -511,14 +502,6 @@ export class Executor {
   }
 
   // ── Result builder ──────────────────────────────────────────────
-
-  /**
-   * Check whether an edge's type matches any of the expected types.
-   * Used for multi-type edge patterns like `[:TYPE1|TYPE2]`.
-   */
-  private _matchesEdgeTypes(edge: Edge, types: string[]): boolean {
-    return types.length === 0 || types.includes(edge.type);
-  }
 
   private _buildResult(
     plan: QueryPlan,

@@ -57,77 +57,77 @@ export function runGraphTraverseScenarios(
     });
 
     it('should return null when source node does not exist', async () => {
-      const b = (await graph.getNodesByProperty('name', 'B'))[0];
+      const b = (await graph.getNodes({ filter: { properties: [{ key: 'name', value: 'B' }] } }))[0];
       await expect(graph.traverse('non-existent', b.id)).resolves.toBeNull();
     });
 
     it('should return null when target node does not exist', async () => {
-      const a = (await graph.getNodesByProperty('name', 'A'))[0];
+      const a = (await graph.getNodes({ filter: { properties: [{ key: 'name', value: 'A' }] } }))[0];
       await expect(graph.traverse(a.id, 'non-existent')).resolves.toBeNull();
     });
 
     it('should return [source] when source equals target', async () => {
-      const a = (await graph.getNodesByProperty('name', 'A'))[0];
+      const a = (await graph.getNodes({ filter: { properties: [{ key: 'name', value: 'A' }] } }))[0];
       await expect(graph.traverse(a.id, a.id)).resolves.toEqual([[a.id]]);
     });
 
     it('should find direct path with BFS', async () => {
-      const a = (await graph.getNodesByProperty('name', 'A'))[0];
-      const b = (await graph.getNodesByProperty('name', 'B'))[0];
+      const a = (await graph.getNodes({ filter: { properties: [{ key: 'name', value: 'A' }] } }))[0];
+      const b = (await graph.getNodes({ filter: { properties: [{ key: 'name', value: 'B' }] } }))[0];
       await expect(graph.traverse(a.id, b.id, { method: 'bfs' })).resolves.toEqual([[a.id, b.id]]);
     });
 
     it('should find multi-hop path with BFS', async () => {
-      const a = (await graph.getNodesByProperty('name', 'A'))[0];
-      const b = (await graph.getNodesByProperty('name', 'B'))[0];
-      const c = (await graph.getNodesByProperty('name', 'C'))[0];
+      const a = (await graph.getNodes({ filter: { properties: [{ key: 'name', value: 'A' }] } }))[0];
+      const b = (await graph.getNodes({ filter: { properties: [{ key: 'name', value: 'B' }] } }))[0];
+      const c = (await graph.getNodes({ filter: { properties: [{ key: 'name', value: 'C' }] } }))[0];
       await expect(graph.traverse(a.id, c.id, { method: 'bfs' })).resolves.toEqual([[a.id, b.id, c.id]]);
     });
 
     it('should find path through different branches with BFS', async () => {
-      const a = (await graph.getNodesByProperty('name', 'A'))[0];
-      const d = (await graph.getNodesByProperty('name', 'D'))[0];
-      const f = (await graph.getNodesByProperty('name', 'F'))[0];
+      const a = (await graph.getNodes({ filter: { properties: [{ key: 'name', value: 'A' }] } }))[0];
+      const d = (await graph.getNodes({ filter: { properties: [{ key: 'name', value: 'D' }] } }))[0];
+      const f = (await graph.getNodes({ filter: { properties: [{ key: 'name', value: 'F' }] } }))[0];
       await expect(graph.traverse(a.id, f.id, { method: 'bfs' })).resolves.toEqual([[a.id, d.id, f.id]]);
     });
 
     it('should find path with BFS (shortest)', async () => {
       // A -> D -> E vs A -> B -> D -> E
-      const a = (await graph.getNodesByProperty('name', 'A'))[0];
-      const d = (await graph.getNodesByProperty('name', 'D'))[0];
-      const e = (await graph.getNodesByProperty('name', 'E'))[0];
+      const a = (await graph.getNodes({ filter: { properties: [{ key: 'name', value: 'A' }] } }))[0];
+      const d = (await graph.getNodes({ filter: { properties: [{ key: 'name', value: 'D' }] } }))[0];
+      const e = (await graph.getNodes({ filter: { properties: [{ key: 'name', value: 'E' }] } }))[0];
       await expect(graph.traverse(a.id, e.id, { method: 'bfs' })).resolves.toEqual([[a.id, d.id, e.id]]);
     });
 
     it('should find path with DFS', async () => {
-      const a = (await graph.getNodesByProperty('name', 'A'))[0];
-      const b = (await graph.getNodesByProperty('name', 'B'))[0];
-      const c = (await graph.getNodesByProperty('name', 'C'))[0];
+      const a = (await graph.getNodes({ filter: { properties: [{ key: 'name', value: 'A' }] } }))[0];
+      const b = (await graph.getNodes({ filter: { properties: [{ key: 'name', value: 'B' }] } }))[0];
+      const c = (await graph.getNodes({ filter: { properties: [{ key: 'name', value: 'C' }] } }))[0];
       await expect(graph.traverse(a.id, c.id, { method: 'dfs' })).resolves.toEqual([[a.id, b.id, c.id]]);
     });
 
     it('should return null when no path exists', async () => {
       // Add isolated node G with no connections
       await graph.addNode('Node', { name: 'G' });
-      const a = (await graph.getNodesByProperty('name', 'A'))[0];
-      const g = (await graph.getNodesByProperty('name', 'G'))[0];
+      const a = (await graph.getNodes({ filter: { properties: [{ key: 'name', value: 'A' }] } }))[0];
+      const g = (await graph.getNodes({ filter: { properties: [{ key: 'name', value: 'G' }] } }))[0];
       await expect(graph.traverse(a.id, g.id)).resolves.toBeNull();
     });
 
     it('should handle cycle without infinite loop', async () => {
       // Add edge that would create cycle
-      const d = (await graph.getNodesByProperty('name', 'D'))[0];
-      const b = (await graph.getNodesByProperty('name', 'B'))[0];
+      const d = (await graph.getNodes({ filter: { properties: [{ key: 'name', value: 'D' }] } }))[0];
+      const b = (await graph.getNodes({ filter: { properties: [{ key: 'name', value: 'B' }] } }))[0];
       await graph.addEdge(d.id, b.id, 'CONNECTS');
-      const a = (await graph.getNodesByProperty('name', 'A'))[0];
-      const c = (await graph.getNodesByProperty('name', 'C'))[0];
+      const a = (await graph.getNodes({ filter: { properties: [{ key: 'name', value: 'A' }] } }))[0];
+      const c = (await graph.getNodes({ filter: { properties: [{ key: 'name', value: 'C' }] } }))[0];
       await expect(graph.traverse(a.id, c.id, { method: 'bfs' })).resolves.toEqual([[a.id, b.id, c.id]]);
     });
 
     it('should default to BFS when method not specified', async () => {
-      const a = (await graph.getNodesByProperty('name', 'A'))[0];
-      const b = (await graph.getNodesByProperty('name', 'B'))[0];
-      const c = (await graph.getNodesByProperty('name', 'C'))[0];
+      const a = (await graph.getNodes({ filter: { properties: [{ key: 'name', value: 'A' }] } }))[0];
+      const b = (await graph.getNodes({ filter: { properties: [{ key: 'name', value: 'B' }] } }))[0];
+      const c = (await graph.getNodes({ filter: { properties: [{ key: 'name', value: 'C' }] } }))[0];
       await expect(graph.traverse(a.id, c.id)).resolves.toEqual([[a.id, b.id, c.id]]);
     });
 
@@ -247,12 +247,12 @@ export function runGraphTraverseScenarios(
     });
 
     it('should find all paths using wildcard source', async () => {
-      const a = (await graph.getNodesByProperty('name', 'A'))[0];
-      const b = (await graph.getNodesByProperty('name', 'B'))[0];
-      const c = (await graph.getNodesByProperty('name', 'C'))[0];
-      const d = (await graph.getNodesByProperty('name', 'D'))[0];
-      const e = (await graph.getNodesByProperty('name', 'E'))[0];
-      const f = (await graph.getNodesByProperty('name', 'F'))[0];
+      const a = (await graph.getNodes({ filter: { properties: [{ key: 'name', value: 'A' }] } }))[0];
+      const b = (await graph.getNodes({ filter: { properties: [{ key: 'name', value: 'B' }] } }))[0];
+      const c = (await graph.getNodes({ filter: { properties: [{ key: 'name', value: 'C' }] } }))[0];
+      const d = (await graph.getNodes({ filter: { properties: [{ key: 'name', value: 'D' }] } }))[0];
+      const e = (await graph.getNodes({ filter: { properties: [{ key: 'name', value: 'E' }] } }))[0];
+      const f = (await graph.getNodes({ filter: { properties: [{ key: 'name', value: 'F' }] } }))[0];
 
       // Find all paths from A to any node
       const paths = await graph.traverse(a.id, '*');
@@ -269,10 +269,10 @@ export function runGraphTraverseScenarios(
     });
 
     it('should find all paths using wildcard target', async () => {
-      const a = (await graph.getNodesByProperty('name', 'A'))[0];
-      const b = (await graph.getNodesByProperty('name', 'B'))[0];
-      const c = (await graph.getNodesByProperty('name', 'C'))[0];
-      const d = (await graph.getNodesByProperty('name', 'D'))[0];
+      const a = (await graph.getNodes({ filter: { properties: [{ key: 'name', value: 'A' }] } }))[0];
+      const b = (await graph.getNodes({ filter: { properties: [{ key: 'name', value: 'B' }] } }))[0];
+      const c = (await graph.getNodes({ filter: { properties: [{ key: 'name', value: 'C' }] } }))[0];
+      const d = (await graph.getNodes({ filter: { properties: [{ key: 'name', value: 'D' }] } }))[0];
 
       // Find all paths to D from any node
       const paths = await graph.traverse('*', d.id);
@@ -298,9 +298,9 @@ export function runGraphTraverseScenarios(
     });
 
     it('should find all paths using array of sources', async () => {
-      const a = (await graph.getNodesByProperty('name', 'A'))[0];
-      const b = (await graph.getNodesByProperty('name', 'B'))[0];
-      const e = (await graph.getNodesByProperty('name', 'E'))[0];
+      const a = (await graph.getNodes({ filter: { properties: [{ key: 'name', value: 'A' }] } }))[0];
+      const b = (await graph.getNodes({ filter: { properties: [{ key: 'name', value: 'B' }] } }))[0];
+      const e = (await graph.getNodes({ filter: { properties: [{ key: 'name', value: 'E' }] } }))[0];
 
       // Find paths from [A, B] to E
       const paths = await graph.traverse([a.id, b.id], e.id);
@@ -317,11 +317,11 @@ export function runGraphTraverseScenarios(
     });
 
     it('should find all paths using array of sources and targets', async () => {
-      const a = (await graph.getNodesByProperty('name', 'A'))[0];
-      const b = (await graph.getNodesByProperty('name', 'B'))[0];
-      const c = (await graph.getNodesByProperty('name', 'C'))[0];
-      const e = (await graph.getNodesByProperty('name', 'E'))[0];
-      const f = (await graph.getNodesByProperty('name', 'F'))[0];
+      const a = (await graph.getNodes({ filter: { properties: [{ key: 'name', value: 'A' }] } }))[0];
+      const b = (await graph.getNodes({ filter: { properties: [{ key: 'name', value: 'B' }] } }))[0];
+      const c = (await graph.getNodes({ filter: { properties: [{ key: 'name', value: 'C' }] } }))[0];
+      const e = (await graph.getNodes({ filter: { properties: [{ key: 'name', value: 'E' }] } }))[0];
+      const f = (await graph.getNodes({ filter: { properties: [{ key: 'name', value: 'F' }] } }))[0];
 
       // Find paths from [A, B] to [C, E, F]
       const paths = await graph.traverse([a.id, b.id], [c.id, e.id, f.id]);
