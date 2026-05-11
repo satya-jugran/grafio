@@ -155,7 +155,8 @@ export class Executor {
     row: Row,
     sourceNode: Node,
   ): Promise<Row[]> {
-    const filterArg = step.types.length > 0
+    // Use Graph API filtering for single type, in-process for multi-type.
+    const filterArg = step.types.length === 1
       ? { filter: { edgeType: step.types[0] } }
       : undefined;
 
@@ -166,6 +167,10 @@ export class Executor {
 
     const result: Row[] = [];
     for (const edge of edges) {
+      // In-process filter for multi-type edges (e.g. [:TYPE1|TYPE2]).
+      if (step.types.length > 1 && !this._matchesEdgeTypes(edge, step.types)) {
+        continue;
+      }
       const targetId = step.direction === 'out' ? edge.targetId : edge.sourceId;
       const targetNode = await this._graph.getNode(targetId);
       if (!targetNode) continue;
@@ -201,7 +206,7 @@ export class Executor {
 
       if (hops >= step.maxHops) continue;
 
-      const filterArg = step.types.length > 0
+      const filterArg = step.types.length === 1
         ? { filter: { edgeType: step.types[0] } }
         : undefined;
 
@@ -211,6 +216,10 @@ export class Executor {
           : await this._graph.getEdgesTo(node.id, filterArg);
 
       for (const edge of edges) {
+        // In-process filter for multi-type edges.
+        if (step.types.length > 1 && !this._matchesEdgeTypes(edge, step.types)) {
+          continue;
+        }
         const targetId = step.direction === 'out' ? edge.targetId : edge.sourceId;
         const targetNode = await this._graph.getNode(targetId);
         if (!targetNode) continue;
@@ -498,6 +507,14 @@ export class Executor {
   }
 
   // ── Result builder ──────────────────────────────────────────────
+
+  /**
+   * Check whether an edge's type matches any of the expected types.
+   * Used for multi-type edge patterns like `[:TYPE1|TYPE2]`.
+   */
+  private _matchesEdgeTypes(edge: Edge, types: string[]): boolean {
+    return types.length === 0 || types.includes(edge.type);
+  }
 
   private _buildResult(
     plan: QueryPlan,

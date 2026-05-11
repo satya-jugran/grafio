@@ -87,6 +87,18 @@ describe('Executor', () => {
       expect(result.rows).toHaveLength(1);
       expect(result.rows[0].friend).toBe('Bob');
     });
+
+    it('matches multi-type edge pattern [:KNOWS|WORKS_AT]', async () => {
+      const graph = await buildSocialGraph();
+      // Alice has KNOWS→Bob and WORKS_AT→Acme
+      const result = await executeQuery(
+        "MATCH (a:Person)-[:KNOWS|WORKS_AT]->(b) WHERE a.name = 'Alice' RETURN b.name AS name ORDER BY b.name ASC",
+        {},
+        graph,
+      );
+      const names = result.rows.map((r) => r.name);
+      expect(names).toEqual(['Acme', 'Bob']);
+    });
   });
 
   // ── Multi-hop (variable-length) expansion ──────────────────────
