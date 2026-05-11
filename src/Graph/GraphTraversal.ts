@@ -28,8 +28,8 @@ export class GraphTraversal {
     edgeTypes: string[] = ['*']
   ): Promise<string[]> {
     // Pass single edge type to storage if filter is specific (for compound index usage)
-    const edgeType = (edgeTypes.length === 1 && edgeTypes[0] !== '*') ? edgeTypes[0] : undefined;
-    const outEdges = await this._store.getEdgesBySource(nodeId, edgeType);
+    const edgeTypeFilter = (edgeTypes.length === 1 && edgeTypes[0] !== '*') ? edgeTypes[0] : undefined;
+    const outEdges = await this._store.getEdgesBySource(nodeId, edgeTypeFilter ? { filter: { types: [edgeTypeFilter] } } : undefined);
     const children: string[] = [];
 
     for (const edge of outEdges) {
@@ -71,7 +71,7 @@ export class GraphTraversal {
     // Use type-filtered query if nodeTypes are specified and not ['*']
     if (nodeTypes && nodeTypes.length > 0 && !nodeTypes.includes('*')) {
       const results = await Promise.all(
-        nodeTypes.map(type => this._store.getNodesByType(type))
+        nodeTypes.map(type => this._store.getNodes({ filter: { types: [type] } }))
       );
       const ids: string[] = [];
       for (const nodes of results) {
@@ -84,7 +84,7 @@ export class GraphTraversal {
 
     // Fall back to all nodes (limit to prevent unbounded traversal)
     const LIMIT = 100;
-    const all = await this._store.getAllNodes(LIMIT);
+    const all = await this._store.getNodes({ limit: LIMIT });
     if (all.length >= LIMIT) {
       throw new TraversalLimitExceededError(LIMIT);
     }
@@ -221,7 +221,7 @@ export class GraphTraversal {
       return false;
     };
 
-    const nodes = await this._store.getAllNodes();
+    const nodes = await this._store.getNodes();
     for (const node of nodes) {
       if (!visited.has(node.id)) {
         if (await hasCycle(node.id)) return false;
@@ -238,8 +238,8 @@ export class GraphTraversal {
    */
   async topologicalSort(): Promise<string[] | null> {
     const [nodes, edges] = await Promise.all([
-      this._store.getAllNodes(),
-      this._store.getAllEdges(),
+      this._store.getNodes(),
+      this._store.getEdges(),
     ]);
 
     const nodeIds = new Set(nodes.map(n => n.id));

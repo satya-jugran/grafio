@@ -1,5 +1,5 @@
 import type { NodeData, EdgeData, GraphData } from '../types';
-import type { IStorageProvider, IOrderBy, ITransactionHandle } from './IStorageProvider';
+import type { IStorageProvider, IOrderBy, ITransactionHandle, GraphQueryOptions } from './IStorageProvider';
 import {
   NodeAlreadyExistsError,
   EdgeAlreadyExistsError,
@@ -728,7 +728,8 @@ export class InMemoryStorageProvider implements IStorageProvider {
     return result;
   }
 
-  async getEdgesBySource(nodeId: string, type?: string, transaction?: ITransactionHandle): Promise<EdgeData[]> {
+  async getEdgesBySource(nodeId: string, options?: GraphQueryOptions): Promise<EdgeData[]> {
+    const transaction = options?.transaction;
     const overlay = this._getOverlay(transaction?.id);
     const seen = new Set<string>();
     const result: EdgeData[] = [];
@@ -738,7 +739,7 @@ export class InMemoryStorageProvider implements IStorageProvider {
       if (overlayIds) {
         for (const id of overlayIds) {
           const edge = overlay.edges.get(id);
-          if (edge && (!type || edge.type === type)) {
+          if (edge && this._matchesEdgeFilters(edge, options)) {
             result.push(deepClone(edge));
             seen.add(id);
           }
@@ -753,16 +754,18 @@ export class InMemoryStorageProvider implements IStorageProvider {
         const edge = this._edges.get(id);
         if (edge) {
           const overlayEdge = overlay?.edges.get(id);
-          if (overlayEdge !== null && (!type || edge.type === type)) {
+          if (overlayEdge !== null && this._matchesEdgeFilters(edge, options)) {
             result.push(deepClone(edge));
           }
         }
       }
     }
-    return result;
+
+    return this._applyOrderAndLimit(result, options);
   }
 
-  async getEdgesByTarget(nodeId: string, type?: string, transaction?: ITransactionHandle): Promise<EdgeData[]> {
+  async getEdgesByTarget(nodeId: string, options?: GraphQueryOptions): Promise<EdgeData[]> {
+    const transaction = options?.transaction;
     const overlay = this._getOverlay(transaction?.id);
     const seen = new Set<string>();
     const result: EdgeData[] = [];
@@ -772,7 +775,7 @@ export class InMemoryStorageProvider implements IStorageProvider {
       if (overlayIds) {
         for (const id of overlayIds) {
           const edge = overlay.edges.get(id);
-          if (edge && (!type || edge.type === type)) {
+          if (edge && this._matchesEdgeFilters(edge, options)) {
             result.push(deepClone(edge));
             seen.add(id);
           }
@@ -787,13 +790,69 @@ export class InMemoryStorageProvider implements IStorageProvider {
         const edge = this._edges.get(id);
         if (edge) {
           const overlayEdge = overlay?.edges.get(id);
-          if (overlayEdge !== null && (!type || edge.type === type)) {
+          if (overlayEdge !== null && this._matchesEdgeFilters(edge, options)) {
             result.push(deepClone(edge));
           }
         }
       }
     }
-    return result;
+
+    return this._applyOrderAndLimit(result, options);
+  }
+
+  async getNodes(options?: GraphQueryOptions): Promise<NodeData[]> {
+    const transaction = options?.transaction;
+    const overlay = this._getOverlay(transaction?.id);
+    const result: NodeData[] = [];
+    const seen = new Set<string>();
+
+    if (overlay) {
+      // First add all overlay nodes
+      for (const [id, node] of overlay.nodes) {
+        if (node && this._matchesNodeFilters(node, options)) {
+          result.push(deepClone(node));
+          seen.add(id);
+        }
+      }
+    }
+
+    // Then add live nodes not overridden by overlay
+    for (const [id, node] of this._nodes) {
+      if (seen.has(id)) continue;
+      if (this._matchesNodeFilters(node, options)) {
+        result.push(deepClone(node));
+      }
+    }
+
+    return this._applyOrderAndLimit(result, options);
+  }
+
+  async getEdges(options?: GraphQueryOptions): Promise<EdgeData[]> {
+    const transaction = options?.transaction;
+    const overlay = this._getOverlay(transaction?.id);
+    const result: EdgeData[] = [];
+    const seen = new Set<string>();
+
+    if (overlay) {
+      // First add all overlay edges
+      for (const [id, edge] of overlay.edges) {
+        if (edge && this._matchesEdgeFilters(edge, options)) {
+          result.push(deepClone(edge));
+          seen.add(id);
+        }
+      }
+    }
+
+    // Then add live edges not overridden by overlay
+    for (const [id, edge] of this._edges) {
+      if (seen.has(id)) continue;
+      const overlayEdge = overlay?.edges.get(id);
+      if (overlayEdge !== null && this._matchesEdgeFilters(edge, options)) {
+        result.push(deepClone(edge));
+      }
+    }
+
+    return this._applyOrderAndLimit(result, options);
   }
 
   // ---------------------------------------------------------------------------
@@ -1280,6 +1339,78 @@ export class InMemoryStorageProvider implements IStorageProvider {
     const id = txnId ?? this._activeTransaction;
     if (!id) return null;
     return this._transactionOverlays.get(id) ?? null;
+  }
+
+  private _matchesNodeFilters(node: NodeData, options?: GraphQueryOptions): boolean {
+    if (!options?.filter) return true;
+
+    const { filter } = options;
+
+    // Check type filter (OR within types)
+    if (filter.types && filter.types.length > 0) {
+      if (!filter.types.includes(node.type)) {
+        return false;
+      }
+    }
+
+    // Check property filters (AND - all must match)
+    if (filter.properties && filter.properties.length > 0) {
+      for (const { key, value } of filter.properties) {
+        if (node.properties[key] !== value) {
+          return false;
+        }
+      }
+    }
+
+    return true;
+  }
+
+  private _matchesEdgeFilters(edge: EdgeData, options?: GraphQueryOptions): boolean {
+    if (!options?.filter) return true;
+
+    const { filter } = options;
+
+    // Check type filter (OR within types)
+    if (filter.types && filter.types.length > 0) {
+      if (!filter.types.includes(edge.type)) {
+        return false;
+      }
+    }
+
+    // Check property filters (AND - all must match)
+    if (filter.properties && filter.properties.length > 0) {
+      for (const { key, value } of filter.properties) {
+        if (edge.properties[key] !== value) {
+          return false;
+        }
+      }
+    }
+
+    return true;
+  }
+
+  private _applyOrderAndLimit<T extends NodeData | EdgeData>(result: T[], options?: GraphQueryOptions): T[] {
+    let output = result;
+
+    // Apply ordering if specified
+    if (options?.orderBy) {
+      const { field, direction } = options.orderBy;
+      output.sort((a, b) => {
+        const aVal = a[field];
+        const bVal = b[field];
+        if (aVal === undefined && bVal === undefined) return 0;
+        if (aVal === undefined) return direction === 'asc' ? 1 : -1;
+        if (bVal === undefined) return direction === 'asc' ? -1 : 1;
+        return direction === 'asc' ? (aVal < bVal ? -1 : 1) : (aVal > bVal ? -1 : 1);
+      });
+    }
+
+    // Apply limit
+    if (options?.limit !== undefined) {
+      output = output.slice(0, options.limit);
+    }
+
+    return output;
   }
 
   private _applyOverlayToLive(overlay: TransactionOverlay): void {

@@ -7,6 +7,7 @@ import type {
   IStorageProvider,
   IOrderBy,
   ITransactionHandle,
+  GraphQueryOptions,
 } from './IStorageProvider';
 import type { CacheConfig } from './cache/CacheConfig';
 import type { CacheManager } from './cache/CacheManager';
@@ -134,61 +135,6 @@ export class CachedStorageProvider implements IStorageProvider {
     return node;
   }
 
-  async getAllNodes(
-    limit?: number,
-    orderBy?: IOrderBy,
-    transaction?: ITransactionHandle
-  ): Promise<NodeData[]> {
-    // Bypass cache in transactions — must read uncommitted state
-    if (transaction) {
-      return this._underlying.getAllNodes(limit, orderBy, transaction);
-    }
-
-    // Case 1: No orderBy → only use cache if complete
-    if (orderBy === undefined) {
-      const cachedCount = await this._cacheManager.totalCount(this._graphId, 'node');
-      const totalCount = await this._underlying.getTotalNodeCount();
-      if (cachedCount === totalCount && cachedCount > 0) {
-        if (limit !== undefined && limit <= cachedCount) {
-          return this._cacheManager.getAllNodes(this._graphId, limit);
-        } else {
-          return this._cacheManager.getAllNodes(this._graphId);
-        }
-      }
-    }
-    // Case 2: Has orderBy → only use cache if complete
-    else {
-      const cachedCount = await this._cacheManager.totalCount(this._graphId, 'node');
-      const totalCount = await this._underlying.getTotalNodeCount();
-      if (cachedCount === totalCount && cachedCount > 0) {
-        let nodes = await this._cacheManager.getAllNodes(this._graphId);
-        nodes = this._sortNodes(nodes, orderBy);
-        return limit ? nodes.slice(0, limit) : nodes;
-      }
-    }
-
-    // Fall through to underlying provider
-    return this._underlying.getAllNodes(limit, orderBy, transaction);
-  }
-
-  async getNodesByType(
-    type: string,
-    transaction?: ITransactionHandle
-  ): Promise<NodeData[]> {
-    // Collection queries are NOT cached
-    return this._underlying.getNodesByType(type, transaction);
-  }
-
-  async getNodesByProperty(
-    key: string,
-    value: unknown,
-    nodeType?: string,
-    transaction?: ITransactionHandle
-  ): Promise<NodeData[]> {
-    // Collection queries are NOT cached
-    return this._underlying.getNodesByProperty(key, value, nodeType, transaction);
-  }
-
   // ─── Edge mutations ─────────────────────────────────────────────────────────
 
   async insertEdge(edge: EdgeData, transaction?: ITransactionHandle): Promise<void> {
@@ -253,63 +199,16 @@ export class CachedStorageProvider implements IStorageProvider {
     return edge;
   }
 
-  async getAllEdges(limit?: number, orderBy?: IOrderBy, transaction?: ITransactionHandle): Promise<EdgeData[]> {
-    // Bypass cache in transactions — must read uncommitted state
-    if (transaction) {
-      return this._underlying.getAllEdges(limit, orderBy, transaction);
-    }
-
-    // Case 1: No orderBy → only use cache if complete
-    if (orderBy === undefined) {
-      const cachedCount = await this._cacheManager.totalCount(this._graphId, 'edge');
-      const totalCount = await this._underlying.getTotalEdgeCount();
-      if (cachedCount === totalCount && cachedCount > 0) {
-        if (limit !== undefined && limit <= cachedCount) {
-          return this._cacheManager.getAllEdges(this._graphId, limit);
-        } else {
-          return this._cacheManager.getAllEdges(this._graphId);
-        }
-      }
-    }
-    // Case 2: Has orderBy → only use cache if complete
-    else {
-      const cachedCount = await this._cacheManager.totalCount(this._graphId, 'edge');
-      const totalCount = await this._underlying.getTotalEdgeCount();
-      if (cachedCount === totalCount && cachedCount > 0) {
-        let edges = await this._cacheManager.getAllEdges(this._graphId);
-        edges = this._sortEdges(edges, orderBy);
-        return limit ? edges.slice(0, limit) : edges;
-      }
-    }
-
-    // Fall through to underlying provider
-    return this._underlying.getAllEdges(limit, orderBy, transaction);
-  }
-
-  async getEdgesByType(
-    type: string,
-    transaction?: ITransactionHandle
-  ): Promise<EdgeData[]> {
-    return this._underlying.getEdgesByType(type, transaction);
-  }
-
-  async getEdgesByProperty(
-    key: string,
-    value: unknown,
-    edgeType?: string,
-    transaction?: ITransactionHandle
-  ): Promise<EdgeData[]> {
-    return this._underlying.getEdgesByProperty(key, value, edgeType, transaction);
-  }
-
   async getEdgesBySource(
     nodeId: string,
-    type?: string,
-    transaction?: ITransactionHandle
+    options?: GraphQueryOptions
   ): Promise<EdgeData[]> {
+    const type = options?.filter?.types?.[0];
+    const transaction = options?.transaction;
+
     // Bypass cache in transactions
     if (transaction) {
-      return this._underlying.getEdgesBySource(nodeId, type, transaction);
+      return this._underlying.getEdgesBySource(nodeId, options);
     }
 
     // Try adjacency index first - if it returns non-empty, use those edges
@@ -332,17 +231,19 @@ export class CachedStorageProvider implements IStorageProvider {
 
     // Adjacency index returned empty - could be genuinely no edges, or cache not warmed
     // Fall back to underlying provider
-    return this._underlying.getEdgesBySource(nodeId, type, transaction);
+    return this._underlying.getEdgesBySource(nodeId, options);
   }
 
   async getEdgesByTarget(
     nodeId: string,
-    type?: string,
-    transaction?: ITransactionHandle
+    options?: GraphQueryOptions
   ): Promise<EdgeData[]> {
+    const type = options?.filter?.types?.[0];
+    const transaction = options?.transaction;
+
     // Bypass cache in transactions
     if (transaction) {
-      return this._underlying.getEdgesByTarget(nodeId, type, transaction);
+      return this._underlying.getEdgesByTarget(nodeId, options);
     }
 
     // Try adjacency index first - if it returns non-empty, use those edges
@@ -365,7 +266,15 @@ export class CachedStorageProvider implements IStorageProvider {
 
     // Adjacency index returned empty - could be genuinely no edges, or cache not warmed
     // Fall back to underlying provider
-    return this._underlying.getEdgesByTarget(nodeId, type, transaction);
+    return this._underlying.getEdgesByTarget(nodeId, options);
+  }
+
+  async getNodes(options?: GraphQueryOptions): Promise<NodeData[]> {
+    return this._underlying.getNodes(options);
+  }
+
+  async getEdges(options?: GraphQueryOptions): Promise<EdgeData[]> {
+    return this._underlying.getEdges(options);
   }
 
   // ─── Property mutations ─────────────────────────────────────────────────────
@@ -478,12 +387,12 @@ export class CachedStorageProvider implements IStorageProvider {
 
       case 'all': {
         // Load all nodes/edges up to budget
-        const nodes = await this._underlying.getAllNodes(this._config.maxNodesCount);
+        const nodes = await this._underlying.getNodes({ limit: this._config.maxNodesCount });
         for (const node of nodes) {
           await this._cacheManager.setNode(this._graphId, node.id, node);
         }
 
-        const edges = await this._underlying.getAllEdges(this._config.maxEdgesCount);
+        const edges = await this._underlying.getEdges({ limit: this._config.maxEdgesCount });
         for (const edge of edges) {
           await this._cacheManager.setEdge(this._graphId, edge.id, edge);
           await this._cacheManager.addEdgeToAdjacencyIndex(this._graphId, 'source', edge.sourceId, edge.id);
@@ -495,18 +404,18 @@ export class CachedStorageProvider implements IStorageProvider {
       case 'recent': {
         // Load nodes/edges sorted by updatedOn (descending - most recent first)
         // Storage provider handles sorting natively for efficiency
-        const nodes = await this._underlying.getAllNodes(
-          this._config.maxNodesCount,
-          { field: 'updatedOn', direction: 'desc' }
-        );
+        const nodes = await this._underlying.getNodes({
+          limit: this._config.maxNodesCount,
+          orderBy: { field: 'updatedOn', direction: 'desc' }
+        });
         for (const node of nodes) {
           await this._cacheManager.setNode(this._graphId, node.id, node);
         }
 
-        const edges = await this._underlying.getAllEdges(
-          this._config.maxEdgesCount,
-          { field: 'updatedOn', direction: 'desc' }
-        );
+        const edges = await this._underlying.getEdges({
+          limit: this._config.maxEdgesCount,
+          orderBy: { field: 'updatedOn', direction: 'desc' }
+        });
         for (const edge of edges) {
           await this._cacheManager.setEdge(this._graphId, edge.id, edge);
           await this._cacheManager.addEdgeToAdjacencyIndex(this._graphId, 'source', edge.sourceId, edge.id);
@@ -517,12 +426,12 @@ export class CachedStorageProvider implements IStorageProvider {
 
       case 'first-n': {
         // Load first N nodes/edges as returned by storage provider
-        const nodes = await this._underlying.getAllNodes(this._config.maxNodesCount);
+        const nodes = await this._underlying.getNodes({ limit: this._config.maxNodesCount });
         for (const node of nodes) {
           await this._cacheManager.setNode(this._graphId, node.id, node);
         }
 
-        const edges = await this._underlying.getAllEdges(this._config.maxEdgesCount);
+        const edges = await this._underlying.getEdges({ limit: this._config.maxEdgesCount });
         for (const edge of edges) {
           await this._cacheManager.setEdge(this._graphId, edge.id, edge);
           await this._cacheManager.addEdgeToAdjacencyIndex(this._graphId, 'source', edge.sourceId, edge.id);

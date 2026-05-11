@@ -48,14 +48,14 @@ export class GraphIndex {
   /** Returns all nodes in the graph. */
   async getNodes(transaction?: GraphTransaction): Promise<readonly Node[]> {
     const handle = transaction?._getHandle();
-    const data = await this._store.getAllNodes(undefined, undefined, handle);
+    const data = await this._store.getNodes({ transaction: handle });
     return data.map(d => new Node(d.type, d.properties, d.id, d.createdOn, d.updatedOn));
   }
 
   /** Returns all edges in the graph. */
   async getEdges(transaction?: GraphTransaction): Promise<readonly Edge[]> {
     const handle = transaction?._getHandle();
-    const data = await this._store.getAllEdges(undefined, undefined, handle);
+    const data = await this._store.getEdges({ transaction: handle });
     return data.map(d => new Edge(d.sourceId, d.targetId, d.type, d.properties, d.id));
   }
 
@@ -115,8 +115,8 @@ export class GraphIndex {
       if (!await this._store.hasNode(id, handle)) return false;
 
       const [outgoing, incoming] = await Promise.all([
-        this._store.getEdgesBySource(id, undefined, handle),
-        this._store.getEdgesByTarget(id, undefined, handle),
+        this._store.getEdgesBySource(id, { transaction: handle }),
+        this._store.getEdgesByTarget(id, { transaction: handle }),
       ]);
 
       if (cascade) {
@@ -149,7 +149,7 @@ export class GraphIndex {
   /** Retrieves nodes by their type. */
   async getNodesByType(type: string, transaction?: GraphTransaction): Promise<Node[]> {
     const handle = transaction?._getHandle();
-    const data = await this._store.getNodesByType(type, handle);
+    const data = await this._store.getNodes({ filter: { types: [type] }, transaction: handle });
     return data.map(d => new Node(d.type, d.properties, d.id, d.createdOn, d.updatedOn));
   }
 
@@ -159,7 +159,13 @@ export class GraphIndex {
    */
   async getNodesByProperty(key: string, value: unknown, options?: GraphOptions<{ nodeType?: string }>): Promise<Node[]> {
     const handle = options?.transaction?._getHandle();
-    const data = await this._store.getNodesByProperty(key, value, options?.filter?.nodeType, handle);
+    const filter: { types?: string[]; properties?: Array<{ key: string; value: unknown }> } = {
+      properties: [{ key, value }]
+    };
+    if (options?.filter?.nodeType) {
+      filter.types = [options.filter.nodeType];
+    }
+    const data = await this._store.getNodes({ filter, transaction: handle });
     return data.map(d => new Node(d.type, d.properties, d.id, d.createdOn, d.updatedOn));
   }
 
@@ -169,7 +175,13 @@ export class GraphIndex {
    */
   async getEdgesByProperty(key: string, value: unknown, options?: GraphOptions<{ edgeType?: string }>): Promise<Edge[]> {
     const handle = options?.transaction?._getHandle();
-    const data = await this._store.getEdgesByProperty(key, value, options?.filter?.edgeType, handle);
+    const filter: { types?: string[]; properties?: Array<{ key: string; value: unknown }> } = {
+      properties: [{ key, value }]
+    };
+    if (options?.filter?.edgeType) {
+      filter.types = [options.filter.edgeType];
+    }
+    const data = await this._store.getEdges({ filter, transaction: handle });
     return data.map(d => new Edge(d.sourceId, d.targetId, d.type, d.properties, d.id, d.createdOn, d.updatedOn));
   }
 
@@ -254,7 +266,10 @@ export class GraphIndex {
     const edgeType = options?.filter?.edgeType ?? '*';
     const parentIds = new Set<string>();
 
-    const edges = await this._store.getEdgesByTarget(nodeId, edgeType !== '*' ? edgeType : undefined, handle);
+    const edges = await this._store.getEdgesByTarget(nodeId, {
+      filter: edgeType !== '*' ? { types: [edgeType] } : undefined,
+      transaction: handle
+    });
     for (const edge of edges) {
       if (edgeType !== '*' && edge.type !== edgeType) continue;
       if (nodeType === '*') {
@@ -284,7 +299,10 @@ export class GraphIndex {
     const edgeType = options?.filter?.edgeType ?? '*';
     const childIds = new Set<string>();
 
-    const edges = await this._store.getEdgesBySource(nodeId, edgeType !== '*' ? edgeType : undefined, handle);
+    const edges = await this._store.getEdgesBySource(nodeId, {
+      filter: edgeType !== '*' ? { types: [edgeType] } : undefined,
+      transaction: handle
+    });
     for (const edge of edges) {
       if (nodeType === '*') {
         childIds.add(edge.targetId);
@@ -310,7 +328,10 @@ export class GraphIndex {
     if (!await this._store.hasNode(sourceId, handle)) throw new NodeNotFoundError(sourceId);
 
     const edgeType = options?.filter?.edgeType ?? '*';
-    const data = await this._store.getEdgesBySource(sourceId, edgeType !== '*' ? edgeType : undefined, handle);
+    const data = await this._store.getEdgesBySource(sourceId, {
+      filter: edgeType !== '*' ? { types: [edgeType] } : undefined,
+      transaction: handle
+    });
     return data.map(d => new Edge(d.sourceId, d.targetId, d.type, d.properties, d.id, d.createdOn, d.updatedOn));
   }
 
@@ -323,7 +344,10 @@ export class GraphIndex {
     if (!await this._store.hasNode(targetId, handle)) throw new NodeNotFoundError(targetId);
 
     const edgeType = options?.filter?.edgeType ?? '*';
-    const data = await this._store.getEdgesByTarget(targetId, edgeType !== '*' ? edgeType : undefined, handle);
+    const data = await this._store.getEdgesByTarget(targetId, {
+      filter: edgeType !== '*' ? { types: [edgeType] } : undefined,
+      transaction: handle
+    });
     return data.map(d => new Edge(d.sourceId, d.targetId, d.type, d.properties, d.id, d.createdOn, d.updatedOn));
   }
 
@@ -344,8 +368,8 @@ export class GraphIndex {
     const result: Edge[] = [];
 
     const [outFromSource, outFromTarget] = await Promise.all([
-      this._store.getEdgesBySource(sourceId, edgeType !== '*' ? edgeType : undefined),
-      this._store.getEdgesBySource(targetId, edgeType !== '*' ? edgeType : undefined),
+      this._store.getEdgesBySource(sourceId, { filter: edgeType !== '*' ? { types: [edgeType] } : undefined }),
+      this._store.getEdgesBySource(targetId, { filter: edgeType !== '*' ? { types: [edgeType] } : undefined }),
     ]);
 
     for (const e of outFromSource) {
@@ -365,7 +389,7 @@ export class GraphIndex {
   /** Gets all edges of a specific type. */
   async getEdgesByType(type: string, transaction?: GraphTransaction): Promise<Edge[]> {
     const handle = transaction?._getHandle();
-    const data = await this._store.getEdgesByType(type, handle);
+    const data = await this._store.getEdges({ filter: { types: [type] }, transaction: handle });
     return data.map(d => new Edge(d.sourceId, d.targetId, d.type, d.properties, d.id, d.createdOn, d.updatedOn));
   }
 
