@@ -97,7 +97,7 @@ export class Executor {
       case 'SortStep':
         return this._executeSort(step, rows, params);
       case 'LimitStep':
-        return this._executeLimit(step, rows);
+        return this._executeLimit(step, rows, params);
       case 'AggregateStep':
         throw new CypherRuntimeError('Aggregation is not yet supported');
     }
@@ -185,12 +185,19 @@ export class Executor {
   ): Promise<Row[]> {
     const result: Row[] = [];
     const visited = new Set<string>([sourceNode.id]);
-    const queue: Array<{ node: Node; row: Row; hops: number }> = [
+
+    // Use a shared array as both queue (BFS via shift) and stack (DFS via pop).
+    // Both strategies share the same visited-set cycle detection.
+    const frontier: Array<{ node: Node; row: Row; hops: number }> = [
       { node: sourceNode, row, hops: 0 },
     ];
 
-    while (queue.length > 0) {
-      const { node, row: curRow, hops } = queue.shift()!;
+    const isBFS = step.strategy !== 'multi-hop-dfs';
+
+    while (frontier.length > 0) {
+      const { node, row: curRow, hops } = isBFS
+        ? frontier.shift()!   // BFS: dequeue from front (FIFO)
+        : frontier.pop()!;    // DFS: pop from back (LIFO)
 
       if (hops >= step.maxHops) continue;
 
@@ -220,7 +227,7 @@ export class Executor {
         if (newHops < step.maxHops && !visited.has(targetId)) {
           visited.add(targetId);
           const nextRow = new Map(curRow);
-          queue.push({ node: targetNode, row: nextRow, hops: newHops });
+          frontier.push({ node: targetNode, row: nextRow, hops: newHops });
         }
       }
     }
@@ -308,9 +315,19 @@ export class Executor {
 
   // ── LimitStep ───────────────────────────────────────────────────
 
-  private _executeLimit(step: LimitStep, rows: Row[]): Row[] {
-    const start = Math.max(0, step.skip);
-    const end = step.limit === Infinity ? undefined : start + step.limit;
+  private _executeLimit(
+    step: LimitStep,
+    rows: Row[],
+    params: Record<string, unknown>,
+  ): Row[] {
+    // Evaluate expressions at runtime so $param placeholders work.
+    const start = step.skipExpr
+      ? Math.max(0, Number(this._evaluate(step.skipExpr, rows[0], params)))
+      : 0;
+    const limitVal = step.limitExpr
+      ? Number(this._evaluate(step.limitExpr, rows[0], params))
+      : Infinity;
+    const end = limitVal === Infinity ? undefined : start + limitVal;
     return rows.slice(start, end);
   }
 

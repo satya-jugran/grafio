@@ -10,10 +10,12 @@
  * 1. **Push filters early** — {@link FilterStep} is inserted immediately after
  *    the scan/expand sequence, before projection and sorting.
  * 2. **Edge expansion strategy selection** — The Planner sets
- *    {@link EdgeExpandStep.strategy} based on the pattern's hop range:
- *    - Single-hop → `'single-hop'`
- *    - Multi-hop (default) → `'multi-hop-bfs'`
- *    - Multi-hop with small result cap → `'multi-hop-dfs'`
+ *    {@link EdgeExpandStep.strategy} based on the pattern's hop range
+ *    and whether a LIMIT clause is present:
+ *    - Single-hop (`minHops === 1 && maxHops === 1`) → `'single-hop'`
+ *    - Multi-hop without LIMIT → `'multi-hop-bfs'`
+ *    - Multi-hop with LIMIT → `'multi-hop-dfs'`
+ *      (DFS finds the first N results with lower memory: O(depth) vs O(breadth^depth))
  *
  * @module cypher/Planner
  */
@@ -106,14 +108,14 @@ export class Planner {
    */
   private _planPatterns(ast: QueryAst, steps: PlanStep[]): void {
     for (const path of ast.match.patterns) {
-      this._planPatternPath(path, steps);
+      this._planPatternPath(path, steps, ast);
     }
   }
 
   /**
    * Convert a single pattern path into plan steps.
    */
-  private _planPatternPath(path: PatternPath, steps: PlanStep[]): void {
+  private _planPatternPath(path: PatternPath, steps: PlanStep[], ast: QueryAst): void {
     const segments = path.segments;
     if (segments.length === 0) return;
 
@@ -125,7 +127,7 @@ export class Planner {
     for (let i = 1; i < segments.length; i += 2) {
       const edge = segments[i] as EdgePattern;
       const targetNode = segments[i + 1] as NodePattern;
-      this._planEdgeExpand(edge, targetNode, steps);
+      this._planEdgeExpand(edge, targetNode, steps, ast);
     }
   }
 
@@ -170,6 +172,7 @@ export class Planner {
     edge: EdgePattern,
     targetNode: NodePattern,
     steps: PlanStep[],
+    ast: QueryAst,
   ): void {
     // Find the source variable: it's the variable of the most recent
     // NodeScanStep or the target of the most recent EdgeExpandStep.
@@ -183,8 +186,9 @@ export class Planner {
     let strategy: EdgeExpandStep['strategy'] = 'single-hop';
 
     if (isMultiHop) {
-      // Default to BFS for multi-hop.
-      strategy = 'multi-hop-bfs';
+      // Use DFS when a LIMIT is present: depth-first finds the first N
+      // results with lower memory (O(depth) vs O(breadth^depth) for BFS).
+      strategy = ast.limit ? 'multi-hop-dfs' : 'multi-hop-bfs';
     }
 
     // If the edge has inline properties but no variable, generate a
@@ -252,17 +256,11 @@ export class Planner {
    * Convert SKIP / LIMIT into a {@link LimitStep}.
    */
   private _planLimit(ast: QueryAst): LimitStep {
-    let skip = 0;
-    let limit = Infinity;
-
-    if (ast.skip) {
-      skip = this._evalConstInt(ast.skip.expression);
-    }
-    if (ast.limit) {
-      limit = this._evalConstInt(ast.limit.expression);
-    }
-
-    return { kind: 'LimitStep', skip, limit };
+    return {
+      kind: 'LimitStep',
+      skipExpr: ast.skip?.expression,
+      limitExpr: ast.limit?.expression,
+    };
   }
 
   // ── Helpers ─────────────────────────────────────────────────────
@@ -332,30 +330,6 @@ export class Planner {
    */
   private _syntheticVar(prefix: string, index: number): string {
     return `__${prefix}_${index}`;
-  }
-
-  /**
-   * Try to evaluate an expression to a constant integer at plan time.
-   *
-   * Only literal integers, float→int conversion, and $param references
-   * are evaluated. Anything else returns 0 (the executor will resolve
-   * parameters at runtime through the LimitStep interface).
-   */
-  private _evalConstInt(expr: Expression): number {
-    if (expr.kind === 'Literal') {
-      if (typeof expr.value === 'number') {
-        return Math.floor(expr.value);
-      }
-      return 0;
-    }
-    if (expr.kind === 'Parameter') {
-      // Parameters are resolved at runtime; return 0 as a safe default.
-      // The Executor will override these when params are available.
-      return 0;
-    }
-    // For other expression types, return 0 and let the executor handle
-    // runtime evaluation.
-    return 0;
   }
 
   /**

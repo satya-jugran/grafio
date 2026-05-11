@@ -82,7 +82,7 @@ export interface EdgeExpandStep {
    * - `multi-hop-dfs` → depth-first traversal
    */
   strategy: 'single-hop' | 'multi-hop-bfs' | 'multi-hop-dfs';
-  /** Optional cap on result rows; when small, Planner may prefer DFS. */
+  /** Reserved for future DFS optimisation: optional cap on result rows. */
   maxResults?: number;
 }
 
@@ -144,14 +144,17 @@ export interface SortSpec {
 /**
  * Apply SKIP and/or LIMIT to the row buffer.
  *
+ * Expressions are evaluated at runtime so that `SKIP $offset` and
+ * `LIMIT $pageSize` work with parameterised queries.
+ *
  * Operates in-process (no Graph API call).
  */
 export interface LimitStep {
   kind: 'LimitStep';
-  /** Number of rows to skip (0 if no SKIP clause). */
-  skip: number;
-  /** Maximum number of rows to return (Infinity if no LIMIT clause). */
-  limit: number;
+  /** Expression evaluating to rows to skip (undefined if no SKIP clause). */
+  skipExpr?: Expression;
+  /** Expression evaluating to max rows (undefined if no LIMIT clause). */
+  limitExpr?: Expression;
 }
 
 /**

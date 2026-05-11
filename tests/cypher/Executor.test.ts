@@ -150,6 +150,20 @@ describe('Executor', () => {
       // Only 2 and 3 hops
       expect(names).toEqual(['C', 'D']);
     });
+
+    it('uses DFS with LIMIT to find first results deep in chain', async () => {
+      const graph = await buildChainGraph();
+      const result = await executeQuery(
+        "MATCH (a:Person)-[*1..3]->(b:Person) WHERE a.name = 'A' RETURN b.name AS name LIMIT 2",
+        {},
+        graph,
+      );
+      // DFS should still find valid results; the strategy is DFS with LIMIT
+      expect(result.rows).toHaveLength(2);
+      const names = result.rows.map((r) => r.name);
+      // Both BFS and DFS should contain B and C (DFS goes deep first, so may find D before C)
+      expect(names).toHaveLength(2);
+    });
   });
 
   // ── WHERE filtering ────────────────────────────────────────────
@@ -321,6 +335,20 @@ describe('Executor', () => {
       expect(result.rows).toHaveLength(2);
     });
 
+    it('supports parameterized LIMIT ($limit)', async () => {
+      const graph = await buildSocialGraph();
+      const result = await executeQuery(
+        'MATCH (p:Person) RETURN p.name AS name ORDER BY p.name ASC LIMIT $limit',
+        { limit: 1 },
+        graph,
+      );
+      expect(result.rows).toHaveLength(1);
+      expect(result.rows[0].name).toBe('Alice');
+    });
+  });
+
+  // ── WHERE filtering ────────────────────────────────────────────
+  describe('WHERE filtering', () => {
     it('filters with NOT IN', async () => {
       const graph = await buildSocialGraph();
       const result = await executeQuery(

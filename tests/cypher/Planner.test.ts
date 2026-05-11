@@ -43,10 +43,16 @@ describe('Planner', () => {
       expect(expand.strategy).toBe('single-hop');
     });
 
-    it('produces multi-hop-bfs for variable-length edge', () => {
+    it('produces multi-hop-bfs for variable-length edge without LIMIT', () => {
       const p = plan('MATCH (a)-[*1..3]->(b) RETURN b');
       const expand = p.steps[1] as any;
       expect(expand.strategy).toBe('multi-hop-bfs');
+    });
+
+    it('produces multi-hop-dfs when LIMIT is present', () => {
+      const p = plan('MATCH (a)-[*1..3]->(b) RETURN b LIMIT 5');
+      const expand = p.steps[1] as any;
+      expect(expand.strategy).toBe('multi-hop-dfs');
       expect(expand.minHops).toBe(1);
       expect(expand.maxHops).toBe(3);
     });
