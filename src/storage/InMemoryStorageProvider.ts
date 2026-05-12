@@ -652,7 +652,8 @@ export class InMemoryStorageProvider implements IStorageProvider {
     // Then add live nodes not overridden by overlay
     for (const [id, node] of this._nodes) {
       if (seen.has(id)) continue;
-      if (this._matchesNodeFilters(node, options)) {
+      const overlayNode = overlay?.nodes.get(id);
+      if (overlayNode !== null && this._matchesNodeFilters(node, options)) {
         result.push(deepClone(node));
       }
     }
