@@ -724,6 +724,7 @@ describe('CachedStorageProvider', () => {
 
       expect(nodes).toHaveLength(2);
       expect(nodes.map(n => n.id).sort()).toEqual(['node-1', 'node-2']);
+      expect(spy).not.toHaveBeenCalled(); // Cache hit - underlying should not be called
     });
 
     it('should delegate to underlying when orderBy provided but cache is incomplete', async () => {
