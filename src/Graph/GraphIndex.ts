@@ -219,10 +219,7 @@ export class GraphIndex {
   async getEdgesFrom(sourceId: string, options?: GraphQueryOptions): Promise<Edge[]> {
     if (!await this._store.hasNode(sourceId, options?.transaction)) throw new NodeNotFoundError(sourceId);
 
-    const data = await this._store.getEdgesBySource(sourceId, {
-      filter: options?.filter,
-      transaction: options?.transaction
-    });
+    const data = await this._store.getEdgesBySource(sourceId, options);
     return data.map(d => new Edge(d.sourceId, d.targetId, d.type, d.properties, d.id, d.createdOn, d.updatedOn));
   }
 
@@ -233,10 +230,7 @@ export class GraphIndex {
   async getEdgesTo(targetId: string, options?: GraphQueryOptions): Promise<Edge[]> {
     if (!await this._store.hasNode(targetId, options?.transaction)) throw new NodeNotFoundError(targetId);
 
-    const data = await this._store.getEdgesByTarget(targetId, {
-      filter: options?.filter,
-      transaction: options?.transaction
-    });
+    const data = await this._store.getEdgesByTarget(targetId, options);
     return data.map(d => new Edge(d.sourceId, d.targetId, d.type, d.properties, d.id, d.createdOn, d.updatedOn));
   }
 
