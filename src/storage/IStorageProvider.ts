@@ -3,9 +3,6 @@ import type { NodeData, EdgeData, GraphData, StorageQueryOptions, IOrderBy, ITra
 // Re-export types from types.ts for convenience
 export type { StorageQueryOptions, IOrderBy, ITransactionHandle };
 
-// Storage layer uses GraphQueryOptions as an alias to StorageQueryOptions
-export type GraphQueryOptions = StorageQueryOptions;
-
 /**
  * Contract that every storage backend must fulfill.
  *
@@ -74,7 +71,7 @@ export interface IStorageProvider {
    * Used by CachedStorageProvider to determine cache completeness.
    * @param options - Optional query options for filtering
    */
-  getNodeCount(options?: GraphQueryOptions): Promise<number>;
+  getNodeCount(options?: StorageQueryOptions): Promise<number>;
 
   /**
    * Aggregates a numeric property across nodes matching the query options.
@@ -83,7 +80,7 @@ export interface IStorageProvider {
    */
   aggregateNodeProperty(
     key: string,
-    options?: GraphQueryOptions
+    options?: StorageQueryOptions
   ): Promise<AggregateResult>;
 
   /**
@@ -107,7 +104,7 @@ export interface IStorageProvider {
    *   orderBy: { field: 'updatedOn', direction: 'desc' }
    * });
    */
-  getNodes(options?: GraphQueryOptions): Promise<NodeData[]>;
+  getNodes(options?: StorageQueryOptions): Promise<NodeData[]>;
 
   // ---------------------------------------------------------------------------
   // Edge mutations
@@ -146,7 +143,7 @@ export interface IStorageProvider {
    * Used by CachedStorageProvider to determine cache completeness.
    * @param options - Optional query options for filtering
    */
-  getEdgeCount(options?: GraphQueryOptions): Promise<number>;
+  getEdgeCount(options?: StorageQueryOptions): Promise<number>;
 
   /**
    * Aggregates a numeric property across edges matching the query options.
@@ -155,7 +152,7 @@ export interface IStorageProvider {
    */
   aggregateEdgeProperty(
     key: string,
-    options?: GraphQueryOptions
+    options?: StorageQueryOptions
   ): Promise<AggregateResult>;
 
   /**
@@ -177,7 +174,7 @@ export interface IStorageProvider {
    *   orderBy: { field: 'updatedOn', direction: 'desc' }
    * });
    */
-  getEdges(options?: GraphQueryOptions): Promise<EdgeData[]>;
+  getEdges(options?: StorageQueryOptions): Promise<EdgeData[]>;
 
   /**
    * Returns all outgoing edges from a source node.
@@ -191,7 +188,7 @@ export interface IStorageProvider {
    * // Get all 'KNOWS' edges from alice
    * const friends = await provider.getEdgesBySource(aliceId, { filter: { types: ['KNOWS'] } });
    */
-  getEdgesBySource(nodeId: string, options?: GraphQueryOptions): Promise<EdgeData[]>;
+  getEdgesBySource(nodeId: string, options?: StorageQueryOptions): Promise<EdgeData[]>;
 
   /**
    * Returns all incoming edges to a target node.
@@ -205,7 +202,7 @@ export interface IStorageProvider {
    * // Get all 'KNOWS' edges to bob
    * const friendOf = await provider.getEdgesByTarget(bobId, { filter: { types: ['KNOWS'] } });
    */
-  getEdgesByTarget(nodeId: string, options?: GraphQueryOptions): Promise<EdgeData[]>;
+  getEdgesByTarget(nodeId: string, options?: StorageQueryOptions): Promise<EdgeData[]>;
 
   // ---------------------------------------------------------------------------
   // Property mutations

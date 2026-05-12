@@ -9,7 +9,7 @@ import type {
   IStorageProvider,
   IOrderBy,
   ITransactionHandle,
-  GraphQueryOptions,
+  StorageQueryOptions,
 } from './IStorageProvider';
 import type { CacheConfig } from './cache/CacheConfig';
 import type { CacheManager } from './cache/CacheManager';
@@ -74,19 +74,19 @@ export class CachedStorageProvider implements IStorageProvider {
 
   // The following comment is needed to exclude these methods from coverage
   /* istanbul ignore next */
-  async getNodeCount(options?: GraphQueryOptions): Promise<number> {
+  async getNodeCount(options?: StorageQueryOptions): Promise<number> {
     return this._underlying.getNodeCount(options);
   }
 
   /* istanbul ignore next */
-  async getEdgeCount(options?: GraphQueryOptions): Promise<number> {
+  async getEdgeCount(options?: StorageQueryOptions): Promise<number> {
     return this._underlying.getEdgeCount(options);
   }
 
   /* istanbul ignore next */
   async aggregateNodeProperty(
     key: string,
-    options?: GraphQueryOptions
+    options?: StorageQueryOptions
   ): Promise<AggregateResult> {
     return this._underlying.aggregateNodeProperty(key, options);
   }
@@ -94,7 +94,7 @@ export class CachedStorageProvider implements IStorageProvider {
   /* istanbul ignore next */
   async aggregateEdgeProperty(
     key: string,
-    options?: GraphQueryOptions
+    options?: StorageQueryOptions
   ): Promise<AggregateResult> {
     return this._underlying.aggregateEdgeProperty(key, options);
   }
@@ -222,7 +222,7 @@ export class CachedStorageProvider implements IStorageProvider {
 
   async getEdgesBySource(
     nodeId: string,
-    options?: GraphQueryOptions
+    options?: StorageQueryOptions
   ): Promise<EdgeData[]> {
     const transaction = options?.transaction;
 
@@ -267,7 +267,7 @@ export class CachedStorageProvider implements IStorageProvider {
 
   async getEdgesByTarget(
     nodeId: string,
-    options?: GraphQueryOptions
+    options?: StorageQueryOptions
   ): Promise<EdgeData[]> {
     const transaction = options?.transaction;
 
@@ -310,11 +310,11 @@ export class CachedStorageProvider implements IStorageProvider {
     return this._underlying.getEdgesByTarget(nodeId, options);
   }
 
-  async getNodes(options?: GraphQueryOptions): Promise<NodeData[]> {
+  async getNodes(options?: StorageQueryOptions): Promise<NodeData[]> {
     return this._underlying.getNodes(options);
   }
 
-  async getEdges(options?: GraphQueryOptions): Promise<EdgeData[]> {
+  async getEdges(options?: StorageQueryOptions): Promise<EdgeData[]> {
     return this._underlying.getEdges(options);
   }
 
@@ -493,7 +493,7 @@ export class CachedStorageProvider implements IStorageProvider {
     }
   }
 
-  private _applyOrderAndLimit(edges: EdgeData[], options?: GraphQueryOptions): EdgeData[] {
+  private _applyOrderAndLimit(edges: EdgeData[], options?: StorageQueryOptions): EdgeData[] {
     let output = edges;
 
     // Apply ordering if specified
