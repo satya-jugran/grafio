@@ -64,16 +64,9 @@ export class GraphTraversal {
 
     // Use type-filtered query if nodeTypes are specified and not ['*']
     if (nodeTypes && nodeTypes.length > 0 && !nodeTypes.includes('*')) {
-      const results = await Promise.all(
-        nodeTypes.map(type => this._store.getNodes({ filter: { types: [type] } }))
-      );
-      const ids: string[] = [];
-      for (const nodes of results) {
-        for (const node of nodes) {
-          ids.push(node.id);
-        }
-      }
-      return ids;
+      // Use single query with multiple types (filter.types supports matching any of them)
+      const nodes = await this._store.getNodes({ filter: { types: nodeTypes } });
+      return nodes.map(n => n.id);
     }
 
     // Fall back to all nodes (limit to prevent unbounded traversal)
