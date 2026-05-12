@@ -14,9 +14,30 @@ export interface ITransactionHandle {
  */
 export interface IOrderBy {
   /** Field to order by */
-  field: 'createdOn' | 'updatedOn';
+  field: string;
   /** Sort direction */
   direction: 'asc' | 'desc';
+}
+
+/**
+ * Supported aggregate operations for property aggregation.
+ */
+export type AggregateOp = 'SUM' | 'AVG' | 'MIN' | 'MAX';
+
+/**
+ * Result of an aggregate operation on a property.
+ */
+export interface AggregateResult {
+  /** Count of non-null values (always populated) */
+  count: number;
+  /** Sum of values (SUM operation) */
+  sum?: number;
+  /** Average of values (AVG operation) */
+  avg?: number;
+  /** Minimum value (MIN operation) */
+  min?: number;
+  /** Maximum value (MAX operation) */
+  max?: number;
 }
 
 /**

@@ -1,4 +1,4 @@
-import type { NodeData, EdgeData, GraphData, GraphQueryOptions, IOrderBy, ITransactionHandle } from '../types';
+import type { NodeData, EdgeData, GraphData, GraphQueryOptions, IOrderBy, ITransactionHandle, AggregateOp, AggregateResult } from '../types';
 
 // Re-export for backwards compatibility - these are now defined in types.ts
 export type { GraphQueryOptions, IOrderBy, ITransactionHandle } from '../types';
@@ -67,11 +67,21 @@ export interface IStorageProvider {
   getNode(id: string, transaction?: ITransactionHandle): Promise<NodeData | undefined>;
 
   /**
-   * Returns the total number of nodes in storage.
+   * Returns the number of nodes in storage matching the query options.
    * Used by CachedStorageProvider to determine cache completeness.
-   * @param transaction - Optional transaction handle for transactional storage providers
+   * @param options - Optional query options for filtering
    */
-  getTotalNodeCount(transaction?: ITransactionHandle): Promise<number>;
+  getNodeCount(options?: GraphQueryOptions): Promise<number>;
+
+  /**
+   * Aggregates a numeric property across nodes matching the query options.
+   * @param key - The property key to aggregate
+   * @param options - Optional query options for filtering
+   */
+  aggregateNodeProperty(
+    key: string,
+    options?: GraphQueryOptions
+  ): Promise<AggregateResult>;
 
   /**
    * Returns nodes matching the specified query options.
@@ -129,11 +139,21 @@ export interface IStorageProvider {
   getEdge(id: string, transaction?: ITransactionHandle): Promise<EdgeData | undefined>;
 
   /**
-   * Returns the total number of edges in storage.
+   * Returns the number of edges in storage matching the query options.
    * Used by CachedStorageProvider to determine cache completeness.
-   * @param transaction - Optional transaction handle for transactional storage providers
+   * @param options - Optional query options for filtering
    */
-  getTotalEdgeCount(transaction?: ITransactionHandle): Promise<number>;
+  getEdgeCount(options?: GraphQueryOptions): Promise<number>;
+
+  /**
+   * Aggregates a numeric property across edges matching the query options.
+   * @param key - The property key to aggregate
+   * @param options - Optional query options for filtering
+   */
+  aggregateEdgeProperty(
+    key: string,
+    options?: GraphQueryOptions
+  ): Promise<AggregateResult>;
 
   /**
    * Returns edges matching the specified query options.
