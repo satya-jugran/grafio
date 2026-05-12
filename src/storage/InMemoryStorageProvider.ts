@@ -230,13 +230,18 @@ export class InMemoryStorageProvider implements IStorageProvider {
     options?: StorageQueryOptions
   ): Promise<AggregateResult> {
     const nodes = await this.getNodes(options);
-    const values: number[] = [];
+    let values: number[] = [];
 
     for (const node of nodes) {
       const value = node.properties?.[key];
       if (typeof value === 'number' && !Number.isNaN(value)) {
         values.push(value);
       }
+    }
+
+    // Deduplicate property values when distinct is true
+    if (options?.distinct) {
+      values = [...new Set(values)];
     }
 
     return this._computeAggregation(values);
@@ -280,13 +285,18 @@ export class InMemoryStorageProvider implements IStorageProvider {
     options?: StorageQueryOptions
   ): Promise<AggregateResult> {
     const edges = await this.getEdges(options);
-    const values: number[] = [];
+    let values: number[] = [];
 
     for (const edge of edges) {
       const value = edge.properties?.[key];
       if (typeof value === 'number' && !Number.isNaN(value)) {
         values.push(value);
       }
+    }
+
+    // Deduplicate property values when distinct is true
+    if (options?.distinct) {
+      values = [...new Set(values)];
     }
 
     return this._computeAggregation(values);

@@ -44,7 +44,7 @@ export interface AggregateResult {
  * Unified query options for storage layer node and edge queries.
  * Used internally by storage providers. For Graph-level queries, use GraphQueryOptions.
  */
-export interface StorageQueryOptions {
+export interface QueryOptions {
   /**
    * Filter criteria - all conditions must match (AND logic).
    * If undefined, no filtering is applied.
@@ -66,6 +66,14 @@ export interface StorageQueryOptions {
   orderBy?: IOrderBy;
   /** Maximum number of results to return */
   limit?: number;
+  /**
+   * When true, deduplicate property values before computing aggregates.
+   * Applies to: aggregateNodeProperty, aggregateEdgeProperty.
+   */
+  distinct?: boolean;
+}
+
+export interface StorageQueryOptions extends QueryOptions {
   /** Transaction handle for transactional storage providers */
   transaction?: ITransactionHandle;
 }
