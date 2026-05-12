@@ -1,5 +1,5 @@
-import type { NodeData, EdgeData, GraphData } from '../types';
-import type { IStorageProvider, IOrderBy, ITransactionHandle } from './IStorageProvider';
+import type { NodeData, EdgeData, GraphData, AggregateOp, AggregateResult } from '../types';
+import type { IStorageProvider, IOrderBy, ITransactionHandle, GraphQueryOptions } from './IStorageProvider';
 import {
   NodeAlreadyExistsError,
   EdgeAlreadyExistsError,
@@ -149,6 +149,27 @@ export class InMemoryStorageProvider implements IStorageProvider {
     }
   }
 
+  /**
+   * Compute aggregate statistics (count, sum, avg, min, max) from an array of numbers.
+   * This is a private helper method used by aggregateNodeProperty and aggregateEdgeProperty.
+   */
+  private _computeAggregation(values: number[]): AggregateResult {
+    const count = values.length;
+    let sum: number | undefined;
+    let avg: number | undefined;
+    let min: number | undefined;
+    let max: number | undefined;
+
+    if (count > 0) {
+      sum = values.reduce((a, b) => a + b, 0);
+      avg = sum / count;
+      min = Math.min(...values);
+      max = Math.max(...values);
+    }
+
+    return { count, sum, avg, min, max };
+  }
+
   // ---------------------------------------------------------------------------
   // Lifecycle
   // ---------------------------------------------------------------------------
@@ -171,48 +192,104 @@ export class InMemoryStorageProvider implements IStorageProvider {
   // Count queries
   // ---------------------------------------------------------------------------
 
-  async getTotalNodeCount(transaction?: ITransactionHandle): Promise<number> {
+  async getNodeCount(options?: GraphQueryOptions): Promise<number> {
+    const transaction = options?.transaction;
     const overlay = this._getOverlay(transaction?.id);
-    let count = this._nodes.size;
 
-    if (overlay) {
-      // Add overlay nodes that aren't overriding live nodes (new inserts)
-      for (const [id, node] of overlay.nodes) {
-        if (node && !this._nodes.has(id)) {
-          count++;
+    // Optimization: O(1) when no filter is applied - just return the Map size
+    // instead of iterating through all nodes with getNodes()
+    if (!options?.filter) {
+      let count = this._nodes.size;
+
+      // If no filter but with transaction: need to iterate overlay - O(overlay size)
+      if (overlay) {
+        // Add overlay nodes that aren't overriding live nodes (new inserts)
+        for (const [id, node] of overlay.nodes) {
+          if (node && !this._nodes.has(id)) {
+            count++;
+          }
+        }
+        // Subtract overlay nodes with null that are deleting live nodes
+        for (const [id, node] of overlay.nodes) {
+          if (node === null && this._nodes.has(id)) {
+            count--;
+          }
         }
       }
-      // Subtract overlay nodes with null that are deleting live nodes
-      for (const [id, node] of overlay.nodes) {
-        if (node === null && this._nodes.has(id)) {
-          count--;
-        }
-      }
+
+      return count;
     }
 
-    return count;
+    // With filter, get filtered results and return count
+    const nodes = await this.getNodes(options);
+    return nodes.length;
   }
 
-  async getTotalEdgeCount(transaction?: ITransactionHandle): Promise<number> {
-    const overlay = this._getOverlay(transaction?.id);
-    let count = this._edges.size;
+  async aggregateNodeProperty(
+    key: string,
+    options?: GraphQueryOptions
+  ): Promise<AggregateResult> {
+    const nodes = await this.getNodes(options);
+    const values: number[] = [];
 
-    if (overlay) {
-      // Add overlay edges that aren't overriding live edges (new inserts)
-      for (const [id, edge] of overlay.edges) {
-        if (edge && !this._edges.has(id)) {
-          count++;
-        }
-      }
-      // Subtract overlay edges with null that are deleting live edges
-      for (const [id, edge] of overlay.edges) {
-        if (edge === null && this._edges.has(id)) {
-          count--;
-        }
+    for (const node of nodes) {
+      const value = node.properties?.[key];
+      if (typeof value === 'number' && !Number.isNaN(value)) {
+        values.push(value);
       }
     }
 
-    return count;
+    return this._computeAggregation(values);
+  }
+
+  async getEdgeCount(options?: GraphQueryOptions): Promise<number> {
+    const transaction = options?.transaction;
+    const overlay = this._getOverlay(transaction?.id);
+
+    // Optimization: O(1) when no filter is applied - just return the Map size
+    // instead of iterating through all edges with getEdges()
+    if (!options?.filter) {
+      let count = this._edges.size;
+
+      // If no filter but with transaction: need to iterate overlay - O(overlay size)
+      if (overlay) {
+        // Add overlay edges that aren't overriding live edges (new inserts)
+        for (const [id, edge] of overlay.edges) {
+          if (edge && !this._edges.has(id)) {
+            count++;
+          }
+        }
+        // Subtract overlay edges with null that are deleting live edges
+        for (const [id, edge] of overlay.edges) {
+          if (edge === null && this._edges.has(id)) {
+            count--;
+          }
+        }
+      }
+
+      return count;
+    }
+
+    // With filter, get filtered results and return count
+    const edges = await this.getEdges(options);
+    return edges.length;
+  }
+
+  async aggregateEdgeProperty(
+    key: string,
+    options?: GraphQueryOptions
+  ): Promise<AggregateResult> {
+    const edges = await this.getEdges(options);
+    const values: number[] = [];
+
+    for (const edge of edges) {
+      const value = edge.properties?.[key];
+      if (typeof value === 'number' && !Number.isNaN(value)) {
+        values.push(value);
+      }
+    }
+
+    return this._computeAggregation(values);
   }
 
   // ---------------------------------------------------------------------------
@@ -223,7 +300,7 @@ export class InMemoryStorageProvider implements IStorageProvider {
     const now = Date.now();
     // Clone first to avoid mutating the caller's object
     const nodeToInsert = deepClone(node);
-    
+
     // Set createdOn and updatedOn at node level if not already set
     if (nodeToInsert.createdOn === undefined) {
       nodeToInsert.createdOn = now;
@@ -362,179 +439,6 @@ export class InMemoryStorageProvider implements IStorageProvider {
     return node ? deepClone(node) : undefined;
   }
 
-  async getAllNodes(limit?: number, orderBy?: IOrderBy, transaction?: ITransactionHandle): Promise<NodeData[]> {
-    const overlay = this._getOverlay(transaction?.id);
-    const result: NodeData[] = [];
-    const seen = new Set<string>();
-
-    if (overlay) {
-      // First add all overlay nodes
-      for (const [id, node] of overlay.nodes) {
-        if (node) {
-          result.push(deepClone(node));
-          seen.add(id);
-        }
-      }
-    }
-
-    // Then add live nodes not overridden by overlay
-    for (const [id, node] of this._nodes) {
-      if (seen.has(id)) continue;
-      result.push(deepClone(node));
-    }
-
-    // Apply ordering if specified
-    if (orderBy) {
-      result.sort((a, b) => {
-        const aVal = a[orderBy.field];
-        const bVal = b[orderBy.field];
-        if (aVal === undefined && bVal === undefined) return 0;
-        if (aVal === undefined) return orderBy.direction === 'asc' ? 1 : -1;
-        if (bVal === undefined) return orderBy.direction === 'asc' ? -1 : 1;
-        return orderBy.direction === 'asc' ? aVal - bVal : bVal - aVal;
-      });
-    }
-
-    // Apply limit
-    if (limit !== undefined) {
-      return result.slice(0, limit);
-    }
-    return result;
-  }
-
-  async getNodesByType(type: string, transaction?: ITransactionHandle): Promise<NodeData[]> {
-    const overlay = this._getOverlay(transaction?.id);
-    const seen = new Set<string>();
-    const result: NodeData[] = [];
-
-    if (overlay) {
-      // Check overlay nodesByType
-      const overlayIds = overlay.nodesByType.get(type);
-      if (overlayIds) {
-        for (const id of overlayIds) {
-          const node = overlay.nodes.get(id);
-          if (node) {
-            result.push(deepClone(node));
-            seen.add(id);
-          }
-        }
-      }
-    }
-
-    // Merge with live nodes
-    const liveIds = this._nodesByType.get(type);
-    if (liveIds) {
-      for (const id of liveIds) {
-        if (seen.has(id)) continue;
-        const node = this._nodes.get(id);
-        if (node) {
-          // Only include if not deleted in overlay
-          const overlayNode = overlay?.nodes.get(id);
-          if (overlayNode !== null) {
-            result.push(deepClone(node));
-          }
-        }
-      }
-    }
-    return result;
-  }
-
-  async getNodesByProperty(key: string, value: unknown, nodeType?: string, transaction?: ITransactionHandle): Promise<NodeData[]> {
-    const serialized = this._propKey(value);
-    const overlay = this._getOverlay(transaction?.id);
-    const seen = new Set<string>();
-    const result: NodeData[] = [];
-
-    if (overlay) {
-      // Check overlay property index
-      const keyMap = overlay.nodesByProperty.get(key);
-      if (keyMap) {
-        const idSet = keyMap.get(serialized);
-        if (idSet) {
-          for (const id of idSet) {
-            const node = overlay.nodes.get(id);
-            if (node) {
-              if (!nodeType || nodeType === '*' || node.type === nodeType) {
-                result.push(deepClone(node));
-                seen.add(id);
-              }
-            }
-          }
-        }
-      }
-    }
-
-    // Merge with live nodes
-    const liveMap = this._nodesByProperty.get(key);
-    if (liveMap) {
-      const liveIds = liveMap.get(serialized);
-      if (liveIds) {
-        for (const id of liveIds) {
-          if (seen.has(id)) continue;
-          const node = this._nodes.get(id);
-          if (node) {
-            // Only include if not deleted in overlay
-            const overlayNode = overlay?.nodes.get(id);
-            if (overlayNode !== null) {
-              if (!nodeType || nodeType === '*' || node.type === nodeType) {
-                result.push(deepClone(node));
-              }
-            }
-          }
-        }
-      }
-    }
-    return result;
-  }
-
-  async getEdgesByProperty(key: string, value: unknown, edgeType?: string, transaction?: ITransactionHandle): Promise<EdgeData[]> {
-    const serialized = this._propKey(value);
-    const overlay = this._getOverlay(transaction?.id);
-    const seen = new Set<string>();
-    const result: EdgeData[] = [];
-
-    if (overlay) {
-      // Check overlay property index
-      const keyMap = overlay.edgesByProperty.get(key);
-      if (keyMap) {
-        const idSet = keyMap.get(serialized);
-        if (idSet) {
-          for (const id of idSet) {
-            const edge = overlay.edges.get(id);
-            if (edge) {
-              if (!edgeType || edgeType === '*' || edge.type === edgeType) {
-                result.push(deepClone(edge));
-                seen.add(id);
-              }
-            }
-          }
-        }
-      }
-    }
-
-    // Merge with live edges
-    const liveMap = this._edgesByProperty.get(key);
-    if (liveMap) {
-      const liveIds = liveMap.get(serialized);
-      if (liveIds) {
-        for (const id of liveIds) {
-          if (seen.has(id)) continue;
-          const edge = this._edges.get(id);
-          if (edge) {
-            // Only include if not deleted in overlay
-            const overlayEdge = overlay?.edges.get(id);
-            if (overlayEdge !== null) {
-              if (!edgeType || edgeType === '*' || edge.type === edgeType) {
-                result.push(deepClone(edge));
-              }
-            }
-          }
-        }
-      }
-    }
-    return result;
-  }
-
   // ---------------------------------------------------------------------------
   // Edge mutations
   // ---------------------------------------------------------------------------
@@ -543,7 +447,7 @@ export class InMemoryStorageProvider implements IStorageProvider {
     const now = Date.now();
     // Clone first to avoid mutating the caller's object
     const edgeToInsert = deepClone(edge);
-    
+
     // Set createdOn and updatedOn at edge level if not already set
     if (edgeToInsert.createdOn === undefined) {
       edgeToInsert.createdOn = now;
@@ -657,78 +561,8 @@ export class InMemoryStorageProvider implements IStorageProvider {
     return edge ? deepClone(edge) : undefined;
   }
 
-  async getAllEdges(limit?: number, orderBy?: IOrderBy, transaction?: ITransactionHandle): Promise<EdgeData[]> {
-    const overlay = this._getOverlay(transaction?.id);
-    const result: EdgeData[] = [];
-    const seen = new Set<string>();
-
-    if (overlay) {
-      for (const [id, edge] of overlay.edges) {
-        if (edge) {
-          result.push(deepClone(edge));
-          seen.add(id);
-        }
-      }
-    }
-
-    for (const [id, edge] of this._edges) {
-      if (seen.has(id)) continue;
-      const overlayEdge = overlay?.edges.get(id);
-      if (overlayEdge !== null) {
-        result.push(deepClone(edge));
-      }
-    }
-
-    // Apply ordering if specified
-    if (orderBy) {
-      result.sort((a, b) => {
-        const aVal = a[orderBy.field];
-        const bVal = b[orderBy.field];
-        if (aVal === undefined && bVal === undefined) return 0;
-        if (aVal === undefined) return orderBy.direction === 'asc' ? 1 : -1;
-        if (bVal === undefined) return orderBy.direction === 'asc' ? -1 : 1;
-        return orderBy.direction === 'asc' ? aVal - bVal : bVal - aVal;
-      });
-    }
-
-    return limit !== undefined ? result.slice(0, limit) : result;
-  }
-
-  async getEdgesByType(type: string, transaction?: ITransactionHandle): Promise<EdgeData[]> {
-    const overlay = this._getOverlay(transaction?.id);
-    const seen = new Set<string>();
-    const result: EdgeData[] = [];
-
-    if (overlay) {
-      const overlayIds = overlay.edgesByType.get(type);
-      if (overlayIds) {
-        for (const id of overlayIds) {
-          const edge = overlay.edges.get(id);
-          if (edge) {
-            result.push(deepClone(edge));
-            seen.add(id);
-          }
-        }
-      }
-    }
-
-    const liveIds = this._edgesByType.get(type);
-    if (liveIds) {
-      for (const id of liveIds) {
-        if (seen.has(id)) continue;
-        const edge = this._edges.get(id);
-        if (edge) {
-          const overlayEdge = overlay?.edges.get(id);
-          if (overlayEdge !== null) {
-            result.push(deepClone(edge));
-          }
-        }
-      }
-    }
-    return result;
-  }
-
-  async getEdgesBySource(nodeId: string, type?: string, transaction?: ITransactionHandle): Promise<EdgeData[]> {
+  async getEdgesBySource(nodeId: string, options?: GraphQueryOptions): Promise<EdgeData[]> {
+    const transaction = options?.transaction;
     const overlay = this._getOverlay(transaction?.id);
     const seen = new Set<string>();
     const result: EdgeData[] = [];
@@ -738,7 +572,7 @@ export class InMemoryStorageProvider implements IStorageProvider {
       if (overlayIds) {
         for (const id of overlayIds) {
           const edge = overlay.edges.get(id);
-          if (edge && (!type || edge.type === type)) {
+          if (edge && this._matchesEdgeFilters(edge, options)) {
             result.push(deepClone(edge));
             seen.add(id);
           }
@@ -753,16 +587,18 @@ export class InMemoryStorageProvider implements IStorageProvider {
         const edge = this._edges.get(id);
         if (edge) {
           const overlayEdge = overlay?.edges.get(id);
-          if (overlayEdge !== null && (!type || edge.type === type)) {
+          if (overlayEdge !== null && this._matchesEdgeFilters(edge, options)) {
             result.push(deepClone(edge));
           }
         }
       }
     }
-    return result;
+
+    return this._applyOrderAndLimit(result, options);
   }
 
-  async getEdgesByTarget(nodeId: string, type?: string, transaction?: ITransactionHandle): Promise<EdgeData[]> {
+  async getEdgesByTarget(nodeId: string, options?: GraphQueryOptions): Promise<EdgeData[]> {
+    const transaction = options?.transaction;
     const overlay = this._getOverlay(transaction?.id);
     const seen = new Set<string>();
     const result: EdgeData[] = [];
@@ -772,7 +608,7 @@ export class InMemoryStorageProvider implements IStorageProvider {
       if (overlayIds) {
         for (const id of overlayIds) {
           const edge = overlay.edges.get(id);
-          if (edge && (!type || edge.type === type)) {
+          if (edge && this._matchesEdgeFilters(edge, options)) {
             result.push(deepClone(edge));
             seen.add(id);
           }
@@ -787,13 +623,70 @@ export class InMemoryStorageProvider implements IStorageProvider {
         const edge = this._edges.get(id);
         if (edge) {
           const overlayEdge = overlay?.edges.get(id);
-          if (overlayEdge !== null && (!type || edge.type === type)) {
+          if (overlayEdge !== null && this._matchesEdgeFilters(edge, options)) {
             result.push(deepClone(edge));
           }
         }
       }
     }
-    return result;
+
+    return this._applyOrderAndLimit(result, options);
+  }
+
+  async getNodes(options?: GraphQueryOptions): Promise<NodeData[]> {
+    const transaction = options?.transaction;
+    const overlay = this._getOverlay(transaction?.id);
+    const result: NodeData[] = [];
+    const seen = new Set<string>();
+
+    if (overlay) {
+      // First add all overlay nodes
+      for (const [id, node] of overlay.nodes) {
+        if (node && this._matchesNodeFilters(node, options)) {
+          result.push(deepClone(node));
+          seen.add(id);
+        }
+      }
+    }
+
+    // Then add live nodes not overridden by overlay
+    for (const [id, node] of this._nodes) {
+      if (seen.has(id)) continue;
+      const overlayNode = overlay?.nodes.get(id);
+      if (overlayNode !== null && this._matchesNodeFilters(node, options)) {
+        result.push(deepClone(node));
+      }
+    }
+
+    return this._applyOrderAndLimit(result, options);
+  }
+
+  async getEdges(options?: GraphQueryOptions): Promise<EdgeData[]> {
+    const transaction = options?.transaction;
+    const overlay = this._getOverlay(transaction?.id);
+    const result: EdgeData[] = [];
+    const seen = new Set<string>();
+
+    if (overlay) {
+      // First add all overlay edges
+      for (const [id, edge] of overlay.edges) {
+        if (edge && this._matchesEdgeFilters(edge, options)) {
+          result.push(deepClone(edge));
+          seen.add(id);
+        }
+      }
+    }
+
+    // Then add live edges not overridden by overlay
+    for (const [id, edge] of this._edges) {
+      if (seen.has(id)) continue;
+      const overlayEdge = overlay?.edges.get(id);
+      if (overlayEdge !== null && this._matchesEdgeFilters(edge, options)) {
+        result.push(deepClone(edge));
+      }
+    }
+
+    return this._applyOrderAndLimit(result, options);
   }
 
   // ---------------------------------------------------------------------------
@@ -1280,6 +1173,81 @@ export class InMemoryStorageProvider implements IStorageProvider {
     const id = txnId ?? this._activeTransaction;
     if (!id) return null;
     return this._transactionOverlays.get(id) ?? null;
+  }
+
+  private _matchesNodeFilters(node: NodeData, options?: GraphQueryOptions): boolean {
+    if (!options?.filter) return true;
+
+    const { filter } = options;
+
+    // Check type filter (OR within types)
+    if (filter.types && filter.types.length > 0) {
+      if (!filter.types.includes(node.type)) {
+        return false;
+      }
+    }
+
+    // Check property filters (AND - all must match)
+    if (filter.properties && filter.properties.length > 0) {
+      for (const { key, value } of filter.properties) {
+        if (node.properties[key] !== value) {
+          return false;
+        }
+      }
+    }
+
+    return true;
+  }
+
+  private _matchesEdgeFilters(edge: EdgeData, options?: GraphQueryOptions): boolean {
+    if (!options?.filter) return true;
+
+    const { filter } = options;
+
+    // Check type filter (OR within types)
+    if (filter.types && filter.types.length > 0) {
+      if (!filter.types.includes(edge.type)) {
+        return false;
+      }
+    }
+
+    // Check property filters (AND - all must match)
+    if (filter.properties && filter.properties.length > 0) {
+      for (const { key, value } of filter.properties) {
+        if (edge.properties[key] !== value) {
+          return false;
+        }
+      }
+    }
+
+    return true;
+  }
+
+  private _applyOrderAndLimit<T extends NodeData | EdgeData>(result: T[], options?: GraphQueryOptions): T[] {
+    let output = result;
+
+    // Apply ordering if specified
+    if (options?.orderBy) {
+      const { field, direction } = options.orderBy;
+      output.sort((a, b) => {
+        // Direct fields (createdOn, updatedOn) are on the object itself
+        // Other properties are in the properties object
+        const aVal = (field === 'createdOn' || field === 'updatedOn' ? a[field] : a.properties?.[field]) as number | undefined;
+        const bVal = (field === 'createdOn' || field === 'updatedOn' ? b[field] : b.properties?.[field]) as number | undefined;
+        if (aVal === undefined && bVal === undefined) return 0;
+        if (aVal === undefined) return direction === 'asc' ? 1 : -1;
+        if (bVal === undefined) return direction === 'asc' ? -1 : 1;
+        if (aVal === bVal) return 0;
+        return direction === 'asc' ? (aVal < bVal ? -1 : 1) : (aVal > bVal ? -1 : 1);
+      });
+    }
+
+    // Apply limit
+    if (options?.limit !== undefined) {
+      output = output.slice(0, options.limit);
+    }
+
+    return output;
   }
 
   private _applyOverlayToLive(overlay: TransactionOverlay): void {

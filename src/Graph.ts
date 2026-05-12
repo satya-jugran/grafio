@@ -1,4 +1,4 @@
-import type { GraphData, GraphOptions } from './types';
+import type { GraphData } from './types';
 import { Node } from './Node';
 import { Edge } from './Edge';
 import { GraphIndex } from './Graph/GraphIndex';
@@ -6,9 +6,11 @@ import { GraphTraversal } from './Graph/GraphTraversal';
 import { GraphAdminOps } from './Graph/GraphAdminOps';
 import { GraphTransaction } from './Graph/GraphTransaction';
 import type { TraversalOptions } from './Graph/TraversalOptions';
+import type { GraphQueryOptions } from './Graph/GraphQueryOptions';
 import type { IStorageProvider } from './storage/IStorageProvider';
 
 // Re-export for external use
+export type { GraphQueryOptions } from './Graph/GraphQueryOptions';
 export type { TraversalOptions } from './Graph/TraversalOptions';
 export { GraphTransaction } from './Graph/GraphTransaction';
 export { TransactionNotActiveError, TransactionFailedError } from './Graph/GraphTransaction';
@@ -84,18 +86,18 @@ export class Graph {
 
   /**
    * Returns all nodes in the graph.
-   * @param transaction - Optional transaction for consistent reads within a transaction
+   * @param options - Optional GraphQueryOptions for filtering/ordering/limit
    */
-  async getNodes(transaction?: GraphTransaction): Promise<readonly Node[]> {
-    return this._index.getNodes(transaction);
+  async getNodes(options?: GraphQueryOptions): Promise<readonly Node[]> {
+    return this._index.getNodes(options);
   }
 
   /**
    * Returns all edges in the graph.
-   * @param transaction - Optional transaction for consistent reads within a transaction
+   * @param options - Optional GraphQueryOptions for filtering/ordering/limit
    */
-  async getEdges(transaction?: GraphTransaction): Promise<readonly Edge[]> {
-    return this._index.getEdges(transaction);
+  async getEdges(options?: GraphQueryOptions): Promise<readonly Edge[]> {
+    return this._index.getEdges(options);
   }
 
   /**
@@ -154,31 +156,6 @@ export class Graph {
    * @param transaction - Optional transaction for consistent reads within a transaction
    * @returns Array of Nodes with the specified type
    */
-  async getNodesByType(type: string, transaction?: GraphTransaction): Promise<Node[]> {
-    return this._index.getNodesByType(type, transaction);
-  }
-
-  /**
-   * Retrieves nodes by a property value.
-   * @param key - The property key to search
-   * @param value - The property value to match
-   * @param options - Optional options with nodeType filter
-   * @param transaction - Optional transaction for consistent reads within a transaction
-   * @returns Array of Nodes with the specified property value
-   */
-  async getNodesByProperty(key: string, value: unknown, options?: GraphOptions<{ nodeType?: string }>): Promise<Node[]> {
-    return this._index.getNodesByProperty(key, value, options);
-  }
-
-  /**
-   * Retrieves edges by a property value.
-   * @param key - The property key to search for
-   * @param value - The property value to match
-   * @param options - Optional options with edgeType filter and transaction
-   */
-  async getEdgesByProperty(key: string, value: unknown, options?: GraphOptions<{ edgeType?: string }>): Promise<Edge[]> {
-    return this._index.getEdgesByProperty(key, value, options);
-  }
 
   /**
    * Adds a new directed edge to the graph.
@@ -220,45 +197,22 @@ export class Graph {
   }
 
   /**
-   * Gets the parent nodes of a given node.
-   * Parents are nodes that have edges pointing TO this node.
-   * @param nodeId - Id of the target node
-   * @param options - Optional traversal options with nodeType and edgeType filters
-   * @param transaction - Optional transaction for consistent reads within a transaction
-   * @returns Array of parent Nodes
-   */
-  async getParents(nodeId: string, options?: GraphOptions<{ nodeType?: string; edgeType?: string }>): Promise<Node[]> {
-    return this._index.getParents(nodeId, options);
-  }
-
-  /**
-   * Gets the child nodes of a given node.
-   * Children are nodes that this node points TO.
-   * @param nodeId - Id of the source node
-   * @param options - Optional options with nodeType and edgeType filters and transaction
-   * @returns Array of child Nodes
-   */
-  async getChildren(nodeId: string, options?: GraphOptions<{ nodeType?: string; edgeType?: string }>): Promise<Node[]> {
-    return this._index.getChildren(nodeId, options);
-  }
-
-  /**
    * Gets all edges originating from a node (outgoing edges).
    * @param sourceId - Id of the source node
-   * @param options - Optional traversal options with edgeType filter
+   * @param options - Optional query options with edgeType filter
    * @returns Array of outgoing Edges
    */
-  async getEdgesFrom(sourceId: string, options?: GraphOptions<{ edgeType?: string }>): Promise<Edge[]> {
+  async getEdgesFrom(sourceId: string, options?: GraphQueryOptions): Promise<Edge[]> {
     return this._index.getEdgesFrom(sourceId, options);
   }
 
   /**
    * Gets all edges pointing to a node (incoming edges).
    * @param targetId - Id of the target node
-   * @param options - Optional options with edgeType filter and transaction
+   * @param options - Optional query options with edgeType filter and transaction
    * @returns Array of incoming Edges
    */
-  async getEdgesTo(targetId: string, options?: GraphOptions<{ edgeType?: string }>): Promise<Edge[]> {
+  async getEdgesTo(targetId: string, options?: GraphQueryOptions): Promise<Edge[]> {
     return this._index.getEdgesTo(targetId, options);
   }
 
@@ -267,22 +221,13 @@ export class Graph {
    * Only returns edges where the two nodes are directly connected.
    * @param sourceId - Id of the first node
    * @param targetId - Id of the second node
-   * @param options - Optional options with edgeType filter and transaction
+   * @param options - Optional query options with edgeType filter and transaction
    * @returns Array of Edges between the nodes
    */
-  async getDirectEdgesBetween(sourceId: string, targetId: string, options?: GraphOptions<{ edgeType?: string }>): Promise<Edge[]> {
+  async getDirectEdgesBetween(sourceId: string, targetId: string, options?: GraphQueryOptions): Promise<Edge[]> {
     return this._index.getDirectEdgesBetween(sourceId, targetId, options);
   }
 
-  /**
-   * Gets all edges of a specific type.
-   * @param type - The edge type to filter by
-   * @param transaction - Optional transaction for consistent reads within a transaction
-   * @returns Array of Edges with the specified type
-   */
-  async getEdgesByType(type: string, transaction?: GraphTransaction): Promise<Edge[]> {
-    return this._index.getEdgesByType(type, transaction);
-  }
 
   /**
    * Traverses the graph from source to target using the specified algorithm.

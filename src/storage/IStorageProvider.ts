@@ -1,25 +1,10 @@
-import type { NodeData, EdgeData, GraphData } from '../types';
+import type { NodeData, EdgeData, GraphData, StorageQueryOptions, IOrderBy, ITransactionHandle, AggregateOp, AggregateResult } from '../types';
 
-/**
- * Represents a transaction handle returned by a storage provider.
- * Contains a unique transaction identifier and optional backend-specific context.
- */
-export interface ITransactionHandle {
-  /** Unique transaction identifier */
-  id: string;
-  /** Backend-specific context (e.g., MongoDB ClientSession) */
-  context?: unknown;
-}
+// Re-export types from types.ts for convenience
+export type { StorageQueryOptions, IOrderBy, ITransactionHandle };
 
-/**
- * Ordering options for collection queries.
- */
-export interface IOrderBy {
-  /** Field to order by */
-  field: 'createdOn' | 'updatedOn';
-  /** Sort direction */
-  direction: 'asc' | 'desc';
-}
+// Storage layer uses GraphQueryOptions as an alias to StorageQueryOptions
+export type GraphQueryOptions = StorageQueryOptions;
 
 /**
  * Contract that every storage backend must fulfill.
@@ -85,34 +70,44 @@ export interface IStorageProvider {
   getNode(id: string, transaction?: ITransactionHandle): Promise<NodeData | undefined>;
 
   /**
-   * Returns all stored nodes, optionally limited and ordered.
-   * @param limit - Maximum number of nodes to return (default: unlimited)
-   * @param orderBy - Optional ordering (e.g., { field: 'updatedOn', direction: 'desc' })
-   * @param transaction - Optional transaction handle for transactional storage providers
-   */
-  getAllNodes(limit?: number, orderBy?: IOrderBy, transaction?: ITransactionHandle): Promise<NodeData[]>;
-
-  /**
-   * Returns all nodes whose `type` field matches the given value.
-   * Implementations must use an index (not a full scan).
-   * @param transaction - Optional transaction handle for transactional storage providers
-   */
-  getNodesByType(type: string, transaction?: ITransactionHandle): Promise<NodeData[]>;
-
-  /**
-   * Returns all nodes that have a property `key` equal to `value`.
-   * Optionally filtered to a specific node type.
-   * Implementations must use an index (not a full scan).
-   * @param transaction - Optional transaction handle for transactional storage providers
-   */
-  getNodesByProperty(key: string, value: unknown, nodeType?: string, transaction?: ITransactionHandle): Promise<NodeData[]>;
-
-  /**
-   * Returns the total number of nodes in storage.
+   * Returns the number of nodes in storage matching the query options.
    * Used by CachedStorageProvider to determine cache completeness.
-   * @param transaction - Optional transaction handle for transactional storage providers
+   * @param options - Optional query options for filtering
    */
-  getTotalNodeCount(transaction?: ITransactionHandle): Promise<number>;
+  getNodeCount(options?: GraphQueryOptions): Promise<number>;
+
+  /**
+   * Aggregates a numeric property across nodes matching the query options.
+   * @param key - The property key to aggregate
+   * @param options - Optional query options for filtering
+   */
+  aggregateNodeProperty(
+    key: string,
+    options?: GraphQueryOptions
+  ): Promise<AggregateResult>;
+
+  /**
+   * Returns nodes matching the specified query options.
+   * Provides unified filtering, ordering, and pagination for node queries.
+   *
+   * @param options - Query options including filters, ordering, limit, and transaction
+   * @returns Array of NodeData matching the query criteria
+   *
+   * @example
+   * // Get all 'User' nodes
+   * const users = await provider.getNodes({ filter: { types: ['User'] } });
+   *
+   * // Get active users with limit
+   * const activeUsers = await provider.getNodes({
+   *   filter: {
+   *     types: ['User'],
+   *     properties: [{ key: 'active', value: true }]
+   *   },
+   *   limit: 10,
+   *   orderBy: { field: 'updatedOn', direction: 'desc' }
+   * });
+   */
+  getNodes(options?: GraphQueryOptions): Promise<NodeData[]>;
 
   // ---------------------------------------------------------------------------
   // Edge mutations
@@ -147,48 +142,70 @@ export interface IStorageProvider {
   getEdge(id: string, transaction?: ITransactionHandle): Promise<EdgeData | undefined>;
 
   /**
-   * Returns all stored edges, up to the optional limit, optionally ordered.
-   * @param limit - Optional maximum number of edges to return
-   * @param orderBy - Optional ordering (e.g., { field: 'updatedOn', direction: 'desc' })
-   * @param transaction - Optional transaction handle
-   */
-  getAllEdges(limit?: number, orderBy?: IOrderBy, transaction?: ITransactionHandle): Promise<EdgeData[]>;
-
-  /**
-   * Returns all edges whose `type` field matches the given value.
-   * Implementations must use an index (not a full scan).
-   * @param transaction - Optional transaction handle for transactional storage providers
-   */
-  getEdgesByType(type: string, transaction?: ITransactionHandle): Promise<EdgeData[]>;
-
-  /**
-   * Returns all edges that have a property `key` equal to `value`.
-   * Optionally filtered to a specific edge type.
-   * Implementations must use an index (not a full scan).
-   * @param transaction - Optional transaction handle for transactional storage providers
-   */
-  getEdgesByProperty(key: string, value: unknown, edgeType?: string, transaction?: ITransactionHandle): Promise<EdgeData[]>;
-
-  /**
-   * Returns the total number of edges in storage.
+   * Returns the number of edges in storage matching the query options.
    * Used by CachedStorageProvider to determine cache completeness.
-   * @param transaction - Optional transaction handle for transactional storage providers
+   * @param options - Optional query options for filtering
    */
-  getTotalEdgeCount(transaction?: ITransactionHandle): Promise<number>;
+  getEdgeCount(options?: GraphQueryOptions): Promise<number>;
 
   /**
-   * Returns all edges whose `sourceId` equals the given node id.
-   * Optionally filtered by edge type to leverage compound adjacency indexes.
-   * Implementations must use an adjacency index (not a full scan).
+   * Aggregates a numeric property across edges matching the query options.
+   * @param key - The property key to aggregate
+   * @param options - Optional query options for filtering
    */
-  getEdgesBySource(nodeId: string, type?: string, transaction?: ITransactionHandle): Promise<EdgeData[]>;
+  aggregateEdgeProperty(
+    key: string,
+    options?: GraphQueryOptions
+  ): Promise<AggregateResult>;
 
   /**
-   * Returns all edges whose `targetId` equals the given node id.
-   * Optionally filtered by edge type to leverage compound adjacency indexes.
-   * Implementations must use an adjacency index (not a full scan).
+   * Returns edges matching the specified query options.
+   * Provides unified filtering, ordering, and pagination for edge queries.
+   *
+   * @param options - Query options including filters, ordering, limit, and transaction
+   * @returns Array of EdgeData matching the query criteria
+   *
+   * @example
+   * // Get all 'KNOWS' edges
+   * const knowsEdges = await provider.getEdges({ filter: { types: ['KNOWS'] } });
+   *
+   * // Get edges with weight > 0.5
+   * const highWeightEdges = await provider.getEdges({
+   *   filter: {
+   *     properties: [{ key: 'weight', value: 0.5 }]
+   *   },
+   *   orderBy: { field: 'updatedOn', direction: 'desc' }
+   * });
    */
-  getEdgesByTarget(nodeId: string, type?: string, transaction?: ITransactionHandle): Promise<EdgeData[]>;
+  getEdges(options?: GraphQueryOptions): Promise<EdgeData[]>;
+
+  /**
+   * Returns all outgoing edges from a source node.
+   * Provides unified adjacency querying with filtering and pagination.
+   *
+   * @param nodeId - The source node identifier
+   * @param options - Query options including type filters, ordering, limit, and transaction
+   * @returns Array of EdgeData representing outgoing edges from the source node
+   *
+   * @example
+   * // Get all 'KNOWS' edges from alice
+   * const friends = await provider.getEdgesBySource(aliceId, { filter: { types: ['KNOWS'] } });
+   */
+  getEdgesBySource(nodeId: string, options?: GraphQueryOptions): Promise<EdgeData[]>;
+
+  /**
+   * Returns all incoming edges to a target node.
+   * Provides unified adjacency querying with filtering and pagination.
+   *
+   * @param nodeId - The target node identifier
+   * @param options - Query options including type filters, ordering, limit, and transaction
+   * @returns Array of EdgeData representing incoming edges to the target node
+   *
+   * @example
+   * // Get all 'KNOWS' edges to bob
+   * const friendOf = await provider.getEdgesByTarget(bobId, { filter: { types: ['KNOWS'] } });
+   */
+  getEdgesByTarget(nodeId: string, options?: GraphQueryOptions): Promise<EdgeData[]>;
 
   // ---------------------------------------------------------------------------
   // Property mutations

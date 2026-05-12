@@ -50,46 +50,58 @@ class MockStorageProvider {
     return this.edges.get(id);
   }
 
-  async getAllNodes(limit?: number, orderBy?: { field: string; direction: 'asc' | 'desc' }): Promise<NodeData[]> {
+  async getNodes(options?: { filter?: { types?: string[] }; limit?: number; orderBy?: { field: string; direction: 'asc' | 'desc' } }): Promise<NodeData[]> {
     let nodes = Array.from(this.nodes.values());
-    if (orderBy?.field === 'updatedOn') {
+    if (options?.filter?.types) {
+      nodes = nodes.filter(n => options.filter!.types!.includes(n.type));
+    }
+    if (options?.orderBy?.field === 'updatedOn' || options?.orderBy?.field === 'createdOn') {
       nodes.sort((a, b) => {
-        const aVal = (a as any).updatedOn ?? 0;
-        const bVal = (b as any).updatedOn ?? 0;
-        return orderBy.direction === 'desc' ? bVal - aVal : aVal - bVal;
+        const aVal = (a as any)[options.orderBy!.field];
+        const bVal = (b as any)[options.orderBy!.field];
+        if (aVal === undefined && bVal === undefined) return 0;
+        if (aVal === undefined) return options.orderBy!.direction === 'asc' ? 1 : -1;
+        if (bVal === undefined) return options.orderBy!.direction === 'asc' ? -1 : 1;
+        return options.orderBy!.direction === 'asc' ? aVal - bVal : bVal - aVal;
       });
     }
-    if (limit) nodes = nodes.slice(0, limit);
+    if (options?.limit) nodes = nodes.slice(0, options.limit);
     return nodes;
   }
 
-  async getAllEdges(limit?: number, orderBy?: { field: string; direction: 'asc' | 'desc' }): Promise<EdgeData[]> {
+  async getEdges(options?: { filter?: { types?: string[] }; limit?: number; orderBy?: { field: string; direction: 'asc' | 'desc' } }): Promise<EdgeData[]> {
     let edges = Array.from(this.edges.values());
-    if (orderBy?.field === 'updatedOn') {
+    if (options?.filter?.types) {
+      edges = edges.filter(e => options.filter!.types!.includes(e.type));
+    }
+    if (options?.orderBy?.field === 'updatedOn' || options?.orderBy?.field === 'createdOn') {
       edges.sort((a, b) => {
-        const aVal = (a as any).updatedOn ?? 0;
-        const bVal = (b as any).updatedOn ?? 0;
-        return orderBy.direction === 'desc' ? bVal - aVal : aVal - bVal;
+        const aVal = (a as any)[options.orderBy!.field];
+        const bVal = (b as any)[options.orderBy!.field];
+        if (aVal === undefined && bVal === undefined) return 0;
+        if (aVal === undefined) return options.orderBy!.direction === 'asc' ? 1 : -1;
+        if (bVal === undefined) return options.orderBy!.direction === 'asc' ? -1 : 1;
+        return options.orderBy!.direction === 'asc' ? aVal - bVal : bVal - aVal;
       });
     }
-    if (limit) edges = edges.slice(0, limit);
+    if (options?.limit) edges = edges.slice(0, options.limit);
     return edges;
   }
 
-  async getNodesByType(type: string): Promise<NodeData[]> {
-    return Array.from(this.nodes.values()).filter(n => n.type === type);
+  async getEdgesBySource(nodeId: string, options?: { filter?: { types?: string[] } }): Promise<EdgeData[]> {
+    let edges = Array.from(this.edges.values()).filter(e => e.sourceId === nodeId);
+    if (options?.filter?.types) {
+      edges = edges.filter(e => options.filter!.types!.includes(e.type));
+    }
+    return edges;
   }
 
-  async getEdgesByType(type: string): Promise<EdgeData[]> {
-    return Array.from(this.edges.values()).filter(e => e.type === type);
-  }
-
-  async getEdgesBySource(nodeId: string): Promise<EdgeData[]> {
-    return Array.from(this.edges.values()).filter(e => e.sourceId === nodeId);
-  }
-
-  async getEdgesByTarget(nodeId: string): Promise<EdgeData[]> {
-    return Array.from(this.edges.values()).filter(e => e.targetId === nodeId);
+  async getEdgesByTarget(nodeId: string, options?: { filter?: { types?: string[] } }): Promise<EdgeData[]> {
+    let edges = Array.from(this.edges.values()).filter(e => e.targetId === nodeId);
+    if (options?.filter?.types) {
+      edges = edges.filter(e => options.filter!.types!.includes(e.type));
+    }
+    return edges;
   }
 
   async getTotalNodeCount(): Promise<number> {
@@ -528,13 +540,13 @@ describe('CachedStorageProvider', () => {
       await provider.insertNode({ id: 'node-1', type: 'Test', properties: {} });
       await provider.insertNode({ id: 'node-2', type: 'Test', properties: {} });
 
-      const nodes = await provider.getAllNodes();
+      const nodes = await provider.getNodes();
 
       expect(nodes).toHaveLength(2);
     });
 
     it('should return empty array when no nodes', async () => {
-      const nodes = await provider.getAllNodes();
+      const nodes = await provider.getNodes();
       expect(nodes).toHaveLength(0);
     });
   });
@@ -544,13 +556,13 @@ describe('CachedStorageProvider', () => {
       await provider.insertEdge({ id: 'edge-1', type: 'Test', sourceId: 'n1', targetId: 'n2', properties: {} });
       await provider.insertEdge({ id: 'edge-2', type: 'Test', sourceId: 'n3', targetId: 'n4', properties: {} });
 
-      const edges = await provider.getAllEdges();
+      const edges = await provider.getEdges();
 
       expect(edges).toHaveLength(2);
     });
 
     it('should return empty array when no edges', async () => {
-      const edges = await provider.getAllEdges();
+      const edges = await provider.getEdges();
       expect(edges).toHaveLength(0);
     });
   });
@@ -561,7 +573,7 @@ describe('CachedStorageProvider', () => {
       await provider.insertNode({ id: 'node-2', type: 'Place', properties: {} });
       await provider.insertNode({ id: 'node-3', type: 'Person', properties: {} });
 
-      const nodes = await provider.getNodesByType('Person');
+      const nodes = await provider.getNodes({ filter: { types: ['Person'] } });
 
       expect(nodes).toHaveLength(2);
     });
@@ -573,7 +585,7 @@ describe('CachedStorageProvider', () => {
       await provider.insertEdge({ id: 'edge-2', type: 'LIKES', sourceId: 'n1', targetId: 'n3', properties: {} });
       await provider.insertEdge({ id: 'edge-3', type: 'KNOWS', sourceId: 'n3', targetId: 'n4', properties: {} });
 
-      const edges = await provider.getEdgesByType('KNOWS');
+      const edges = await provider.getEdges({ filter: { types: ['KNOWS'] } });
 
       expect(edges).toHaveLength(2);
     });
@@ -706,9 +718,7 @@ describe('CachedStorageProvider', () => {
       await warmProvider.warmCache();
 
       // Do NOT clear underlying - cache completeness check requires cachedCount === totalCount
-      // Verify cache is being used by checking underlying was not called
-      const spy = jest.spyOn(mockProvider, 'getAllNodes');
-      const nodes = await warmProvider.getAllNodes();
+      const nodes = await warmProvider.getNodes();
 
       expect(nodes).toHaveLength(2);
       expect(nodes.map(n => n.id).sort()).toEqual(['node-1', 'node-2']);
@@ -727,7 +737,7 @@ describe('CachedStorageProvider', () => {
       // Manually add a node to underlying but not to cache
       mockProvider.nodes.set('node-3', { id: 'node-3', type: 'Test', properties: {} });
 
-      const nodes = await warmProvider.getAllNodes(undefined, { field: 'updatedOn', direction: 'asc' });
+      const nodes = await warmProvider.getNodes({ orderBy: { field: 'updatedOn', direction: 'asc' } });
 
       // Should get all 3 nodes from underlying since cache is incomplete
       expect(nodes).toHaveLength(3);
@@ -737,7 +747,7 @@ describe('CachedStorageProvider', () => {
       await provider.insertNode({ id: 'node-1', type: 'Test', properties: {} });
 
       const txn = await provider.beginTransaction();
-      const nodes = await provider.getAllNodes(undefined, undefined, txn);
+      const nodes = await provider.getNodes({ transaction: txn });
 
       expect(nodes).toHaveLength(1);
     });
@@ -754,7 +764,7 @@ describe('CachedStorageProvider', () => {
 
       // Do NOT clear underlying - cache completeness check requires cachedCount === totalCount
       // Request only 3 nodes, cache has 5
-      const nodes = await warmProvider.getAllNodes(3);
+      const nodes = await warmProvider.getNodes({ limit: 3 });
 
       expect(nodes).toHaveLength(3);
     });
@@ -772,7 +782,7 @@ describe('CachedStorageProvider', () => {
       // NOTE: Do NOT clear underlying here - the orderBy case requires cachedCount === totalCount
       // If we clear underlying, totalCount would be 0 while cachedCount is 3, breaking the condition
 
-      const nodes = await warmProvider.getAllNodes(undefined, { field: 'createdOn', direction: 'desc' });
+      const nodes = await warmProvider.getNodes({ orderBy: { field: 'createdOn', direction: 'desc' } });
 
       expect(nodes).toHaveLength(3);
       expect(nodes[0].id).toBe('node-2'); // highest createdOn
@@ -790,7 +800,7 @@ describe('CachedStorageProvider', () => {
       const warmProvider = new CachedStorageProvider(mockProvider as any, 'graph-test', cacheManager, warmConfig);
       await warmProvider.warmCache();
 
-      const nodes = await warmProvider.getAllNodes(undefined, { field: 'createdOn', direction: 'asc' });
+      const nodes = await warmProvider.getNodes({ orderBy: { field: 'createdOn', direction: 'asc' } });
 
       // node-2 with undefined createdOn should come last in asc order
       expect(nodes).toHaveLength(3);
@@ -807,7 +817,7 @@ describe('CachedStorageProvider', () => {
       const warmProvider = new CachedStorageProvider(mockProvider as any, 'graph-test', cacheManager, warmConfig);
       await warmProvider.warmCache();
 
-      const nodes = await warmProvider.getAllNodes(undefined, { field: 'createdOn', direction: 'desc' });
+      const nodes = await warmProvider.getNodes({ orderBy: { field: 'createdOn', direction: 'desc' } });
 
       // node-2 with undefined createdOn should come first in desc order
       expect(nodes).toHaveLength(3);
@@ -825,8 +835,8 @@ describe('CachedStorageProvider', () => {
       await warmProvider.warmCache();
 
       // Do NOT clear underlying - cache completeness check requires cachedCount === totalCount
-      const spy = jest.spyOn(mockProvider, 'getAllEdges');
-      const edges = await warmProvider.getAllEdges();
+      const spy = jest.spyOn(mockProvider, 'getEdges');
+      const edges = await warmProvider.getEdges();
 
       expect(edges).toHaveLength(2);
       expect(edges.map(e => e.id).sort()).toEqual(['edge-1', 'edge-2']);
@@ -844,7 +854,7 @@ describe('CachedStorageProvider', () => {
 
       // Do NOT clear underlying - cache completeness check requires cachedCount === totalCount
       // Request only 3 edges, cache has 5
-      const edges = await warmProvider.getAllEdges(3);
+      const edges = await warmProvider.getEdges({ limit: 3 });
 
       expect(edges).toHaveLength(3);
     });
@@ -861,7 +871,7 @@ describe('CachedStorageProvider', () => {
 
       // NOTE: Do NOT clear underlying here - the orderBy case requires cachedCount === totalCount
 
-      const edges = await warmProvider.getAllEdges(undefined, { field: 'createdOn', direction: 'desc' });
+      const edges = await warmProvider.getEdges({ orderBy: { field: 'createdOn', direction: 'desc' } });
 
       expect(edges).toHaveLength(3);
       expect(edges[0].id).toBe('edge-2'); // highest createdOn
@@ -879,7 +889,7 @@ describe('CachedStorageProvider', () => {
       const warmProvider = new CachedStorageProvider(mockProvider as any, 'graph-test', cacheManager, warmConfig);
       await warmProvider.warmCache();
 
-      const edges = await warmProvider.getAllEdges(undefined, { field: 'createdOn', direction: 'asc' });
+      const edges = await warmProvider.getEdges({ orderBy: { field: 'createdOn', direction: 'asc' } });
 
       // edge-2 with undefined createdOn should come last in asc order
       expect(edges).toHaveLength(3);
@@ -896,7 +906,7 @@ describe('CachedStorageProvider', () => {
       const warmProvider = new CachedStorageProvider(mockProvider as any, 'graph-test', cacheManager, warmConfig);
       await warmProvider.warmCache();
 
-      const edges = await warmProvider.getAllEdges(undefined, { field: 'createdOn', direction: 'desc' });
+      const edges = await warmProvider.getEdges({ orderBy: { field: 'createdOn', direction: 'desc' } });
 
       // edge-2 with undefined createdOn should come first in desc order
       expect(edges).toHaveLength(3);
@@ -909,9 +919,97 @@ describe('CachedStorageProvider', () => {
       await provider.insertEdge({ id: 'edge-1', type: 'KNOWS', sourceId: 'n1', targetId: 'n2', properties: {} });
 
       const txn = await provider.beginTransaction();
-      const edges = await provider.getEdgesBySource('n1', undefined, txn);
+      const edges = await provider.getEdgesBySource('n1', { transaction: txn });
 
       expect(edges).toHaveLength(1);
+    });
+
+    it('should apply orderBy when sorting edges by createdOn', async () => {
+      await provider.insertEdge({ id: 'edge-1', type: 'A', sourceId: 'n1', targetId: 'n2', properties: {}, createdOn: 1000 });
+      await provider.insertEdge({ id: 'edge-2', type: 'A', sourceId: 'n1', targetId: 'n3', properties: {}, createdOn: 3000 });
+      await provider.insertEdge({ id: 'edge-3', type: 'A', sourceId: 'n1', targetId: 'n4', properties: {}, createdOn: 2000 });
+
+      const warmConfig: CacheConfig = { ...defaultConfig, preloadStrategy: 'all' };
+      const warmProvider = new CachedStorageProvider(mockProvider as any, 'graph-test', cacheManager, warmConfig);
+      await warmProvider.warmCache();
+
+      const edges = await warmProvider.getEdgesBySource('n1', { orderBy: { field: 'createdOn', direction: 'asc' } });
+
+      expect(edges).toHaveLength(3);
+      expect(edges[0].id).toBe('edge-1');
+      expect(edges[1].id).toBe('edge-3');
+      expect(edges[2].id).toBe('edge-2');
+    });
+
+    it('should apply limit to edges from source', async () => {
+      await provider.insertEdge({ id: 'edge-1', type: 'A', sourceId: 'n1', targetId: 'n2', properties: {} });
+      await provider.insertEdge({ id: 'edge-2', type: 'A', sourceId: 'n1', targetId: 'n3', properties: {} });
+      await provider.insertEdge({ id: 'edge-3', type: 'A', sourceId: 'n1', targetId: 'n4', properties: {} });
+
+      const warmConfig: CacheConfig = { ...defaultConfig, preloadStrategy: 'all' };
+      const warmProvider = new CachedStorageProvider(mockProvider as any, 'graph-test', cacheManager, warmConfig);
+      await warmProvider.warmCache();
+
+      const edges = await warmProvider.getEdgesBySource('n1', { limit: 2 });
+
+      expect(edges).toHaveLength(2);
+    });
+
+    it('should handle undefined property values during orderBy', async () => {
+      await provider.insertEdge({ id: 'edge-1', type: 'A', sourceId: 'n1', targetId: 'n2', properties: { weight: 100 } });
+      await provider.insertEdge({ id: 'edge-2', type: 'A', sourceId: 'n1', targetId: 'n3', properties: {} });
+      await provider.insertEdge({ id: 'edge-3', type: 'A', sourceId: 'n1', targetId: 'n4', properties: { weight: 50 } });
+      await provider.insertEdge({ id: 'edge-4', type: 'A', sourceId: 'n1', targetId: 'n5', properties: { weight: 200 } });
+
+      const warmConfig: CacheConfig = { ...defaultConfig, preloadStrategy: 'all' };
+      const warmProvider = new CachedStorageProvider(mockProvider as any, 'graph-test', cacheManager, warmConfig);
+      await warmProvider.warmCache();
+
+      const edges = await warmProvider.getEdgesBySource('n1', { orderBy: { field: 'weight', direction: 'asc' } });
+
+      expect(edges).toHaveLength(4);
+      // undefined values should sort to the end in asc order
+      expect(edges[0].id).toBe('edge-3'); // 50
+      expect(edges[1].id).toBe('edge-1'); // 100
+      expect(edges[2].id).toBe('edge-4'); // 200
+      expect(edges[3].id).toBe('edge-2'); // undefined
+    });
+
+    it('should handle when both values are undefined during orderBy', async () => {
+      await provider.insertEdge({ id: 'edge-1', type: 'A', sourceId: 'n1', targetId: 'n2', properties: {} });
+      await provider.insertEdge({ id: 'edge-2', type: 'A', sourceId: 'n1', targetId: 'n3', properties: {} });
+      await provider.insertEdge({ id: 'edge-3', type: 'A', sourceId: 'n1', targetId: 'n4', properties: { weight: 50 } });
+
+      const warmConfig: CacheConfig = { ...defaultConfig, preloadStrategy: 'all' };
+      const warmProvider = new CachedStorageProvider(mockProvider as any, 'graph-test', cacheManager, warmConfig);
+      await warmProvider.warmCache();
+
+      const edges = await warmProvider.getEdgesBySource('n1', { orderBy: { field: 'weight', direction: 'asc' } });
+
+      expect(edges).toHaveLength(3);
+      // weight:50 comes first, both undefined stay in original order
+      expect(edges[0].id).toBe('edge-3'); // 50
+      expect(edges[1].id).toBe('edge-1'); // undefined
+      expect(edges[2].id).toBe('edge-2'); // undefined
+    });
+
+    it('should combine orderBy and limit on edges from source', async () => {
+      await provider.insertEdge({ id: 'edge-1', type: 'A', sourceId: 'n1', targetId: 'n2', properties: {}, createdOn: 1000 });
+      await provider.insertEdge({ id: 'edge-2', type: 'A', sourceId: 'n1', targetId: 'n3', properties: {}, createdOn: 3000 });
+      await provider.insertEdge({ id: 'edge-3', type: 'A', sourceId: 'n1', targetId: 'n4', properties: {}, createdOn: 2000 });
+
+      const warmConfig: CacheConfig = { ...defaultConfig, preloadStrategy: 'all' };
+      const warmProvider = new CachedStorageProvider(mockProvider as any, 'graph-test', cacheManager, warmConfig);
+      await warmProvider.warmCache();
+
+      const edges = await warmProvider.getEdgesBySource('n1', {
+        orderBy: { field: 'createdOn', direction: 'desc' },
+        limit: 2
+      });
+
+      expect(edges).toHaveLength(2);
+      expect(edges[0].id).toBe('edge-2'); // highest createdOn
+      expect(edges[1].id).toBe('edge-3');
     });
   });
 
@@ -920,9 +1018,97 @@ describe('CachedStorageProvider', () => {
       await provider.insertEdge({ id: 'edge-1', type: 'KNOWS', sourceId: 'n1', targetId: 'n2', properties: {} });
 
       const txn = await provider.beginTransaction();
-      const edges = await provider.getEdgesByTarget('n2', undefined, txn);
+      const edges = await provider.getEdgesByTarget('n2', { transaction: txn });
 
       expect(edges).toHaveLength(1);
+    });
+
+    it('should apply orderBy when sorting edges by createdOn', async () => {
+      await provider.insertEdge({ id: 'edge-1', type: 'A', sourceId: 'n1', targetId: 'n2', properties: {}, createdOn: 1000 });
+      await provider.insertEdge({ id: 'edge-2', type: 'A', sourceId: 'n3', targetId: 'n2', properties: {}, createdOn: 3000 });
+      await provider.insertEdge({ id: 'edge-3', type: 'A', sourceId: 'n4', targetId: 'n2', properties: {}, createdOn: 2000 });
+
+      const warmConfig: CacheConfig = { ...defaultConfig, preloadStrategy: 'all' };
+      const warmProvider = new CachedStorageProvider(mockProvider as any, 'graph-test', cacheManager, warmConfig);
+      await warmProvider.warmCache();
+
+      const edges = await warmProvider.getEdgesByTarget('n2', { orderBy: { field: 'createdOn', direction: 'desc' } });
+
+      expect(edges).toHaveLength(3);
+      expect(edges[0].id).toBe('edge-2');
+      expect(edges[1].id).toBe('edge-3');
+      expect(edges[2].id).toBe('edge-1');
+    });
+
+    it('should apply limit to edges to target', async () => {
+      await provider.insertEdge({ id: 'edge-1', type: 'A', sourceId: 'n1', targetId: 'n2', properties: {} });
+      await provider.insertEdge({ id: 'edge-2', type: 'A', sourceId: 'n3', targetId: 'n2', properties: {} });
+      await provider.insertEdge({ id: 'edge-3', type: 'A', sourceId: 'n4', targetId: 'n2', properties: {} });
+
+      const warmConfig: CacheConfig = { ...defaultConfig, preloadStrategy: 'all' };
+      const warmProvider = new CachedStorageProvider(mockProvider as any, 'graph-test', cacheManager, warmConfig);
+      await warmProvider.warmCache();
+
+      const edges = await warmProvider.getEdgesByTarget('n2', { limit: 2 });
+
+      expect(edges).toHaveLength(2);
+    });
+
+    it('should handle undefined property values during orderBy', async () => {
+      await provider.insertEdge({ id: 'edge-1', type: 'A', sourceId: 'n1', targetId: 'n2', properties: { weight: 100 } });
+      await provider.insertEdge({ id: 'edge-2', type: 'A', sourceId: 'n3', targetId: 'n2', properties: {} });
+      await provider.insertEdge({ id: 'edge-3', type: 'A', sourceId: 'n4', targetId: 'n2', properties: { weight: 50 } });
+      await provider.insertEdge({ id: 'edge-4', type: 'A', sourceId: 'n5', targetId: 'n2', properties: { weight: 200 } });
+
+      const warmConfig: CacheConfig = { ...defaultConfig, preloadStrategy: 'all' };
+      const warmProvider = new CachedStorageProvider(mockProvider as any, 'graph-test', cacheManager, warmConfig);
+      await warmProvider.warmCache();
+
+      const edges = await warmProvider.getEdgesByTarget('n2', { orderBy: { field: 'weight', direction: 'asc' } });
+
+      expect(edges).toHaveLength(4);
+      // undefined values should sort to the end in asc order
+      expect(edges[0].id).toBe('edge-3'); // 50
+      expect(edges[1].id).toBe('edge-1'); // 100
+      expect(edges[2].id).toBe('edge-4'); // 200
+      expect(edges[3].id).toBe('edge-2'); // undefined
+    });
+
+    it('should handle when both values are undefined during orderBy', async () => {
+      await provider.insertEdge({ id: 'edge-1', type: 'A', sourceId: 'n1', targetId: 'n2', properties: {} });
+      await provider.insertEdge({ id: 'edge-2', type: 'A', sourceId: 'n3', targetId: 'n2', properties: {} });
+      await provider.insertEdge({ id: 'edge-3', type: 'A', sourceId: 'n4', targetId: 'n2', properties: { weight: 50 } });
+
+      const warmConfig: CacheConfig = { ...defaultConfig, preloadStrategy: 'all' };
+      const warmProvider = new CachedStorageProvider(mockProvider as any, 'graph-test', cacheManager, warmConfig);
+      await warmProvider.warmCache();
+
+      const edges = await warmProvider.getEdgesByTarget('n2', { orderBy: { field: 'weight', direction: 'asc' } });
+
+      expect(edges).toHaveLength(3);
+      // weight:50 comes first, both undefined stay in original order
+      expect(edges[0].id).toBe('edge-3'); // 50
+      expect(edges[1].id).toBe('edge-1'); // undefined
+      expect(edges[2].id).toBe('edge-2'); // undefined
+    });
+
+    it('should combine orderBy and limit on edges to target', async () => {
+      await provider.insertEdge({ id: 'edge-1', type: 'A', sourceId: 'n1', targetId: 'n2', properties: {}, createdOn: 1000 });
+      await provider.insertEdge({ id: 'edge-2', type: 'A', sourceId: 'n3', targetId: 'n2', properties: {}, createdOn: 3000 });
+      await provider.insertEdge({ id: 'edge-3', type: 'A', sourceId: 'n4', targetId: 'n2', properties: {}, createdOn: 2000 });
+
+      const warmConfig: CacheConfig = { ...defaultConfig, preloadStrategy: 'all' };
+      const warmProvider = new CachedStorageProvider(mockProvider as any, 'graph-test', cacheManager, warmConfig);
+      await warmProvider.warmCache();
+
+      const edges = await warmProvider.getEdgesByTarget('n2', {
+        orderBy: { field: 'createdOn', direction: 'asc' },
+        limit: 2
+      });
+
+      expect(edges).toHaveLength(2);
+      expect(edges[0].id).toBe('edge-1'); // lowest createdOn
+      expect(edges[1].id).toBe('edge-3');
     });
   });
 
@@ -959,3 +1145,4 @@ describe('CachedStorageProvider', () => {
     });
   });
 });
+

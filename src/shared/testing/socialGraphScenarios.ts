@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, it, expect } from '@jest/globals';
-import { Graph, IStorageProvider } from '../../index';
+import { Graph, IStorageProvider, Node } from '../../index';
 
 /**
  * Shared test scenarios for the Facebook Social Graph.
@@ -220,28 +220,28 @@ export function runSocialGraphScenarios(provider?: IStorageProvider): void {
       });
 
       it('should have exactly 10 people', async () => {
-        const peopleNodes = await graph.getNodesByType('Person');
+        const peopleNodes = await graph.getNodes({ filter: { types: ['Person'] } });
         expect(peopleNodes).toHaveLength(10);
       });
 
       it('should have exactly 7 posts', async () => {
-        const postNodes = await graph.getNodesByType('Post');
+        const postNodes = await graph.getNodes({ filter: { types: ['Post'] } });
         expect(postNodes).toHaveLength(7);
       });
 
       it('should have exactly 5 photos', async () => {
-        const photoNodes = await graph.getNodesByType('Photo');
+        const photoNodes = await graph.getNodes({ filter: { types: ['Photo'] } });
         expect(photoNodes).toHaveLength(5);
       });
 
       it('should have exactly 20 comments', async () => {
-        const commentNodes = await graph.getNodesByType('Comment');
+        const commentNodes = await graph.getNodes({ filter: { types: ['Comment'] } });
         expect(commentNodes).toHaveLength(20);
       });
 
       it('should have all 10 people with correct names', async () => {
-        const peopleNodes = await graph.getNodesByType('Person');
-        const names = peopleNodes.map(n => n.properties.name as string).sort();
+        const peopleNodes = await graph.getNodes({ filter: { types: ['Person'] } });
+        const names = peopleNodes.map((n: any) => n.properties.name as string).sort();
         expect(names).toEqual([
           'Alice', 'Bob', 'Charlie', 'David', 'Eve',
           'Frank', 'Grace', 'Henry', 'Ivan', 'Julia'
@@ -261,19 +261,21 @@ export function runSocialGraphScenarios(provider?: IStorageProvider): void {
     // ========================================
     describe('B. Friendship Network', () => {
       it('should have 28 friendship edges (bidirectional)', async () => {
-        const friendships = await graph.getEdgesByType('FRIENDS_WITH');
+        const friendships = await graph.getEdges({ filter: { types: ['FRIENDS_WITH'] } });
         expect(friendships).toHaveLength(28);
       });
 
       it('should find the most social person (most friendships)', async () => {
-        const allPeople = await graph.getNodesByType('Person');
+        const allPeople = await graph.getNodes({ filter: { types: ['Person'] } });
         let maxFriends = 0;
         let mostSocial = '';
 
         for (const person of allPeople) {
-          const friends = await graph.getChildren(person.id, { filter: { edgeType: 'FRIENDS_WITH' } });
-          if (friends.length > maxFriends) {
-            maxFriends = friends.length;
+          const friendEdges = await graph.getEdgesFrom(person.id, { filter: { types: ['FRIENDS_WITH'] } });
+          const friends = await Promise.all(friendEdges.map(e => graph.getNode(e.targetId)));
+          const friendList = friends.filter((n): n is Node => n !== undefined);
+          if (friendList.length > maxFriends) {
+            maxFriends = friendList.length;
             mostSocial = person.properties.name as string;
           }
         }
@@ -283,14 +285,18 @@ export function runSocialGraphScenarios(provider?: IStorageProvider): void {
       });
 
       it('should get friends of friends for Alice (2nd degree connections)', async () => {
-        const allPeople = await graph.getNodesByType('Person');
-        const alice = allPeople.find(n => n.properties.name === 'Alice')!;
-        const aliceFriends = await graph.getChildren(alice.id, { filter: { edgeType: 'FRIENDS_WITH' } });
+        const allPeople = await graph.getNodes({ filter: { types: ['Person'] } });
+        const alice = allPeople.find((n: any) => n.properties.name === 'Alice')!;
+        const aliceFriendEdges = await graph.getEdgesFrom(alice.id, { filter: { types: ['FRIENDS_WITH'] } });
+        const aliceFriends = await Promise.all(aliceFriendEdges.map(e => graph.getNode(e.targetId)));
+        const aliceFriendList = aliceFriends.filter((n): n is Node => n !== undefined);
         const friendsOfFriends = new Set<string>();
 
-        for (const friend of aliceFriends) {
-          const theirFriends = await graph.getChildren(friend.id, { filter: { edgeType: 'FRIENDS_WITH' } });
-          for (const fof of theirFriends) {
+        for (const friend of aliceFriendList) {
+          const theirFriendEdges = await graph.getEdgesFrom(friend.id, { filter: { types: ['FRIENDS_WITH'] } });
+          const theirFriends = await Promise.all(theirFriendEdges.map(e => graph.getNode(e.targetId)));
+          const theirFriendList = theirFriends.filter((n): n is Node => n !== undefined);
+          for (const fof of theirFriendList) {
             if (fof.properties.name !== 'Alice') {
               friendsOfFriends.add(fof.properties.name as string);
             }
@@ -306,21 +312,23 @@ export function runSocialGraphScenarios(provider?: IStorageProvider): void {
     // ========================================
     describe('C. Content & Posting', () => {
       it('should have 7 posted edges', async () => {
-        const postedEdges = await graph.getEdgesByType('POSTED');
+        const postedEdges = await graph.getEdges({ filter: { types: ['POSTED'] } });
         expect(postedEdges).toHaveLength(7);
       });
 
       it('should have 5 photo uploaded edges', async () => {
-        const uploadedEdges = await graph.getEdgesByType('PHOTO_UPLOADED');
+        const uploadedEdges = await graph.getEdges({ filter: { types: ['PHOTO_UPLOADED'] } });
         expect(uploadedEdges).toHaveLength(5);
       });
 
       it('should find all posts by Alice', async () => {
-        const allPeople = await graph.getNodesByType('Person');
-        const alice = allPeople.find(n => n.properties.name === 'Alice')!;
-        const aliceChildren = await graph.getChildren(alice.id, { filter: { edgeType: 'POSTED' } });
-        expect(aliceChildren).toHaveLength(1);
-        expect(aliceChildren[0].properties.content).toContain('Just joined');
+        const allPeople = await graph.getNodes({ filter: { types: ['Person'] } });
+        const alice = allPeople.find((n: any) => n.properties.name === 'Alice')!;
+        const alicePostEdges = await graph.getEdgesFrom(alice.id, { filter: { types: ['POSTED'] } });
+        const alicePosts = await Promise.all(alicePostEdges.map(e => graph.getNode(e.targetId)));
+        const postList = alicePosts.filter((n): n is Node => n !== undefined);
+        expect(postList).toHaveLength(1);
+        expect(postList[0].properties.content).toContain('Just joined');
       });
     });
 
@@ -329,22 +337,22 @@ export function runSocialGraphScenarios(provider?: IStorageProvider): void {
     // ========================================
     describe('D. Likes & Engagement', () => {
       it('should have 18 likes on posts', async () => {
-        const likesOnPosts = await graph.getEdgesByType('LIKES_POST');
+        const likesOnPosts = await graph.getEdges({ filter: { types: ['LIKES_POST'] } });
         expect(likesOnPosts).toHaveLength(18);
       });
 
       it('should have 9 likes on photos', async () => {
-        const likesOnPhotos = await graph.getEdgesByType('LIKES_PHOTO');
+        const likesOnPhotos = await graph.getEdges({ filter: { types: ['LIKES_PHOTO'] } });
         expect(likesOnPhotos).toHaveLength(9);
       });
 
       it('should find most liked post (Hello World with 4)', async () => {
-        const allPosts = await graph.getNodesByType('Post');
+        const allPosts = await graph.getNodes({ filter: { types: ['Post'] } });
         let maxLikes = 0;
         let mostLikedPost = '';
 
         for (const post of allPosts) {
-          const likes = await graph.getEdgesTo(post.id, { filter: { edgeType: 'LIKES_POST' } });
+          const likes = await graph.getEdgesTo(post.id, { filter: { types: ['LIKES_POST'] } });
           if (likes.length > maxLikes) {
             maxLikes = likes.length;
             mostLikedPost = post.properties.content as string;
@@ -356,11 +364,11 @@ export function runSocialGraphScenarios(provider?: IStorageProvider): void {
       });
 
       it('should find person who liked most posts', async () => {
-        const allPeople = await graph.getNodesByType('Person');
+        const allPeople = await graph.getNodes({ filter: { types: ['Person'] } });
         let maxLikes = 0;
 
         for (const person of allPeople) {
-          const likes = await graph.getEdgesFrom(person.id, { filter: { edgeType: 'LIKES_POST' } });
+          const likes = await graph.getEdgesFrom(person.id, { filter: { types: ['LIKES_POST'] } });
           if (likes.length > maxLikes) {
             maxLikes = likes.length;
           }
@@ -375,33 +383,33 @@ export function runSocialGraphScenarios(provider?: IStorageProvider): void {
     // ========================================
     describe('E. Comments', () => {
       it('should have 12 commented on post edges', async () => {
-        const commentPostEdges = await graph.getEdgesByType('COMMENTED_ON_POST');
+        const commentPostEdges = await graph.getEdges({ filter: { types: ['COMMENTED_ON_POST'] } });
         expect(commentPostEdges).toHaveLength(12);
       });
 
       it('should have 12 on post edges', async () => {
-        const onPostEdges = await graph.getEdgesByType('ON_POST');
+        const onPostEdges = await graph.getEdges({ filter: { types: ['ON_POST'] } });
         expect(onPostEdges).toHaveLength(12);
       });
 
       it('should have 8 commented on photo edges', async () => {
-        const commentPhotoEdges = await graph.getEdgesByType('COMMENTED_ON_PHOTO');
+        const commentPhotoEdges = await graph.getEdges({ filter: { types: ['COMMENTED_ON_PHOTO'] } });
         expect(commentPhotoEdges).toHaveLength(8);
       });
 
       it('should have 8 on photo edges', async () => {
-        const onPhotoEdges = await graph.getEdgesByType('ON_PHOTO');
+        const onPhotoEdges = await graph.getEdges({ filter: { types: ['ON_PHOTO'] } });
         expect(onPhotoEdges).toHaveLength(8);
       });
 
       it('should find most commented post has 3 comments', async () => {
-        const allPosts = await graph.getNodesByType('Post');
+        const allPosts = await graph.getNodes({ filter: { types: ['Post'] } });
         let maxComments = 0;
 
         for (const post of allPosts) {
-          const commentsOnPost = await graph.getParents(post.id, { filter: { edgeType: 'ON_POST' } });
-          if (commentsOnPost.length > maxComments) {
-            maxComments = commentsOnPost.length;
+          const commentEdges = await graph.getEdgesTo(post.id, { filter: { types: ['ON_POST'] } });
+          if (commentEdges.length > maxComments) {
+            maxComments = commentEdges.length;
           }
         }
 
@@ -414,7 +422,7 @@ export function runSocialGraphScenarios(provider?: IStorageProvider): void {
     // ========================================
     describe('F. Complex Traversal Queries', () => {
       it('should find path from Alice to David via friends (Alice -> Bob -> David)', async () => {
-        const allPeople = await graph.getNodesByType('Person');
+        const allPeople = await graph.getNodes({ filter: { types: ['Person'] } });
         const alice = allPeople.find(n => n.properties.name === 'Alice')!;
         const david = allPeople.find(n => n.properties.name === 'David')!;
 
@@ -432,16 +440,18 @@ export function runSocialGraphScenarios(provider?: IStorageProvider): void {
       });
 
       it('should find all people who liked Alice posts', async () => {
-        const allPeople = await graph.getNodesByType('Person');
+        const allPeople = await graph.getNodes({ filter: { types: ['Person'] } });
         const alice = allPeople.find(n => n.properties.name === 'Alice')!;
-        const alicePosts = await graph.getChildren(alice.id, { filter: { edgeType: 'POSTED' } });
+        const alicePostEdges = await graph.getEdgesFrom(alice.id, { filter: { types: ['POSTED'] } });
+        const alicePosts = await Promise.all(alicePostEdges.map(e => graph.getNode(e.targetId)));
+        const postList = alicePosts.filter((n): n is Node => n !== undefined);
         const likerNames = new Set<string>();
 
-        for (const post of alicePosts) {
-          const likes = await graph.getEdgesTo(post.id, { filter: { edgeType: 'LIKES_POST' } });
+        for (const post of postList) {
+          const likes = await graph.getEdgesTo(post.id, { filter: { types: ['LIKES_POST'] } });
           for (const like of likes) {
             const liker = await graph.getNode(like.sourceId);
-            likerNames.add(liker!.properties.name as string);
+            if (liker) likerNames.add(liker.properties.name as string);
           }
         }
 
@@ -449,15 +459,20 @@ export function runSocialGraphScenarios(provider?: IStorageProvider): void {
       });
 
       it('should find mutual friends between Alice and Frank', async () => {
-        const allPeople = await graph.getNodesByType('Person');
+        const allPeople = await graph.getNodes({ filter: { types: ['Person'] } });
         const alice = allPeople.find(n => n.properties.name === 'Alice')!;
         const frank = allPeople.find(n => n.properties.name === 'Frank')!;
 
-        const aliceFriends = await graph.getChildren(alice.id, { filter: { edgeType: 'FRIENDS_WITH' } });
-        const frankFriends = await graph.getChildren(frank.id, { filter: { edgeType: 'FRIENDS_WITH' } });
+        const aliceFriendEdges = await graph.getEdgesFrom(alice.id, { filter: { types: ['FRIENDS_WITH'] } });
+        const aliceFriends = await Promise.all(aliceFriendEdges.map(e => graph.getNode(e.targetId)));
+        const aliceFriendList = aliceFriends.filter((n): n is Node => n !== undefined);
 
-        const aliceFriendIds = new Set(aliceFriends.map(n => n.id));
-        const mutualFriends = frankFriends.filter(n => aliceFriendIds.has(n.id));
+        const frankFriendEdges = await graph.getEdgesFrom(frank.id, { filter: { types: ['FRIENDS_WITH'] } });
+        const frankFriends = await Promise.all(frankFriendEdges.map(e => graph.getNode(e.targetId)));
+        const frankFriendList = frankFriends.filter((n): n is Node => n !== undefined);
+
+        const aliceFriendIds = new Set(aliceFriendList.map(n => n.id));
+        const mutualFriends = frankFriendList.filter(n => aliceFriendIds.has(n.id));
         const mutualNames = mutualFriends.map(n => n.properties.name);
 
         expect(mutualNames).toContain('Charlie');
@@ -511,8 +526,10 @@ export function runSocialGraphScenarios(provider?: IStorageProvider): void {
         const aliceNode = allNodes.find(n => n.properties.name === 'Alice');
         expect(aliceNode).toBeDefined();
 
-        const aliceFriends = await reconstructed.getChildren(aliceNode!.id, { filter: { edgeType: 'FRIENDS_WITH' } });
-        expect(aliceFriends.length).toBe(4);
+        const aliceFriendEdges = await reconstructed.getEdgesFrom(aliceNode!.id, { filter: { types: ['FRIENDS_WITH'] } });
+        const aliceFriends = await Promise.all(aliceFriendEdges.map(e => reconstructed.getNode(e.targetId)));
+        const aliceFriendList = aliceFriends.filter((n): n is Node => n !== undefined);
+        expect(aliceFriendList.length).toBe(4);
       });
 
       it('should preserve node properties after serialization', async () => {
@@ -530,7 +547,7 @@ export function runSocialGraphScenarios(provider?: IStorageProvider): void {
         const json = await graph.exportJSON();
         const reconstructed = await Graph.importJSON(json);
 
-        const friendshipEdges = await reconstructed.getEdgesByType('FRIENDS_WITH');
+        const friendshipEdges = await reconstructed.getEdges({ filter: { types: ['FRIENDS_WITH'] } });
         const aliceBobEdge = await Promise.all(
           friendshipEdges.map(async e => {
             const source = await reconstructed.getNode(e.sourceId);
@@ -573,25 +590,25 @@ export function runSocialGraphScenarios(provider?: IStorageProvider): void {
       });
 
       it('should find node by property value', async () => {
-        const results = await graph.getNodesByProperty('name', 'Grace');
+        const results = await graph.getNodes({ filter: { properties: [{ key: 'name', value: 'Grace' }] } });
         expect(results).toHaveLength(1);
         expect(results[0].properties.city).toBe('Denver');
       });
 
       it('should find nodes by type with multiple results', async () => {
-        const allPersons = await graph.getNodesByType('Person');
+        const allPersons = await graph.getNodes({ filter: { types: ['Person'] } });
         expect(allPersons.length).toBe(10);
       });
 
       it('should return empty for getNodesByProperty with no matches', async () => {
-        const results = await graph.getNodesByProperty('name', 'NonExistent');
+        const results = await graph.getNodes({ filter: { properties: [{ key: 'name', value: 'NonExistent' }] } });
         expect(results).toHaveLength(0);
       });
 
       it('should filter edges by type correctly', async () => {
         const allEdges = await graph.getEdges();
-        const friendships = await graph.getEdgesByType('FRIENDS_WITH');
-        const likesPost = await graph.getEdgesByType('LIKES_POST');
+        const friendships = await graph.getEdges({ filter: { types: ['FRIENDS_WITH'] } });
+        const likesPost = await graph.getEdges({ filter: { types: ['LIKES_POST'] } });
 
         expect(allEdges.length).toBeGreaterThan(friendships.length);
         expect(friendships).toHaveLength(28);
@@ -609,7 +626,7 @@ export function runSocialGraphScenarios(provider?: IStorageProvider): void {
       });
 
       it('should find paths from one person to another when path exists', async () => {
-        const allPeople = await graph.getNodesByType('Person');
+        const allPeople = await graph.getNodes({ filter: { types: ['Person'] } });
         const alice = allPeople.find(n => n.properties.name === 'Alice')!;
         const bob = allPeople.find(n => n.properties.name === 'Bob')!;
 
@@ -619,7 +636,7 @@ export function runSocialGraphScenarios(provider?: IStorageProvider): void {
       });
 
       it('should handle edge type filtering in traversal', async () => {
-        const allPeople = await graph.getNodesByType('Person');
+        const allPeople = await graph.getNodes({ filter: { types: ['Person'] } });
         const alice = allPeople.find(n => n.properties.name === 'Alice')!;
         const bob = allPeople.find(n => n.properties.name === 'Bob')!;
 
@@ -648,7 +665,7 @@ export function runSocialGraphScenarios(provider?: IStorageProvider): void {
         const initialEdges = await graph.getEdges();
         const initialEdgeCount = initialEdges.length;
 
-        const friendshipEdges = await graph.getEdgesByType('FRIENDS_WITH');
+        const friendshipEdges = await graph.getEdges({ filter: { types: ['FRIENDS_WITH'] } });
         const friendshipEdge = friendshipEdges[0];
         expect(friendshipEdge).toBeDefined();
 

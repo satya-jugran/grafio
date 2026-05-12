@@ -137,22 +137,22 @@ export function buildCommonScenarios(
       iterations: calcIterations(100_000, factor, isLarge, 50_000),
     },
 
-    // ── Read: getNodesByType ───────────────────────────────────────────────
+    // ── Read: getNodes with filter.types ─────────────────────────────────────
     {
       category: 'Read',
-      name: 'getNodesByType',
+      name: 'getNodes with filter.types',
       run: async (graph: any, _meta: any) => {
-        return graph.getNodesByType('Person');
+        return graph.getNodes({ filter: { types: ['Person'] } });
       },
       iterations: calcIterations(100, factor, isLarge, 50_000),
     },
 
-    // ── Read: getNodesByProperty ───────────────────────────────────────────
+    // ── Read: getNodes with filter.properties ─────────────────────────────────
     {
       category: 'Read',
-      name: 'getNodesByProperty',
+      name: 'getNodes with filter.properties',
       run: async (graph: any, _meta: any) => {
-        return graph.getNodesByProperty('active', true);
+        return graph.getNodes({ filter: { properties: [{ key: 'active', value: true }] } });
       },
       iterations: calcIterations(20, factor, isLarge, 50_000),
     },
@@ -165,26 +165,6 @@ export function buildCommonScenarios(
         return graph.getNodes();
       },
       iterations: calcIterations(40, factor, isLarge, 50_000),
-    },
-
-    // ── Navigation: getChildren ───────────────────────────────────────────
-    {
-      category: 'Navigation',
-      name: 'getChildren',
-      run: async (graph: any, meta: any) => {
-        return graph.getChildren(pickId(meta, 1234));
-      },
-      iterations: calcIterations(2_000, factor, isLarge, 50_000),
-    },
-
-    // ── Navigation: getParents ─────────────────────────────────────────────
-    {
-      category: 'Navigation',
-      name: 'getParents',
-      run: async (graph: any, meta: any) => {
-        return graph.getParents(pickId(meta, 5678));
-      },
-      iterations: calcIterations(2_000, factor, isLarge, 50_000),
     },
 
     // ── Navigation: getEdgesFrom ───────────────────────────────────────────

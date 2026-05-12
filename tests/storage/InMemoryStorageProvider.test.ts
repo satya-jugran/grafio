@@ -14,60 +14,81 @@ describe('InMemoryStorageProvider', () => {
     await provider.clear();
   });
 
-  describe('getAllNodes with orderBy', () => {
-    it('should enter the orderBy branch when orderBy is provided', async () => {
-      await provider.insertNode({ id: 'node-1', type: 'Test', properties: { order: 1 } });
-      await provider.insertNode({ id: 'node-2', type: 'Test', properties: { order: 2 } });
+  describe('getNodes with orderBy on custom property', () => {
+    it('should order nodes by a custom property (ascending)', async () => {
+      // Insert in reverse order to verify sorting works
+      await provider.insertNode({ id: 'node-3', type: 'Item', properties: { priority: 30 } });
+      await provider.insertNode({ id: 'node-1', type: 'Item', properties: { priority: 10 } });
+      await provider.insertNode({ id: 'node-2', type: 'Item', properties: { priority: 20 } });
 
-      // Call with orderBy - exercises the if (orderBy) branch
-      const orderBy: IOrderBy = { field: 'createdOn', direction: 'asc' };
-      const nodes = await provider.getAllNodes(undefined, orderBy);
+      const nodes = await provider.getNodes({ orderBy: { field: 'priority', direction: 'asc' } });
 
-      expect(nodes).toHaveLength(2);
-      // Verify sorting happened (ascending)
-      expect(Number(nodes[0].properties.order)).toBeLessThanOrEqual(Number(nodes[1].properties.order));
+      expect(nodes).toHaveLength(3);
+      expect(nodes[0].properties.priority).toBe(10);
+      expect(nodes[1].properties.priority).toBe(20);
+      expect(nodes[2].properties.priority).toBe(30);
     });
 
-    it('should enter the orderBy branch when orderBy is provided (descending)', async () => {
-      await provider.insertNode({ id: 'node-1', type: 'Test', properties: { order: 2 } });
-      await provider.insertNode({ id: 'node-2', type: 'Test', properties: { order: 1 } });
+    it('should order nodes by a custom property (descending)', async () => {
+      await provider.insertNode({ id: 'node-1', type: 'Item', properties: { priority: 10 } });
+      await provider.insertNode({ id: 'node-2', type: 'Item', properties: { priority: 20 } });
+      await provider.insertNode({ id: 'node-3', type: 'Item', properties: { priority: 30 } });
 
-      const orderBy: IOrderBy = { field: 'createdOn', direction: 'desc' };
-      const nodes = await provider.getAllNodes(undefined, orderBy);
+      const nodes = await provider.getNodes({ orderBy: { field: 'priority', direction: 'desc' } });
 
-      expect(nodes).toHaveLength(2);
-      // Simply verify the call succeeded and the orderBy branch was exercised
+      expect(nodes).toHaveLength(3);
+      expect(nodes[0].properties.priority).toBe(30);
+      expect(nodes[1].properties.priority).toBe(20);
+      expect(nodes[2].properties.priority).toBe(10);
+    });
+
+    it('should order nodes by createdOn (direct field)', async () => {
+      // Insert in reverse order
+      await provider.insertNode({ id: 'node-3', type: 'Item', properties: { name: 'third' } });
+      await provider.insertNode({ id: 'node-1', type: 'Item', properties: { name: 'first' } });
+      await provider.insertNode({ id: 'node-2', type: 'Item', properties: { name: 'second' } });
+
+      const nodes = await provider.getNodes({ orderBy: { field: 'createdOn', direction: 'asc' } });
+
+      expect(nodes).toHaveLength(3);
+      expect(nodes[0].id).toBe('node-3'); // inserted first
+      expect(nodes[1].id).toBe('node-1'); // inserted second
+      expect(nodes[2].id).toBe('node-2'); // inserted third
     });
   });
 
-  describe('getAllEdges with orderBy', () => {
-    it('should enter the orderBy branch when orderBy is provided', async () => {
+  describe('getEdges with orderBy on custom property', () => {
+    it('should order edges by a custom property (ascending)', async () => {
       await provider.insertNode({ id: 'n1', type: 'Test', properties: {} });
       await provider.insertNode({ id: 'n2', type: 'Test', properties: {} });
 
-      await provider.insertEdge({ id: 'edge-1', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: { weight: 1 } });
-      await provider.insertEdge({ id: 'edge-2', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: { weight: 2 } });
+      // Insert in reverse order
+      await provider.insertEdge({ id: 'edge-3', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: { cost: 30 } });
+      await provider.insertEdge({ id: 'edge-1', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: { cost: 10 } });
+      await provider.insertEdge({ id: 'edge-2', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: { cost: 20 } });
 
-      const orderBy: IOrderBy = { field: 'createdOn', direction: 'asc' };
-      const edges = await provider.getAllEdges(undefined, orderBy);
+      const edges = await provider.getEdges({ orderBy: { field: 'cost', direction: 'asc' } });
 
-      expect(edges).toHaveLength(2);
-      // Verify sorting happened
-      expect(Number(edges[0].properties.weight)).toBeLessThanOrEqual(Number(edges[1].properties.weight));
+      expect(edges).toHaveLength(3);
+      expect(edges[0].properties.cost).toBe(10);
+      expect(edges[1].properties.cost).toBe(20);
+      expect(edges[2].properties.cost).toBe(30);
     });
 
-    it('should enter the orderBy branch when orderBy is provided (descending)', async () => {
+    it('should order edges by a custom property (descending)', async () => {
       await provider.insertNode({ id: 'n1', type: 'Test', properties: {} });
       await provider.insertNode({ id: 'n2', type: 'Test', properties: {} });
 
-      await provider.insertEdge({ id: 'edge-1', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: { weight: 2 } });
-      await provider.insertEdge({ id: 'edge-2', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: { weight: 1 } });
+      await provider.insertEdge({ id: 'edge-1', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: { cost: 10 } });
+      await provider.insertEdge({ id: 'edge-2', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: { cost: 20 } });
+      await provider.insertEdge({ id: 'edge-3', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: { cost: 30 } });
 
-      const orderBy: IOrderBy = { field: 'createdOn', direction: 'desc' };
-      const edges = await provider.getAllEdges(undefined, orderBy);
+      const edges = await provider.getEdges({ orderBy: { field: 'cost', direction: 'desc' } });
 
-      expect(edges).toHaveLength(2);
-      // Simply verify the call succeeded and the orderBy branch was exercised
+      expect(edges).toHaveLength(3);
+      expect(edges[0].properties.cost).toBe(30);
+      expect(edges[1].properties.cost).toBe(20);
+      expect(edges[2].properties.cost).toBe(10);
     });
   });
 
@@ -301,6 +322,294 @@ describe('InMemoryStorageProvider', () => {
       ).rejects.toThrow(EdgeNotFoundError);
 
       await provider.rollbackTransaction(txn);
+    });
+  });
+
+  describe('getNodeCount', () => {
+    it('should return 0 for empty graph', async () => {
+      const count = await provider.getNodeCount();
+      expect(count).toBe(0);
+    });
+
+    it('should return correct count after inserting nodes', async () => {
+      await provider.insertNode({ id: 'n1', type: 'Test', properties: {} });
+      await provider.insertNode({ id: 'n2', type: 'Test', properties: {} });
+      await provider.insertNode({ id: 'n3', type: 'Test', properties: {} });
+
+      const count = await provider.getNodeCount();
+      expect(count).toBe(3);
+    });
+
+    it('should return count with type filter', async () => {
+      await provider.insertNode({ id: 'n1', type: 'User', properties: {} });
+      await provider.insertNode({ id: 'n2', type: 'Admin', properties: {} });
+      await provider.insertNode({ id: 'n3', type: 'User', properties: {} });
+
+      const count = await provider.getNodeCount({ filter: { types: ['User'] } });
+      expect(count).toBe(2);
+    });
+
+    it('should return count with property filter', async () => {
+      await provider.insertNode({ id: 'n1', type: 'Item', properties: { active: true } });
+      await provider.insertNode({ id: 'n2', type: 'Item', properties: { active: false } });
+      await provider.insertNode({ id: 'n3', type: 'Item', properties: { active: true } });
+
+      const count = await provider.getNodeCount({
+        filter: { properties: [{ key: 'active', value: true }] }
+      });
+      expect(count).toBe(2);
+    });
+  });
+
+  describe('getEdgeCount', () => {
+    it('should return 0 for empty graph', async () => {
+      const count = await provider.getEdgeCount();
+      expect(count).toBe(0);
+    });
+
+    it('should return correct count after inserting edges', async () => {
+      await provider.insertNode({ id: 'n1', type: 'Test', properties: {} });
+      await provider.insertNode({ id: 'n2', type: 'Test', properties: {} });
+      await provider.insertNode({ id: 'n3', type: 'Test', properties: {} });
+      await provider.insertEdge({ id: 'e1', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: {} });
+      await provider.insertEdge({ id: 'e2', type: 'Link', sourceId: 'n2', targetId: 'n3', properties: {} });
+
+      const count = await provider.getEdgeCount();
+      expect(count).toBe(2);
+    });
+
+    it('should return count with type filter', async () => {
+      await provider.insertNode({ id: 'n1', type: 'Test', properties: {} });
+      await provider.insertNode({ id: 'n2', type: 'Test', properties: {} });
+      await provider.insertNode({ id: 'n3', type: 'Test', properties: {} });
+      await provider.insertEdge({ id: 'e1', type: 'KNOWS', sourceId: 'n1', targetId: 'n2', properties: {} });
+      await provider.insertEdge({ id: 'e2', type: 'LIKES', sourceId: 'n1', targetId: 'n3', properties: {} });
+      await provider.insertEdge({ id: 'e3', type: 'KNOWS', sourceId: 'n2', targetId: 'n3', properties: {} });
+
+      const count = await provider.getEdgeCount({ filter: { types: ['KNOWS'] } });
+      expect(count).toBe(2);
+    });
+
+    it('should return count with property filter', async () => {
+      await provider.insertNode({ id: 'n1', type: 'Test', properties: {} });
+      await provider.insertNode({ id: 'n2', type: 'Test', properties: {} });
+      await provider.insertNode({ id: 'n3', type: 'Test', properties: {} });
+      await provider.insertEdge({ id: 'e1', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: { weight: 5 } });
+      await provider.insertEdge({ id: 'e2', type: 'Link', sourceId: 'n2', targetId: 'n3', properties: { weight: 10 } });
+      await provider.insertEdge({ id: 'e3', type: 'Link', sourceId: 'n1', targetId: 'n3', properties: { weight: 5 } });
+
+      const count = await provider.getEdgeCount({
+        filter: { properties: [{ key: 'weight', value: 5 }] }
+      });
+      expect(count).toBe(2);
+    });
+  });
+
+  describe('aggregateNodeProperty', () => {
+    it('should return zero count for empty graph', async () => {
+      const result = await provider.aggregateNodeProperty('score');
+      expect(result.count).toBe(0);
+      expect(result.sum).toBeUndefined();
+      expect(result.avg).toBeUndefined();
+      expect(result.min).toBeUndefined();
+      expect(result.max).toBeUndefined();
+    });
+
+    it('should aggregate numeric property values', async () => {
+      await provider.insertNode({ id: 'n1', type: 'Item', properties: { price: 10 } });
+      await provider.insertNode({ id: 'n2', type: 'Item', properties: { price: 20 } });
+      await provider.insertNode({ id: 'n3', type: 'Item', properties: { price: 30 } });
+
+      const result = await provider.aggregateNodeProperty('price');
+
+      expect(result.count).toBe(3);
+      expect(result.sum).toBe(60);
+      expect(result.avg).toBe(20);
+      expect(result.min).toBe(10);
+      expect(result.max).toBe(30);
+    });
+
+    it('should ignore non-numeric property values', async () => {
+      await provider.insertNode({ id: 'n1', type: 'Item', properties: { price: 10 } });
+      await provider.insertNode({ id: 'n2', type: 'Item', properties: { price: 'twenty' } }); // string
+      await provider.insertNode({ id: 'n3', type: 'Item', properties: { price: null } }); // null
+      await provider.insertNode({ id: 'n4', type: 'Item', properties: { price: 30 } });
+
+      const result = await provider.aggregateNodeProperty('price');
+
+      expect(result.count).toBe(2);
+      expect(result.sum).toBe(40);
+      expect(result.min).toBe(10);
+      expect(result.max).toBe(30);
+    });
+
+    it('should aggregate with type filter', async () => {
+      await provider.insertNode({ id: 'n1', type: 'Book', properties: { pages: 100 } });
+      await provider.insertNode({ id: 'n2', type: 'Magazine', properties: { pages: 50 } });
+      await provider.insertNode({ id: 'n3', type: 'Book', properties: { pages: 200 } });
+
+      const result = await provider.aggregateNodeProperty('pages', { filter: { types: ['Book'] } });
+
+      expect(result.count).toBe(2);
+      expect(result.sum).toBe(300);
+      expect(result.min).toBe(100);
+      expect(result.max).toBe(200);
+    });
+
+    it('should aggregate with property filter', async () => {
+      await provider.insertNode({ id: 'n1', type: 'Product', properties: { price: 100, active: true } });
+      await provider.insertNode({ id: 'n2', type: 'Product', properties: { price: 200, active: false } });
+      await provider.insertNode({ id: 'n3', type: 'Product', properties: { price: 300, active: true } });
+
+      const result = await provider.aggregateNodeProperty('price', {
+        filter: { properties: [{ key: 'active', value: true }] }
+      });
+
+      expect(result.count).toBe(2);
+      expect(result.sum).toBe(400);
+    });
+  });
+
+  describe('aggregateEdgeProperty', () => {
+    it('should return zero count for empty graph', async () => {
+      const result = await provider.aggregateEdgeProperty('weight');
+      expect(result.count).toBe(0);
+      expect(result.sum).toBeUndefined();
+    });
+
+    it('should aggregate numeric property values', async () => {
+      await provider.insertNode({ id: 'n1', type: 'Test', properties: {} });
+      await provider.insertNode({ id: 'n2', type: 'Test', properties: {} });
+      await provider.insertEdge({ id: 'e1', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: { weight: 5 } });
+      await provider.insertEdge({ id: 'e2', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: { weight: 15 } });
+
+      const result = await provider.aggregateEdgeProperty('weight');
+
+      expect(result.count).toBe(2);
+      expect(result.sum).toBe(20);
+      expect(result.avg).toBe(10);
+      expect(result.min).toBe(5);
+      expect(result.max).toBe(15);
+    });
+
+    it('should ignore non-numeric property values', async () => {
+      await provider.insertNode({ id: 'n1', type: 'Test', properties: {} });
+      await provider.insertNode({ id: 'n2', type: 'Test', properties: {} });
+      await provider.insertEdge({ id: 'e1', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: { weight: 10 } });
+      await provider.insertEdge({ id: 'e2', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: { weight: 'ten' } });
+
+      const result = await provider.aggregateEdgeProperty('weight');
+
+      expect(result.count).toBe(1);
+      expect(result.sum).toBe(10);
+    });
+
+    it('should aggregate with type filter', async () => {
+      await provider.insertNode({ id: 'n1', type: 'Test', properties: {} });
+      await provider.insertNode({ id: 'n2', type: 'Test', properties: {} });
+      await provider.insertEdge({ id: 'e1', type: 'FRIEND', sourceId: 'n1', targetId: 'n2', properties: { strength: 80 } });
+      await provider.insertEdge({ id: 'e2', type: 'COLLEAGUE', sourceId: 'n1', targetId: 'n2', properties: { strength: 50 } });
+
+      const result = await provider.aggregateEdgeProperty('strength', { filter: { types: ['FRIEND'] } });
+
+      expect(result.count).toBe(1);
+      expect(result.sum).toBe(80);
+    });
+  });
+
+  describe('_applyOrderAndLimit sorting branches', () => {
+    describe('getNodes with orderBy on custom property with undefined values', () => {
+      it('should handle when both values are undefined', async () => {
+        await provider.insertNode({ id: 'n1', type: 'Test', properties: {} });
+        await provider.insertNode({ id: 'n2', type: 'Test', properties: {} });
+        await provider.insertNode({ id: 'n3', type: 'Test', properties: { weight: 50 } });
+
+        const nodes = await provider.getNodes({ orderBy: { field: 'weight', direction: 'asc' } });
+
+        expect(nodes).toHaveLength(3);
+        // weight:50 comes first, both undefined stay in original order
+        expect(nodes[0].id).toBe('n3'); // 50
+        expect(nodes[1].id).toBe('n1'); // undefined
+        expect(nodes[2].id).toBe('n2'); // undefined
+      });
+
+      it('should handle when aVal is undefined but bVal is not', async () => {
+        await provider.insertNode({ id: 'n1', type: 'Test', properties: {} });
+        await provider.insertNode({ id: 'n2', type: 'Test', properties: { weight: 100 } });
+        await provider.insertNode({ id: 'n3', type: 'Test', properties: { weight: 50 } });
+
+        const nodes = await provider.getNodes({ orderBy: { field: 'weight', direction: 'asc' } });
+
+        expect(nodes).toHaveLength(3);
+        // undefined (n1) should sort to the end in asc
+        expect(nodes[0].id).toBe('n3'); // 50
+        expect(nodes[1].id).toBe('n2'); // 100
+        expect(nodes[2].id).toBe('n1'); // undefined
+      });
+
+      it('should handle when bVal is undefined but aVal is not', async () => {
+        await provider.insertNode({ id: 'n1', type: 'Test', properties: { weight: 50 } });
+        await provider.insertNode({ id: 'n2', type: 'Test', properties: {} });
+        await provider.insertNode({ id: 'n3', type: 'Test', properties: { weight: 100 } });
+
+        const nodes = await provider.getNodes({ orderBy: { field: 'weight', direction: 'asc' } });
+
+        expect(nodes).toHaveLength(3);
+        // n2 (undefined) should sort to the end in asc
+        expect(nodes[0].id).toBe('n1'); // 50
+        expect(nodes[1].id).toBe('n3'); // 100
+        expect(nodes[2].id).toBe('n2'); // undefined
+      });
+    });
+
+    describe('getEdges with orderBy on custom property with undefined values', () => {
+      it('should handle when both values are undefined', async () => {
+        await provider.insertNode({ id: 'n1', type: 'Test', properties: {} });
+        await provider.insertNode({ id: 'n2', type: 'Test', properties: {} });
+        await provider.insertEdge({ id: 'e1', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: {} });
+        await provider.insertEdge({ id: 'e2', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: {} });
+        await provider.insertEdge({ id: 'e3', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: { weight: 50 } });
+
+        const edges = await provider.getEdges({ orderBy: { field: 'weight', direction: 'asc' } });
+
+        expect(edges).toHaveLength(3);
+        // weight:50 comes first, both undefined stay in original order
+        expect(edges[0].id).toBe('e3'); // 50
+        expect(edges[1].id).toBe('e1'); // undefined
+        expect(edges[2].id).toBe('e2'); // undefined
+      });
+
+      it('should handle when aVal is undefined but bVal is not', async () => {
+        await provider.insertNode({ id: 'n1', type: 'Test', properties: {} });
+        await provider.insertNode({ id: 'n2', type: 'Test', properties: {} });
+        await provider.insertEdge({ id: 'e1', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: {} });
+        await provider.insertEdge({ id: 'e2', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: { weight: 100 } });
+        await provider.insertEdge({ id: 'e3', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: { weight: 50 } });
+
+        const edges = await provider.getEdges({ orderBy: { field: 'weight', direction: 'asc' } });
+
+        expect(edges).toHaveLength(3);
+        // undefined (e1) should sort to the end in asc
+        expect(edges[0].id).toBe('e3'); // 50
+        expect(edges[1].id).toBe('e2'); // 100
+        expect(edges[2].id).toBe('e1'); // undefined
+      });
+
+      it('should handle when bVal is undefined but aVal is not', async () => {
+        await provider.insertNode({ id: 'n1', type: 'Test', properties: {} });
+        await provider.insertNode({ id: 'n2', type: 'Test', properties: {} });
+        await provider.insertEdge({ id: 'e1', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: { weight: 50 } });
+        await provider.insertEdge({ id: 'e2', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: {} });
+        await provider.insertEdge({ id: 'e3', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: { weight: 100 } });
+
+        const edges = await provider.getEdges({ orderBy: { field: 'weight', direction: 'asc' } });
+
+        expect(edges).toHaveLength(3);
+        // e2 (undefined) should sort to the end in asc
+        expect(edges[0].id).toBe('e1'); // 50
+        expect(edges[1].id).toBe('e3'); // 100
+        expect(edges[2].id).toBe('e2'); // undefined
+      });
     });
   });
 });
