@@ -507,6 +507,7 @@ export class CachedStorageProvider implements IStorageProvider {
         if (aVal === undefined && bVal === undefined) return 0;
         if (aVal === undefined) return direction === 'asc' ? 1 : -1;
         if (bVal === undefined) return direction === 'asc' ? -1 : 1;
+        if (aVal === bVal) return 0;
         return direction === 'asc' ? (aVal < bVal ? -1 : 1) : (aVal > bVal ? -1 : 1);
       });
     }
