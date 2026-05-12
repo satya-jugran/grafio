@@ -575,18 +575,18 @@ export function runGraphTransactionScenarios(
         await graph.addEdgeProperty(newEdge.id, 'verified', true, txn);
 
         // Query transaction-aware methods WITHIN transaction - should see uncommitted changes
-        expect(await graph.getNodes({ transaction: txn._getHandle() })).toHaveLength(4); // alice, bob, carol, dave
-        expect(await graph.getEdges({ transaction: txn._getHandle() })).toHaveLength(2); // existingEdge, newEdge
+        expect(await graph.getNodes({ transaction: txn })).toHaveLength(4); // alice, bob, carol, dave
+        expect(await graph.getEdges({ transaction: txn })).toHaveLength(2); // existingEdge, newEdge
         expect(await graph.hasNode(carol.id, txn)).toBe(true);
         expect(await graph.hasEdge(newEdge.id, txn)).toBe(true);
         expect((await graph.getNode(carol.id, txn))?.properties['name']).toBe('Carol');
         expect((await graph.getEdge(newEdge.id, txn))?.properties['weight']).toBe(0.9);
-        expect(await graph.getNodes({ filter: { properties: [{ key: 'status', value: 'active' }] }, transaction: txn._getHandle() })).toHaveLength(2); // carol + bob with updated prop
-        expect(await graph.getEdges({ filter: { properties: [{ key: 'weight', value: 0.9 }] }, transaction: txn._getHandle() })).toHaveLength(1);
-        expect(await graph.getNodes({ filter: { types: ['Person'] }, transaction: txn._getHandle() })).toHaveLength(4);
-        expect(await graph.getEdges({ filter: { types: ['KNOWS'] }, transaction: txn._getHandle() })).toHaveLength(1);
-        expect(await graph.getEdgesTo(carol.id, { transaction: txn._getHandle() })).toHaveLength(1); // alice -> carol
-        expect(await graph.getEdgesFrom(alice.id, { transaction: txn._getHandle() })).toHaveLength(2); // bob + carol
+        expect(await graph.getNodes({ filter: { properties: [{ key: 'status', value: 'active' }] }, transaction: txn })).toHaveLength(2); // carol + bob with updated prop
+        expect(await graph.getEdges({ filter: { properties: [{ key: 'weight', value: 0.9 }] }, transaction: txn })).toHaveLength(1);
+        expect(await graph.getNodes({ filter: { types: ['Person'] }, transaction: txn })).toHaveLength(4);
+        expect(await graph.getEdges({ filter: { types: ['KNOWS'] }, transaction: txn })).toHaveLength(1);
+        expect(await graph.getEdgesTo(carol.id, { transaction: txn })).toHaveLength(1); // alice -> carol
+        expect(await graph.getEdgesFrom(alice.id, { transaction: txn })).toHaveLength(2); // bob + carol
 
         // hasNode/hasEdge on modified existing node/edge
         expect(await graph.hasNode(bob.id, txn)).toBe(true);
@@ -744,8 +744,8 @@ export function runGraphTransactionScenarios(
         await graph.addNode('Person', { name: 'Bob' }, txn2);
 
         // Each should only see its own changes
-        const nodesInTxn1 = await graph.getNodes({ transaction: txn1._getHandle() });
-        const nodesInTxn2 = await graph.getNodes({ transaction: txn2._getHandle() });
+        const nodesInTxn1 = await graph.getNodes({ transaction: txn1 });
+        const nodesInTxn2 = await graph.getNodes({ transaction: txn2 });
 
         expect(nodesInTxn1).toHaveLength(1);
         expect(nodesInTxn2).toHaveLength(1);
@@ -769,7 +769,7 @@ export function runGraphTransactionScenarios(
         await graph.addNode('Person', { name: 'Alice' }, txn1);
 
         // Txn2 should not see txn1's uncommitted changes
-        const nodesInTxn2 = await graph.getNodes({ transaction: txn2._getHandle() });
+        const nodesInTxn2 = await graph.getNodes({ transaction: txn2 });
         expect(nodesInTxn2).toHaveLength(0);
 
         await txn1.rollback();

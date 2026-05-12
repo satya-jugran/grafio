@@ -9,8 +9,9 @@ export { GraphTransaction } from './Graph/GraphTransaction';
 // Type definitions
 export type { NodeData } from './types';
 export type { EdgeData } from './types';
-export type { GraphData } from './types';
-export type { GraphQueryOptions, IOrderBy, ITransactionHandle } from './types';
+export type { GraphData, ITransactionHandle } from './types';
+export type { StorageQueryOptions } from './types';
+export type { GraphQueryOptions, IOrderBy } from './Graph/GraphQueryOptions';  // Graph-level uses GraphTransaction
 export type { TraversalOptions } from './Graph/TraversalOptions';
 export type { MermaidOptions } from './Graph/GraphToMermaid';
 

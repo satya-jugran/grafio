@@ -6,9 +6,11 @@ import { GraphTraversal } from './Graph/GraphTraversal';
 import { GraphAdminOps } from './Graph/GraphAdminOps';
 import { GraphTransaction } from './Graph/GraphTransaction';
 import type { TraversalOptions } from './Graph/TraversalOptions';
-import type { IStorageProvider, GraphQueryOptions } from './storage/IStorageProvider';
+import type { GraphQueryOptions } from './Graph/GraphQueryOptions';
+import type { IStorageProvider } from './storage/IStorageProvider';
 
 // Re-export for external use
+export type { GraphQueryOptions } from './Graph/GraphQueryOptions';
 export type { TraversalOptions } from './Graph/TraversalOptions';
 export { GraphTransaction } from './Graph/GraphTransaction';
 export { TransactionNotActiveError, TransactionFailedError } from './Graph/GraphTransaction';

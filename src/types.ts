@@ -41,10 +41,10 @@ export interface AggregateResult {
 }
 
 /**
- * Unified query options for graph node and edge queries.
- * Provides composable filtering, ordering, and pagination.
+ * Unified query options for storage layer node and edge queries.
+ * Used internally by storage providers. For Graph-level queries, use GraphQueryOptions.
  */
-export interface GraphQueryOptions {
+export interface StorageQueryOptions {
   /**
    * Filter criteria - all conditions must match (AND logic).
    * If undefined, no filtering is applied.

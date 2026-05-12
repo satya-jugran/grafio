@@ -1,7 +1,10 @@
-import type { NodeData, EdgeData, GraphData, GraphQueryOptions, IOrderBy, ITransactionHandle, AggregateOp, AggregateResult } from '../types';
+import type { NodeData, EdgeData, GraphData, StorageQueryOptions, IOrderBy, ITransactionHandle, AggregateOp, AggregateResult } from '../types';
 
-// Re-export for backwards compatibility - these are now defined in types.ts
-export type { GraphQueryOptions, IOrderBy, ITransactionHandle } from '../types';
+// Re-export types from types.ts for convenience
+export type { StorageQueryOptions, IOrderBy, ITransactionHandle };
+
+// Storage layer uses GraphQueryOptions as an alias to StorageQueryOptions
+export type GraphQueryOptions = StorageQueryOptions;
 
 /**
  * Contract that every storage backend must fulfill.
