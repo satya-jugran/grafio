@@ -32,6 +32,7 @@ export const enum TokenKind {
   OR = 'OR',
   ASC = 'ASC',
   DESC = 'DESC',
+  HAVING = 'HAVING',
 
   // ── Future keywords (tokenised, gated in CypherEngine) ──────────
   CREATE = 'CREATE',

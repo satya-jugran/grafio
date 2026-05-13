@@ -459,4 +459,41 @@ describe('Parser', () => {
       expect(inner.args[0].name).toBe('n');
     });
   });
+
+  // ── HAVING clause ───────────────────────────────────────────────
+  describe('HAVING clause', () => {
+    it('parses HAVING with alias reference', () => {
+      const ast = parse('MATCH (p:Person) RETURN p.city, COUNT(*) AS cnt HAVING cnt > 5');
+      expect(ast.having).toBeDefined();
+      expect(ast.having!.kind).toBe('Having');
+      expect(ast.having!.expression.kind).toBe('Binary');
+      const bin = ast.having!.expression as any;
+      expect(bin.op).toBe('>');
+      expect(bin.left.kind).toBe('Identifier');
+      expect(bin.left.name).toBe('cnt');
+      expect(bin.right.kind).toBe('Literal');
+      expect(bin.right.value).toBe(5);
+    });
+
+    it('parses HAVING with aggregate function', () => {
+      const ast = parse('MATCH (p:Person) RETURN COUNT(*) AS cnt HAVING COUNT(*) > 5');
+      expect(ast.having).toBeDefined();
+      expect(ast.having!.kind).toBe('Having');
+      expect(ast.having!.expression.kind).toBe('Binary');
+      const bin = ast.having!.expression as any;
+      expect(bin.left.kind).toBe('FunctionCall');
+    });
+
+    it('parses HAVING without aggregates (valid per spec)', () => {
+      const ast = parse("MATCH (p:Person) RETURN p.name HAVING p.name = 'Alice'");
+      expect(ast.having).toBeDefined();
+      expect(ast.having!.expression.kind).toBe('Binary');
+    });
+
+    it('parses HAVING before ORDER BY', () => {
+      const ast = parse('MATCH (p:Person) RETURN p.city, COUNT(*) AS cnt HAVING cnt > 5 ORDER BY cnt');
+      expect(ast.having).toBeDefined();
+      expect(ast.orderBy).toBeDefined();
+    });
+  });
 });

@@ -935,4 +935,122 @@ describe('Executor', () => {
       });
     });
   });
+
+  // ── HAVING execution ─────────────────────────────────────────────
+  describe('HAVING execution', () => {
+    it('filters grouped rows with HAVING cnt > 1', async () => {
+      const graph = await buildAggregateGraph();
+      const result = await executeQuery(
+        'MATCH (p:Person) RETURN p.city, COUNT(*) AS cnt HAVING cnt > 1',
+        {},
+        graph,
+      );
+      // NYC has 2 persons, LA has 2 persons — both > 1
+      expect(result.rows).toHaveLength(2);
+      const byCity = new Map(result.rows.map((r) => [r.p_city, r.cnt]));
+      expect(byCity.get('NYC')).toBe(2);
+      expect(byCity.get('LA')).toBe(2);
+    });
+
+    it('returns empty result when HAVING matches no groups', async () => {
+      const graph = await buildAggregateGraph();
+      const result = await executeQuery(
+        'MATCH (p:Person) RETURN p.city, COUNT(*) AS cnt HAVING cnt > 10',
+        {},
+        graph,
+      );
+      expect(result.rows).toHaveLength(0);
+    });
+
+    it('filters non-aggregate query with HAVING', async () => {
+      const graph = await buildAggregateGraph();
+      const result = await executeQuery(
+        "MATCH (p:Person) RETURN p.name HAVING p.name = 'Alice'",
+        {},
+        graph,
+      );
+      expect(result.rows).toHaveLength(1);
+      expect(result.rows[0].p_name).toBe('Alice');
+    });
+  });
+
+  // ── ORDER BY with aggregates execution ───────────────────────────
+  describe('ORDER BY with aggregates execution', () => {
+    it('sorts by aggregate alias DESC', async () => {
+      const graph = await buildAggregateGraph();
+      const result = await executeQuery(
+        'MATCH (p:Person) RETURN p.city, COUNT(*) AS cnt ORDER BY cnt DESC',
+        {},
+        graph,
+      );
+      // Both cities have count 2, order is stable
+      expect(result.rows).toHaveLength(2);
+      expect(result.rows[0].cnt).toBe(2);
+      expect(result.rows[1].cnt).toBe(2);
+    });
+
+    it('sorts by group-by key', async () => {
+      const graph = await buildAggregateGraph();
+      const result = await executeQuery(
+        'MATCH (p:Person) RETURN p.city, COUNT(*) AS cnt ORDER BY p_city ASC',
+        {},
+        graph,
+      );
+      expect(result.rows).toHaveLength(2);
+      expect(result.rows[0].p_city).toBe('LA');
+      expect(result.rows[1].p_city).toBe('NYC');
+    });
+  });
+
+  // ── Aggregate expression execution ───────────────────────────────
+  describe('Aggregate expression execution', () => {
+    it('computes COUNT(*) + 1 AS result', async () => {
+      const graph = await buildAggregateGraph();
+      const result = await executeQuery(
+        'MATCH (p:Person) RETURN COUNT(*) + 1 AS result',
+        {},
+        graph,
+      );
+      expect(result.rows).toHaveLength(1);
+      expect(result.rows[0].result).toBe(5); // 4 persons + 1
+    });
+
+    it('computes SUM(p.age) / COUNT(*) AS average', async () => {
+      const graph = await buildAggregateGraph();
+      const result = await executeQuery(
+        'MATCH (p:Person) RETURN SUM(p.age) / COUNT(*) AS average',
+        {},
+        graph,
+      );
+      expect(result.rows).toHaveLength(1);
+      // Ages: 30, 25, 35, 30 → sum=120, count=4, avg=30
+      expect(result.rows[0].average).toBe(30);
+    });
+  });
+
+  // ── RETURN DISTINCT execution ────────────────────────────────────
+  describe('RETURN DISTINCT execution', () => {
+    it('deduplicates duplicate rows', async () => {
+      const graph = await buildAggregateGraph();
+      const result = await executeQuery(
+        'MATCH (p:Person) RETURN DISTINCT p.city',
+        {},
+        graph,
+      );
+      expect(result.rows).toHaveLength(2);
+      const cities = result.rows.map((r) => r.p_city);
+      expect(cities).toContain('NYC');
+      expect(cities).toContain('LA');
+    });
+
+    it('returns all rows when no duplicates exist', async () => {
+      const graph = await buildAggregateGraph();
+      const result = await executeQuery(
+        'MATCH (p:Person) RETURN DISTINCT p.name',
+        {},
+        graph,
+      );
+      expect(result.rows).toHaveLength(4);
+    });
+  });
 });

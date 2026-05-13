@@ -97,6 +97,7 @@ export class Semantic {
     this._checkUnresolvedVars.bind(this),
     this._checkDuplicateBindings.bind(this),
     this._checkAggregateGrouping.bind(this),
+    this._checkHavingClause.bind(this),
   ];
 
   /** Cached scope table populated by `_resolveScopes` and consumed by later passes. */
@@ -201,8 +202,26 @@ export class Semantic {
 
     // Check ORDER BY items.
     if (ast.orderBy) {
+      // When aggregates are present, ORDER BY can reference aggregate
+      // aliases and group-by key aliases that aren't in the MATCH scope.
+      const hasAggregate = ast.return.items.some(
+        item => this._containsAggregate(item.expression),
+      );
+
+      const allowedAliases = hasAggregate
+        ? this._collectReturnAliases(ast)
+        : undefined;
+
       for (const item of ast.orderBy.items) {
-        this._checkExpressionVars(item.expression, 'ORDER BY');
+        if (allowedAliases) {
+          this._checkExpressionVarsWithAllowed(
+            item.expression,
+            'ORDER BY',
+            allowedAliases,
+          );
+        } else {
+          this._checkExpressionVars(item.expression, 'ORDER BY');
+        }
       }
     }
 
@@ -278,6 +297,75 @@ export class Semantic {
     }
   }
 
+  /**
+   * Like {@link _checkExpressionVars} but also accepts identifiers whose
+   * name appears in the `allowed` set.  Used for ORDER BY when aggregates
+   * are present so that aggregate aliases and group-by key aliases
+   * (which are not in the MATCH scope) pass validation.
+   *
+   * @throws {CypherSemanticError} on the first unresolved reference that
+   *         is not in the allowed set.
+   */
+  private _checkExpressionVarsWithAllowed(
+    expr: Expression,
+    clause: string,
+    allowed: ReadonlySet<string>,
+  ): void {
+    switch (expr.kind) {
+      case 'Identifier': {
+        if (!this._scope.has(expr.name) && !allowed.has(expr.name)) {
+          throw new CypherSemanticError(
+            `Variable '${expr.name}' is not defined in ${clause} clause. ` +
+            `Defined variables: ${[...this._scope.keys()].join(', ') || '(none)'}` +
+            (allowed.size > 0
+              ? `. Post-aggregation aliases: ${[...allowed].join(', ')}`
+              : ''),
+          );
+        }
+        return;
+      }
+
+      case 'PropertyAccess':
+        this._checkExpressionVarsWithAllowed(expr.object, clause, allowed);
+        return;
+
+      case 'Binary':
+        this._checkExpressionVarsWithAllowed(expr.left, clause, allowed);
+        this._checkExpressionVarsWithAllowed(expr.right, clause, allowed);
+        return;
+
+      case 'Unary':
+        this._checkExpressionVarsWithAllowed(expr.operand, clause, allowed);
+        return;
+
+      case 'In':
+        this._checkExpressionVarsWithAllowed(expr.expression, clause, allowed);
+        this._checkExpressionVarsWithAllowed(expr.list, clause, allowed);
+        return;
+
+      case 'IsNull':
+        this._checkExpressionVarsWithAllowed(expr.expression, clause, allowed);
+        return;
+
+      case 'List':
+        for (const elem of expr.elements) {
+          this._checkExpressionVarsWithAllowed(elem, clause, allowed);
+        }
+        return;
+
+      case 'FunctionCall':
+        for (const arg of expr.args) {
+          this._checkExpressionVarsWithAllowed(arg, clause, allowed);
+        }
+        return;
+
+      case 'Literal':
+      case 'Parameter':
+        // No variable references — safe.
+        return;
+    }
+  }
+
   // ── Pass 3: Duplicate binding detection ────────────────────────
 
   /**
@@ -320,6 +408,44 @@ export class Semantic {
     }
 
     return ast;
+  }
+
+  // ── ORDER BY helpers ────────────────────────────────────────────
+
+  /**
+   * Derive the effective alias for a RETURN item, matching the logic in
+   * {@link Planner._deriveAlias} so that the semantic checker knows which
+   * identifiers are valid post-aggregation.
+   */
+  private _deriveReturnAlias(expr: Expression): string {
+    switch (expr.kind) {
+      case 'Identifier':
+        return expr.name;
+      case 'PropertyAccess':
+        return `${this._deriveReturnAlias(expr.object)}_${expr.property}`;
+      case 'Literal':
+        return String(expr.value);
+      case 'Parameter':
+        return expr.name;
+      case 'FunctionCall':
+        return expr.name.toLowerCase();
+      default:
+        return 'expr';
+    }
+  }
+
+  /**
+   * Collect all aliases from the RETURN clause — both explicit (`AS alias`)
+   * and auto-derived — into a set.  Used to allow ORDER BY to reference
+   * aggregate aliases and group-by key aliases when aggregates are present.
+   */
+  private _collectReturnAliases(ast: QueryAst): Set<string> {
+    const aliases = new Set<string>();
+    for (const item of ast.return.items) {
+      const alias = item.alias ?? this._deriveReturnAlias(item.expression);
+      aliases.add(alias);
+    }
+    return aliases;
   }
 
   // ── Pass 4: Aggregate grouping validation ──────────────────────
@@ -371,7 +497,89 @@ export class Semantic {
       }
     }
 
+    // Rule 3: ORDER BY with aggregates — validate that ORDER BY items
+    // reference valid post-aggregation identifiers (aggregate aliases
+    // or group-by key aliases).  Since the Planner now places SortStep
+    // after AggregateStep for aggregate queries, ORDER BY expressions
+    // must only reference identifiers available in the post-aggregation
+    // row.  Raw MATCH variables (like `p.name`) that are not group-by
+    // keys are not available at sort time.
+    if (ast.orderBy) {
+      const allowedAliases = this._collectReturnAliases(ast);
+
+      for (const item of ast.orderBy.items) {
+        const unresolved = this._collectUnresolvedPostAggIdentifiers(
+          item.expression,
+          allowedAliases,
+        );
+
+        if (unresolved.length > 0) {
+          throw new CypherSemanticError(
+            `ORDER BY references '${unresolved.join("', '")}' which ` +
+            `are not available after aggregation. ` +
+            `Post-aggregation aliases: ${[...allowedAliases].join(', ') || '(none)'}. ` +
+            `Use an aggregate alias or a group-by key alias in ORDER BY.`,
+          );
+        }
+      }
+    }
+
     return ast;
+  }
+
+  /**
+   * Walk an expression tree and collect identifiers that are NOT in
+   * the MATCH scope AND NOT in the allowed post-aggregation alias set.
+   *
+   * @returns Array of unresolved identifier names (empty = all valid).
+   */
+  private _collectUnresolvedPostAggIdentifiers(
+    expr: Expression,
+    allowed: ReadonlySet<string>,
+  ): string[] {
+    switch (expr.kind) {
+      case 'Identifier': {
+        if (!this._scope.has(expr.name) && !allowed.has(expr.name)) {
+          return [expr.name];
+        }
+        return [];
+      }
+
+      case 'PropertyAccess':
+        return this._collectUnresolvedPostAggIdentifiers(expr.object, allowed);
+
+      case 'Binary':
+        return [
+          ...this._collectUnresolvedPostAggIdentifiers(expr.left, allowed),
+          ...this._collectUnresolvedPostAggIdentifiers(expr.right, allowed),
+        ];
+
+      case 'Unary':
+        return this._collectUnresolvedPostAggIdentifiers(expr.operand, allowed);
+
+      case 'In':
+        return [
+          ...this._collectUnresolvedPostAggIdentifiers(expr.expression, allowed),
+          ...this._collectUnresolvedPostAggIdentifiers(expr.list, allowed),
+        ];
+
+      case 'IsNull':
+        return this._collectUnresolvedPostAggIdentifiers(expr.expression, allowed);
+
+      case 'List':
+        return expr.elements.flatMap((elem) =>
+          this._collectUnresolvedPostAggIdentifiers(elem, allowed),
+        );
+
+      case 'FunctionCall':
+        return expr.args.flatMap((arg) =>
+          this._collectUnresolvedPostAggIdentifiers(arg, allowed),
+        );
+
+      case 'Literal':
+      case 'Parameter':
+        return [];
+    }
   }
 
   /**
@@ -442,5 +650,49 @@ export class Semantic {
       default:
         return 'expression';
     }
+  }
+
+  // ── Pass 5: HAVING clause validation ────────────────────────────
+
+  /**
+   * Validate the HAVING clause when present.
+   *
+   * Rules enforced:
+   * 1. HAVING without aggregates is unusual but not invalid per openCypher
+   *    — it behaves like an additional WHERE filter.
+   * 2. Variables referenced in HAVING must be defined in the scope or
+   *    be aggregate aliases. Aggregate functions ARE allowed in HAVING
+   *    (e.g., `HAVING COUNT(*) > 5`).
+   *
+   * @throws {CypherSemanticError} if HAVING references undefined variables
+   *         or contains aggregates but no aggregates are present in RETURN.
+   */
+  private _checkHavingClause(ast: QueryAst): QueryAst {
+    if (!ast.having) return ast;
+
+    // When aggregates are present, HAVING can reference aggregate
+    // aliases and group-by key aliases that aren't in the MATCH scope.
+    // Aggregate functions ARE allowed in HAVING (e.g., HAVING COUNT(*) > 5).
+    const hasAggregate = ast.return.items.some(
+      item => this._containsAggregate(item.expression),
+    );
+
+    const allowedAliases = hasAggregate
+      ? this._collectReturnAliases(ast)
+      : undefined;
+
+    if (allowedAliases) {
+      this._checkExpressionVarsWithAllowed(
+        ast.having.expression,
+        'HAVING',
+        allowedAliases,
+      );
+    } else {
+      // No aggregates → HAVING is essentially an additional WHERE filter.
+      // Validate against MATCH-scope variables only.
+      this._checkExpressionVars(ast.having.expression, 'HAVING');
+    }
+
+    return ast;
   }
 }

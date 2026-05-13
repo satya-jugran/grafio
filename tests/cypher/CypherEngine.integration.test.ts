@@ -373,6 +373,79 @@ describe('CypherEngine Integration', () => {
     });
   });
 
+  // ── HAVING, ORDER BY, Aggregate Expressions, DISTINCT ────────────
+  describe('HAVING, ORDER BY, Aggregate Expressions, DISTINCT', () => {
+    let graph: Graph;
+    let engine: CypherEngine;
+
+    beforeAll(async () => {
+      graph = new Graph();
+      await buildSocialGraph(graph);
+      engine = new CypherEngine(graph);
+    });
+
+    it('filters groups with HAVING cnt > 1', async () => {
+      const result = await engine.execute(
+        'MATCH (p:Person) RETURN p.occupation, COUNT(*) AS cnt HAVING cnt > 1',
+      );
+      // Occupations with more than 1 person: Engineer (Alice, Henry), Designer (Bob, Grace)
+      const occupations = result.rows.map((r) => r.p_occupation);
+      expect(occupations).toContain('Engineer');
+      expect(occupations).toContain('Designer');
+      // Each returned row should have cnt > 1
+      for (const row of result.rows) {
+        expect(row.cnt).toBeGreaterThan(1);
+      }
+    });
+
+    it('orders by aggregate alias DESC', async () => {
+      const result = await engine.execute(
+        'MATCH (p:Person) RETURN p.city, COUNT(*) AS cnt ORDER BY cnt DESC',
+      );
+      expect(result.rows.length).toBeGreaterThan(0);
+      // Verify descending order
+      for (let i = 1; i < result.rows.length; i++) {
+        expect(result.rows[i - 1].cnt as number).toBeGreaterThanOrEqual(result.rows[i].cnt as number);
+      }
+    });
+
+    it('computes COUNT(*) + 1 AS result', async () => {
+      const result = await engine.execute(
+        'MATCH (p:Person) RETURN COUNT(*) + 1 AS result',
+      );
+      expect(result.rows).toHaveLength(1);
+      expect(result.rows[0].result).toBe(9); // 8 persons + 1
+    });
+
+    it('returns DISTINCT cities', async () => {
+      const result = await engine.execute(
+        'MATCH (p:Person) RETURN DISTINCT p.city AS city ORDER BY p.city ASC',
+      );
+      const cities = result.rows.map((r) => r.city);
+      // All 8 persons have distinct cities
+      expect(cities).toEqual([
+        'Austin', 'Boston', 'Chicago', 'Denver',
+        'LA', 'NYC', 'Portland', 'Seattle',
+      ]);
+    });
+
+    it('combines HAVING, ORDER BY, and multiple aggregates', async () => {
+      const result = await engine.execute(
+        'MATCH (p:Person) RETURN p.occupation, COUNT(*) AS cnt, AVG(p.age) AS avg_age HAVING cnt > 1 ORDER BY avg_age DESC',
+      );
+      // Occupations with more than 1 person: Engineer(2), Designer(2)
+      expect(result.rows.length).toBeGreaterThanOrEqual(1);
+      // Verify descending order by avg_age
+      for (let i = 1; i < result.rows.length; i++) {
+        expect(result.rows[i - 1].avg_age as number).toBeGreaterThanOrEqual(result.rows[i].avg_age as number);
+      }
+      // Verify all rows have cnt > 1
+      for (const row of result.rows) {
+        expect(row.cnt).toBeGreaterThan(1);
+      }
+    });
+  });
+
   describe('Validation Gate', () => {
     it('rejects CREATE clause', async () => {
       const graph = new Graph();

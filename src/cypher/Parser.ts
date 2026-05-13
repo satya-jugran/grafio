@@ -44,6 +44,7 @@ import {
   QueryAst,
   MatchClause,
   WhereClause,
+  HavingClause,
   ReturnClause,
   ReturnItem,
   OrderByClause,
@@ -133,6 +134,7 @@ export class Parser {
     const match = this._parseMatchClause();
     const where = this._check(TokenKind.WHERE) ? this._parseWhereClause() : undefined;
     const ret = this._parseReturnClause();
+    const having = this._check(TokenKind.HAVING) ? this._parseHavingClause() : undefined;
     const orderBy = this._check(TokenKind.ORDER) ? this._parseOrderByClause() : undefined;
     const skip = this._check(TokenKind.SKIP) ? this._parseSkipClause() : undefined;
     const limit = this._check(TokenKind.LIMIT) ? this._parseLimitClause() : undefined;
@@ -152,6 +154,7 @@ export class Parser {
       match,
       where,
       return: ret,
+      having,
       orderBy,
       skip,
       limit,
@@ -178,6 +181,13 @@ export class Parser {
     this._consume(TokenKind.WHERE, "Expected 'WHERE'");
     const expression = this._parseExpression();
     return { kind: 'Where', expression };
+  }
+
+  /** HAVING expression */
+  private _parseHavingClause(): HavingClause {
+    this._consume(TokenKind.HAVING, "Expected 'HAVING'");
+    const expression = this._parseExpression();
+    return { kind: 'Having', expression };
   }
 
   /** RETURN [DISTINCT] returnItem (',' returnItem)* */

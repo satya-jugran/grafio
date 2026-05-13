@@ -44,6 +44,7 @@ const KEYWORDS: Record<string, TokenKind> = {
   or: TokenKind.OR,
   asc: TokenKind.ASC,
   desc: TokenKind.DESC,
+  having: TokenKind.HAVING,
   // Future keywords
   create: TokenKind.CREATE,
   merge: TokenKind.MERGE,

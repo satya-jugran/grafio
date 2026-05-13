@@ -282,4 +282,81 @@ describe('Planner', () => {
       expect(p.steps.some((s) => s.kind === 'AggregateStep')).toBe(false);
     });
   });
+
+  // ── HAVING plan shape ────────────────────────────────────────────
+  describe('HAVING plan shape', () => {
+    it('places FilterStep after AggregateStep when HAVING exists', () => {
+      const p = plan('MATCH (p:Person) RETURN p.city, COUNT(*) AS cnt HAVING cnt > 5');
+      const aggIdx = p.steps.findIndex((s) => s.kind === 'AggregateStep');
+      const filterIdx = p.steps.findIndex((s) => s.kind === 'FilterStep');
+      expect(aggIdx).toBeGreaterThanOrEqual(0);
+      expect(filterIdx).toBeGreaterThan(aggIdx);
+    });
+
+    it('places FilterStep before ProjectStep for HAVING without aggregates', () => {
+      const p = plan("MATCH (p:Person) RETURN p.name HAVING p.name = 'Alice'");
+      const filterIdx = p.steps.findIndex((s) => s.kind === 'FilterStep');
+      const projectIdx = p.steps.findIndex((s) => s.kind === 'ProjectStep');
+      expect(filterIdx).toBeGreaterThanOrEqual(0);
+      expect(filterIdx).toBeLessThan(projectIdx);
+    });
+  });
+
+  // ── ORDER BY with aggregates plan shape ──────────────────────────
+  describe('ORDER BY with aggregates plan shape', () => {
+    it('places SortStep after AggregateStep when aggregates present', () => {
+      const p = plan('MATCH (p:Person) RETURN p.city, COUNT(*) AS cnt ORDER BY cnt DESC');
+      const aggIdx = p.steps.findIndex((s) => s.kind === 'AggregateStep');
+      const sortIdx = p.steps.findIndex((s) => s.kind === 'SortStep');
+      expect(aggIdx).toBeGreaterThanOrEqual(0);
+      expect(sortIdx).toBeGreaterThan(aggIdx);
+    });
+
+    it('places SortStep before ProjectStep when no aggregates', () => {
+      const p = plan('MATCH (n) RETURN n ORDER BY n.name ASC');
+      const sortIdx = p.steps.findIndex((s) => s.kind === 'SortStep');
+      const projectIdx = p.steps.findIndex((s) => s.kind === 'ProjectStep');
+      expect(sortIdx).toBeGreaterThanOrEqual(0);
+      expect(sortIdx).toBeLessThan(projectIdx);
+    });
+  });
+
+  // ── Aggregate expression plan shape ──────────────────────────────
+  describe('Aggregate expression plan shape', () => {
+    it('extracts internal alias for COUNT(*) + 1', () => {
+      const p = plan('MATCH (p:Person) RETURN COUNT(*) + 1 AS result');
+      const agg = p.steps.find((s) => s.kind === 'AggregateStep') as any;
+      expect(agg).toBeDefined();
+      expect(agg.aggregates).toHaveLength(1);
+      expect(agg.aggregates[0].alias).toMatch(/^__agg_\d+$/);
+      expect(agg.aggregates[0].function).toBe('COUNT');
+
+      const proj = p.steps.find((s) => s.kind === 'ProjectStep') as any;
+      expect(proj.columns[0].alias).toBe('result');
+      expect(proj.columns[0].expression.kind).toBe('Binary');
+    });
+
+    it('extracts two internal aliases for SUM(x) / COUNT(*)', () => {
+      const p = plan('MATCH (p:Person) RETURN SUM(p.age) / COUNT(*) AS average');
+      const agg = p.steps.find((s) => s.kind === 'AggregateStep') as any;
+      expect(agg).toBeDefined();
+      expect(agg.aggregates).toHaveLength(2);
+      expect(agg.aggregates[0].alias).toMatch(/^__agg_\d+$/);
+      expect(agg.aggregates[1].alias).toMatch(/^__agg_\d+$/);
+      expect(agg.aggregates[0].function).toBe('SUM');
+      expect(agg.aggregates[1].function).toBe('COUNT');
+
+      const proj = p.steps.find((s) => s.kind === 'ProjectStep') as any;
+      expect(proj.columns[0].alias).toBe('average');
+      expect(proj.columns[0].expression.kind).toBe('Binary');
+    });
+
+    it('preserves simple aggregate COUNT(*) AS cnt without rewriting', () => {
+      const p = plan('MATCH (p:Person) RETURN COUNT(*) AS cnt');
+      const agg = p.steps.find((s) => s.kind === 'AggregateStep') as any;
+      expect(agg.aggregates).toHaveLength(1);
+      expect(agg.aggregates[0].alias).toBe('cnt');
+      expect(agg.aggregates[0].function).toBe('COUNT');
+    });
+  });
 });
