@@ -176,9 +176,21 @@ export class Executor {
       if (step.edgeVar) newRow.set(step.edgeVar, edge);
       newRow.set(step.target, targetNode);
 
-      // Bind named path variable: [sourceNode, edge, targetNode]
+      // Bind named path variable.
+      // For the first EdgeExpandStep in a named path this creates
+      // [sourceNode, edge, targetNode].  For subsequent steps on the
+      // same named path (e.g. MATCH p = (a)-[:R]->(b)-[:S]->(c)) the
+      // row already carries a prefix from the prior step; we append
+      // [edge, targetNode] to extend it rather than overwriting.
       if (step.pathVar) {
-        newRow.set(step.pathVar, [sourceNode, edge, targetNode]);
+        const existingPath = newRow.get(step.pathVar) as
+          | (Node | Edge)[]
+          | undefined;
+        if (existingPath && existingPath.length > 0) {
+          newRow.set(step.pathVar, [...existingPath, edge, targetNode]);
+        } else {
+          newRow.set(step.pathVar, [sourceNode, edge, targetNode]);
+        }
       }
 
       result.push(newRow);

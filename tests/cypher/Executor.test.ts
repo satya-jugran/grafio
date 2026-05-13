@@ -142,6 +142,31 @@ describe('Executor', () => {
       const names = result.rows.map((r) => r.name);
       expect(names).toEqual(['Acme', 'Bob']);
     });
+
+    it('builds full named path for two-edge pattern', async () => {
+      const graph = await buildSocialGraph();
+      // Alice → Bob → Charlie (both KNOWS edges)
+      const result = await executeQuery(
+        "MATCH p = (a:Person)-[:KNOWS]->(b:Person)-[:KNOWS]->(c:Person) WHERE a.name = 'Alice' RETURN p",
+        {},
+        graph,
+      );
+      expect(result.rows).toHaveLength(1);
+      const path = result.rows[0].p as Array<Record<string, unknown>>;
+      // Path should have 5 elements: [Alice, edge(Alice→Bob), Bob, edge(Bob→Charlie), Charlie]
+      expect(path).toHaveLength(5);
+      // Verify node interleaving (name is stored in properties)
+      expect((path[0] as any).properties.name).toBe('Alice');
+      expect((path[2] as any).properties.name).toBe('Bob');
+      expect((path[4] as any).properties.name).toBe('Charlie');
+      // Verify edges are between correct nodes
+      const edge1 = path[1] as { sourceId: string; targetId: string };
+      const edge2 = path[3] as { sourceId: string; targetId: string };
+      expect(edge1.sourceId).toBe((path[0] as { id: string }).id);
+      expect(edge1.targetId).toBe((path[2] as { id: string }).id);
+      expect(edge2.sourceId).toBe((path[2] as { id: string }).id);
+      expect(edge2.targetId).toBe((path[4] as { id: string }).id);
+    });
   });
 
   // ── Multi-hop (variable-length) expansion ──────────────────────
