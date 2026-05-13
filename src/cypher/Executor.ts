@@ -476,11 +476,11 @@ export class Executor {
 
     // ── Entity-level COUNT ─────────────────────────────────────────
     if (countAggs.length > 0) {
-      const nodes = await this._graph.getNodes({
+      const nodeCount = await this._graph.getNodeCount({
         filter: { types: [sourceType] },
       });
       for (const spec of countAggs) {
-        resultRow.set(spec.alias, nodes.length);
+        resultRow.set(spec.alias, nodeCount);
       }
     }
 
