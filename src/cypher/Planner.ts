@@ -556,16 +556,20 @@ export class Planner {
   }
 
   /**
-   * Returns `true` if the expression *is* a {@link FunctionCallExpr}
+   * Returns `true` if the expression *is* an aggregate {@link FunctionCallExpr}
    * (not nested inside a wrapping expression like Binary or Unary).
    *
-   * Simple:   `COUNT(*) AS cnt`    → true
-   * Simple:   `SUM(p.age)`         → true
-   * Complex:  `COUNT(*) + 1`       → false
-   * Complex:  `SUM(x) / COUNT(*)`  → false
+   * Simple:   `COUNT(*) AS cnt`        → true
+   * Simple:   `SUM(p.age)`             → true
+   * Complex:  `COUNT(*) + 1`           → false (not a FunctionCall)
+   * Complex:  `SUM(x) / COUNT(*)`      → false (not a FunctionCall)
+   * Complex:  `COALESCE(SUM(x), 0)`    → false (FunctionCall but not aggregate)
    */
   private _isSimpleAggregateItem(expr: Expression): boolean {
-    return expr.kind === 'FunctionCall';
+    return (
+      expr.kind === 'FunctionCall' &&
+      this._isAggregateFn(expr.name)
+    );
   }
 
   /**
@@ -700,6 +704,7 @@ export class Planner {
     // ── Classify RETURN items and build aggregate / groupBy ──────
     const allAggregates: AggregateSpec[] = [];
     const groupBy: Expression[] = [];
+    const groupByAliases: string[] = [];
     const rewrittenProjections = new Map<ReturnItem, Expression>();
 
     for (const item of ast.return.items) {
@@ -711,6 +716,7 @@ export class Planner {
         // 'n' that no longer exist post-aggregation).
         groupBy.push(item.expression);
         const alias = item.alias ?? this._deriveAlias(item.expression);
+        groupByAliases.push(alias);
         rewrittenProjections.set(item, { kind: 'Identifier', name: alias });
       } else {
         // Aggregate item — decide simple vs complex.
@@ -803,6 +809,7 @@ export class Planner {
       kind: 'AggregateStep',
       aggregates: allAggregates,
       groupBy,
+      groupByAliases,
       sourceVariable,
       sourceType,
     });

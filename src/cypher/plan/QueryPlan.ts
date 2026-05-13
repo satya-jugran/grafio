@@ -185,6 +185,14 @@ export interface AggregateStep {
   /** Group-by expressions (non-aggregated RETURN items). */
   groupBy: Expression[];
   /**
+   * Output aliases for the group-by columns, in the same order as
+   * {@link groupBy}.  These match the RETURN item aliases (explicit
+   * `AS` name or auto-derived) so the {@link Executor} stores
+   * group-by values under the same keys that {@link ProjectStep}
+   * later looks up.
+   */
+  groupByAliases: string[];
+  /**
    * The entity variable being aggregated over (e.g., 'p' in COUNT(p)).
    * Set by the Planner when the aggregate expression is a simple
    * identifier or property access on a single variable.

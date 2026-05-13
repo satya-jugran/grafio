@@ -596,8 +596,9 @@ export class Executor {
 
       // Include group-by values in the output.
       for (let i = 0; i < step.groupBy.length; i++) {
-        // Derive alias from the group-by expression (simple case: identifier name).
-        const alias = this._deriveGroupByAlias(step.groupBy[i]);
+        // Use the planner-provided alias that matches the RETURN item alias,
+        // so ProjectStep can later resolve it via Identifier lookup.
+        const alias = step.groupByAliases[i];
         resultRow.set(alias, group.keyValues[i]);
       }
 
