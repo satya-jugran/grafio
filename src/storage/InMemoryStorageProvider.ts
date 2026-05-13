@@ -1,5 +1,5 @@
 import type { NodeData, EdgeData, GraphData, AggregateOp, AggregateResult } from '../types';
-import type { IStorageProvider, IOrderBy, ITransactionHandle, GraphQueryOptions } from './IStorageProvider';
+import type { IStorageProvider, IOrderBy, ITransactionHandle, StorageQueryOptions } from './IStorageProvider';
 import {
   NodeAlreadyExistsError,
   EdgeAlreadyExistsError,
@@ -192,7 +192,7 @@ export class InMemoryStorageProvider implements IStorageProvider {
   // Count queries
   // ---------------------------------------------------------------------------
 
-  async getNodeCount(options?: GraphQueryOptions): Promise<number> {
+  async getNodeCount(options?: StorageQueryOptions): Promise<number> {
     const transaction = options?.transaction;
     const overlay = this._getOverlay(transaction?.id);
 
@@ -227,10 +227,10 @@ export class InMemoryStorageProvider implements IStorageProvider {
 
   async aggregateNodeProperty(
     key: string,
-    options?: GraphQueryOptions
+    options?: StorageQueryOptions
   ): Promise<AggregateResult> {
     const nodes = await this.getNodes(options);
-    const values: number[] = [];
+    let values: number[] = [];
 
     for (const node of nodes) {
       const value = node.properties?.[key];
@@ -239,10 +239,15 @@ export class InMemoryStorageProvider implements IStorageProvider {
       }
     }
 
+    // Deduplicate property values when distinct is true
+    if (options?.distinct) {
+      values = [...new Set(values)];
+    }
+
     return this._computeAggregation(values);
   }
 
-  async getEdgeCount(options?: GraphQueryOptions): Promise<number> {
+  async getEdgeCount(options?: StorageQueryOptions): Promise<number> {
     const transaction = options?.transaction;
     const overlay = this._getOverlay(transaction?.id);
 
@@ -277,16 +282,21 @@ export class InMemoryStorageProvider implements IStorageProvider {
 
   async aggregateEdgeProperty(
     key: string,
-    options?: GraphQueryOptions
+    options?: StorageQueryOptions
   ): Promise<AggregateResult> {
     const edges = await this.getEdges(options);
-    const values: number[] = [];
+    let values: number[] = [];
 
     for (const edge of edges) {
       const value = edge.properties?.[key];
       if (typeof value === 'number' && !Number.isNaN(value)) {
         values.push(value);
       }
+    }
+
+    // Deduplicate property values when distinct is true
+    if (options?.distinct) {
+      values = [...new Set(values)];
     }
 
     return this._computeAggregation(values);
@@ -561,7 +571,7 @@ export class InMemoryStorageProvider implements IStorageProvider {
     return edge ? deepClone(edge) : undefined;
   }
 
-  async getEdgesBySource(nodeId: string, options?: GraphQueryOptions): Promise<EdgeData[]> {
+  async getEdgesBySource(nodeId: string, options?: StorageQueryOptions): Promise<EdgeData[]> {
     const transaction = options?.transaction;
     const overlay = this._getOverlay(transaction?.id);
     const seen = new Set<string>();
@@ -597,7 +607,7 @@ export class InMemoryStorageProvider implements IStorageProvider {
     return this._applyOrderAndLimit(result, options);
   }
 
-  async getEdgesByTarget(nodeId: string, options?: GraphQueryOptions): Promise<EdgeData[]> {
+  async getEdgesByTarget(nodeId: string, options?: StorageQueryOptions): Promise<EdgeData[]> {
     const transaction = options?.transaction;
     const overlay = this._getOverlay(transaction?.id);
     const seen = new Set<string>();
@@ -633,7 +643,7 @@ export class InMemoryStorageProvider implements IStorageProvider {
     return this._applyOrderAndLimit(result, options);
   }
 
-  async getNodes(options?: GraphQueryOptions): Promise<NodeData[]> {
+  async getNodes(options?: StorageQueryOptions): Promise<NodeData[]> {
     const transaction = options?.transaction;
     const overlay = this._getOverlay(transaction?.id);
     const result: NodeData[] = [];
@@ -661,7 +671,7 @@ export class InMemoryStorageProvider implements IStorageProvider {
     return this._applyOrderAndLimit(result, options);
   }
 
-  async getEdges(options?: GraphQueryOptions): Promise<EdgeData[]> {
+  async getEdges(options?: StorageQueryOptions): Promise<EdgeData[]> {
     const transaction = options?.transaction;
     const overlay = this._getOverlay(transaction?.id);
     const result: EdgeData[] = [];
@@ -1175,7 +1185,7 @@ export class InMemoryStorageProvider implements IStorageProvider {
     return this._transactionOverlays.get(id) ?? null;
   }
 
-  private _matchesNodeFilters(node: NodeData, options?: GraphQueryOptions): boolean {
+  private _matchesNodeFilters(node: NodeData, options?: StorageQueryOptions): boolean {
     if (!options?.filter) return true;
 
     const { filter } = options;
@@ -1199,7 +1209,7 @@ export class InMemoryStorageProvider implements IStorageProvider {
     return true;
   }
 
-  private _matchesEdgeFilters(edge: EdgeData, options?: GraphQueryOptions): boolean {
+  private _matchesEdgeFilters(edge: EdgeData, options?: StorageQueryOptions): boolean {
     if (!options?.filter) return true;
 
     const { filter } = options;
@@ -1223,7 +1233,7 @@ export class InMemoryStorageProvider implements IStorageProvider {
     return true;
   }
 
-  private _applyOrderAndLimit<T extends NodeData | EdgeData>(result: T[], options?: GraphQueryOptions): T[] {
+  private _applyOrderAndLimit<T extends NodeData | EdgeData>(result: T[], options?: StorageQueryOptions): T[] {
     let output = result;
 
     // Apply ordering if specified

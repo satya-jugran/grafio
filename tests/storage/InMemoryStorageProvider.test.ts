@@ -468,6 +468,38 @@ describe('InMemoryStorageProvider', () => {
       expect(result.count).toBe(2);
       expect(result.sum).toBe(400);
     });
+
+    it('should deduplicate property values when distinct is true', async () => {
+      // Insert nodes with duplicate price values
+      await provider.insertNode({ id: 'n1', type: 'Item', properties: { price: 100 } });
+      await provider.insertNode({ id: 'n2', type: 'Item', properties: { price: 200 } });
+      await provider.insertNode({ id: 'n3', type: 'Item', properties: { price: 100 } }); // duplicate of n1
+      await provider.insertNode({ id: 'n4', type: 'Item', properties: { price: 300 } });
+      await provider.insertNode({ id: 'n5', type: 'Item', properties: { price: 200 } }); // duplicate of n2
+
+      const result = await provider.aggregateNodeProperty('price', { distinct: true });
+
+      // Distinct values are: 100, 200, 300 (3 unique values)
+      expect(result.count).toBe(3);
+      expect(result.sum).toBe(600); // 100 + 200 + 300
+      expect(result.avg).toBe(200); // 600 / 3
+      expect(result.min).toBe(100);
+      expect(result.max).toBe(300);
+    });
+
+    it('should not deduplicate when distinct is false', async () => {
+      await provider.insertNode({ id: 'n1', type: 'Item', properties: { price: 100 } });
+      await provider.insertNode({ id: 'n2', type: 'Item', properties: { price: 200 } });
+      await provider.insertNode({ id: 'n3', type: 'Item', properties: { price: 100 } }); // duplicate of n1
+      await provider.insertNode({ id: 'n4', type: 'Item', properties: { price: 300 } });
+
+      const result = await provider.aggregateNodeProperty('price', { distinct: false });
+
+      // All 4 values included (no deduplication)
+      expect(result.count).toBe(4);
+      expect(result.sum).toBe(700); // 100 + 200 + 100 + 300
+      expect(result.avg).toBe(175); // 700 / 4
+    });
   });
 
   describe('aggregateEdgeProperty', () => {
@@ -514,6 +546,46 @@ describe('InMemoryStorageProvider', () => {
 
       expect(result.count).toBe(1);
       expect(result.sum).toBe(80);
+    });
+
+    it('should deduplicate property values when distinct is true', async () => {
+      await provider.insertNode({ id: 'n1', type: 'Test', properties: {} });
+      await provider.insertNode({ id: 'n2', type: 'Test', properties: {} });
+      await provider.insertNode({ id: 'n3', type: 'Test', properties: {} });
+
+      // Insert edges with duplicate weight values
+      await provider.insertEdge({ id: 'e1', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: { weight: 10 } });
+      await provider.insertEdge({ id: 'e2', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: { weight: 20 } });
+      await provider.insertEdge({ id: 'e3', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: { weight: 10 } }); // duplicate of e1
+      await provider.insertEdge({ id: 'e4', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: { weight: 30 } });
+      await provider.insertEdge({ id: 'e5', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: { weight: 20 } }); // duplicate of e2
+
+      const result = await provider.aggregateEdgeProperty('weight', { distinct: true });
+
+      // Distinct values are: 10, 20, 30 (3 unique values)
+      expect(result.count).toBe(3);
+      expect(result.sum).toBe(60); // 10 + 20 + 30
+      expect(result.avg).toBe(20); // 60 / 3
+      expect(result.min).toBe(10);
+      expect(result.max).toBe(30);
+    });
+
+    it('should not deduplicate when distinct is false', async () => {
+      await provider.insertNode({ id: 'n1', type: 'Test', properties: {} });
+      await provider.insertNode({ id: 'n2', type: 'Test', properties: {} });
+      await provider.insertNode({ id: 'n3', type: 'Test', properties: {} });
+
+      await provider.insertEdge({ id: 'e1', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: { weight: 10 } });
+      await provider.insertEdge({ id: 'e2', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: { weight: 20 } });
+      await provider.insertEdge({ id: 'e3', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: { weight: 10 } }); // duplicate of e1
+      await provider.insertEdge({ id: 'e4', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: { weight: 30 } });
+
+      const result = await provider.aggregateEdgeProperty('weight', { distinct: false });
+
+      // All 4 values included (no deduplication)
+      expect(result.count).toBe(4);
+      expect(result.sum).toBe(70); // 10 + 20 + 10 + 30
+      expect(result.avg).toBe(17.5); // 70 / 4
     });
   });
 

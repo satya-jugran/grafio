@@ -9,7 +9,7 @@ import {
 } from '../errors';
 import { isFlatRecord, isPrimitive } from '../utils';
 import type { IStorageProvider, StorageQueryOptions } from '../storage/IStorageProvider';
-import type { EdgeData } from '../types';
+import type { AggregateResult, EdgeData } from '../types';
 import type { GraphQueryOptions } from './GraphQueryOptions';
 import { InMemoryStorageProvider } from '../storage/InMemoryStorageProvider';
 import { GraphTransaction } from './GraphTransaction';
@@ -450,5 +450,41 @@ export class GraphIndex {
    */
   async createIndex(target: 'node' | 'edge', propertyKey: string, type?: string): Promise<void> {
     await this._store.createIndex(target, propertyKey, type);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Aggregation
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Aggregates a numeric property across nodes matching the query options.
+   * @param key - The property key to aggregate
+   * @param options - Optional query options for filtering
+   * @returns AggregateResult with count, sum, avg, min, max
+   */
+  async aggregateNodeProperty(key: string, options?: GraphQueryOptions): Promise<AggregateResult> {
+    const handle = options?.transaction?._getHandle();
+    const storageOptions: StorageQueryOptions | undefined = options ? {
+      filter: options.filter,
+      distinct: options.distinct,
+      transaction: handle,
+    } : undefined;
+    return this._store.aggregateNodeProperty(key, storageOptions);
+  }
+
+  /**
+   * Aggregates a numeric property across edges matching the query options.
+   * @param key - The property key to aggregate
+   * @param options - Optional query options for filtering
+   * @returns AggregateResult with count, sum, avg, min, max
+   */
+  async aggregateEdgeProperty(key: string, options?: GraphQueryOptions): Promise<AggregateResult> {
+    const handle = options?.transaction?._getHandle();
+    const storageOptions: StorageQueryOptions | undefined = options ? {
+      filter: options.filter,
+      distinct: options.distinct,
+      transaction: handle,
+    } : undefined;
+    return this._store.aggregateEdgeProperty(key, storageOptions);
   }
 }

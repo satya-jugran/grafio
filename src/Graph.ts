@@ -1,4 +1,4 @@
-import type { GraphData } from './types';
+import type { GraphData, AggregateResult } from './types';
 import { Node } from './Node';
 import { Edge } from './Edge';
 import { GraphIndex } from './Graph/GraphIndex';
@@ -360,6 +360,30 @@ export class Graph {
    */
   async createIndex(target: 'node' | 'edge', propertyKey: string, type?: string): Promise<void> {
     return this._index.createIndex(target, propertyKey, type);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Aggregation
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Aggregates a numeric property across nodes matching the query options.
+   * @param key - The property key to aggregate
+   * @param options - Optional query options for filtering
+   * @returns AggregateResult with count, sum, avg, min, max
+   */
+  async aggregateNodeProperty(key: string, options?: GraphQueryOptions): Promise<AggregateResult> {
+    return this._index.aggregateNodeProperty(key, options);
+  }
+
+  /**
+   * Aggregates a numeric property across edges matching the query options.
+   * @param key - The property key to aggregate
+   * @param options - Optional query options for filtering
+   * @returns AggregateResult with count, sum, avg, min, max
+   */
+  async aggregateEdgeProperty(key: string, options?: GraphQueryOptions): Promise<AggregateResult> {
+    return this._index.aggregateEdgeProperty(key, options);
   }
 
   // ---------------------------------------------------------------------------
