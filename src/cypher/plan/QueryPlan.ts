@@ -209,4 +209,9 @@ export interface AggregateStep {
    * Set by the Planner from the NodeScanStep that binds sourceVariable.
    */
   sourceType?: string;
+  /**
+   * When true, the Planner cleared all prior steps and the Executor
+   * should attempt the O(1) storage-level aggregation path.
+   */
+  useStorageLevel?: boolean;
 }

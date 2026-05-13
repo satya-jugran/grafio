@@ -407,8 +407,9 @@ export class Executor {
     rows: Row[],
     params: Record<string, unknown>,
   ): Promise<Row[]> {
-    // Path A: Storage-level optimisation for simple plans.
-    if (this._canUseStorageLevel(step)) {
+    // Path A: Storage-level optimisation — only attempted when the
+    // Planner cleared prior steps and set useStorageLevel.
+    if (step.useStorageLevel && this._canUseStorageLevel(step)) {
       return this._executeAggregateStorageLevel(step);
     }
 
@@ -427,7 +428,11 @@ export class Executor {
    *    a property access on `sourceVariable`, or the COUNT(*) literal.
    */
   private _canUseStorageLevel(step: AggregateStep): boolean {
-    if (!step.sourceVariable || !step.sourceType) return false;
+    if (!step.sourceVariable) return false;
+    // Storage-level aggregation only supports scalar (non-grouped)
+    // aggregates.  GROUP BY queries must use the in-process path so
+    // the group key aliases are populated from the row data.
+    if (step.groupBy.length > 0) return false;
 
     for (const spec of step.aggregates) {
       if (!this._isSimpleAggregateExpr(spec.expression, step.sourceVariable)) {
@@ -498,7 +503,10 @@ export class Executor {
   private async _executeAggregateStorageLevel(
     step: AggregateStep,
   ): Promise<Row[]> {
-    const sourceType = step.sourceType!;
+    const sourceType = step.sourceType;
+    // When sourceType is undefined (unlabeled MATCH) the storage APIs
+    // accept undefined / empty filter to mean "all types".
+    const typeFilter = sourceType ? { types: [sourceType] } : undefined;
     const resultRow = new Map<string, unknown>();
 
     // Partition aggregates by their storage call.
@@ -534,9 +542,9 @@ export class Executor {
 
     // ── Entity-level COUNT ─────────────────────────────────────────
     if (countAggs.length > 0) {
-      const nodeCount = await this._graph.getNodeCount({
-        filter: { types: [sourceType] },
-      });
+      const nodeCount = await this._graph.getNodeCount(
+        typeFilter ? { filter: typeFilter } : undefined,
+      );
       for (const spec of countAggs) {
         resultRow.set(spec.alias, nodeCount);
       }
@@ -548,7 +556,7 @@ export class Executor {
       const distinct = distinctStr === 'true';
 
       const aggResult = await this._graph.aggregateNodeProperty(propKey, {
-        filter: { types: [sourceType] },
+        filter: typeFilter as { types: string[] },
         distinct,
       });
 
@@ -559,9 +567,9 @@ export class Executor {
 
     // ── COLLECT aggregates ─────────────────────────────────────────
     if (collectAggs.length > 0) {
-      const nodes = await this._graph.getNodes({
-        filter: { types: [sourceType] },
-      });
+      const nodes = await this._graph.getNodes(
+        typeFilter ? { filter: typeFilter } : undefined,
+      );
 
       for (const spec of collectAggs) {
         const propKey = this._extractPropertyKey(

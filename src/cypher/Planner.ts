@@ -836,14 +836,10 @@ export class Planner {
         }
       }
 
-      // Only use the simple plan (clear NodeScanStep, delegate to
-      // storage-level aggregation) when the node has a label so the
-      // Executor can issue getNodeCount/getNodes with a type filter.
-      // Unlabeled nodes (e.g. MATCH (n)) must keep the NodeScanStep
-      // so the in-process aggregation path has rows to evaluate.
-      if (sourceType !== undefined) {
-        steps.length = 0;
-      }
+      // Delegate to storage-level aggregation (getNodeCount / getNodes).
+      // The Executor handles sourceType === undefined (unlabeled MATCH)
+      // by querying across all types.
+      steps.length = 0;
     }
 
     // ── Emit AggregateStep ────────────────────────────────────────
@@ -854,6 +850,7 @@ export class Planner {
       groupByAliases,
       sourceVariable,
       sourceType,
+      useStorageLevel: isSimple,
     });
   }
 }
