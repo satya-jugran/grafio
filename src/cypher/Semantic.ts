@@ -313,7 +313,20 @@ export class Semantic {
   ): void {
     switch (expr.kind) {
       case 'Identifier': {
-        if (!this._scope.has(expr.name) && !allowed.has(expr.name)) {
+        if (allowed.size > 0) {
+          // Post-aggregation context (ORDER BY / HAVING with aggregates):
+          // only RETURN aliases are available — MATCH-scope variables like
+          // 'p' from MATCH (p:Person) no longer exist in the row buffer
+          // after AggregateStep.
+          if (!allowed.has(expr.name)) {
+            throw new CypherSemanticError(
+              `Variable '${expr.name}' is not available after aggregation in ${clause} clause. ` +
+              `Post-aggregation aliases: ${[...allowed].join(', ') || '(none)'}. ` +
+              `Use an aggregate alias or a group-by key alias.`,
+            );
+          }
+        } else if (!this._scope.has(expr.name)) {
+          // Pre-aggregation context: check the MATCH scope.
           throw new CypherSemanticError(
             `Variable '${expr.name}' is not defined in ${clause} clause. ` +
             `Defined variables: ${[...this._scope.keys()].join(', ') || '(none)'}` +
@@ -539,7 +552,9 @@ export class Semantic {
   ): string[] {
     switch (expr.kind) {
       case 'Identifier': {
-        if (!this._scope.has(expr.name) && !allowed.has(expr.name)) {
+        // Post-aggregation context: only allowed aliases are available.
+        // MATCH-scope variables do not exist after AggregateStep.
+        if (!allowed.has(expr.name)) {
           return [expr.name];
         }
         return [];
