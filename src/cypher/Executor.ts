@@ -214,11 +214,17 @@ export class Executor {
       row: Row;
       hops: number;
       /** Node objects in traversal order (for pathVar). */
-      pathNodes: Node[];
+      pathNodes?: Node[];
       /** Edge objects in traversal order (for pathVar). */
-      pathEdges: Edge[];
+      pathEdges?: Edge[];
     }> = [
-      { node: sourceNode, row, hops: 0, pathNodes: [sourceNode], pathEdges: [] },
+      {
+        node: sourceNode,
+        row,
+        hops: 0,
+        pathNodes: step.pathVar ? [sourceNode] : undefined,
+        pathEdges: step.pathVar ? [] : undefined,
+      },
     ];
 
     const isBFS = step.strategy !== 'multi-hop-dfs';
@@ -245,8 +251,15 @@ export class Executor {
         if (!targetNode) continue;
 
         const newHops = hops + 1;
-        const newPathNodes = [...pathNodes, targetNode];
-        const newPathEdges = [...pathEdges, edge];
+        // Only track path state when a named path variable is requested
+        // (step.pathVar).  Otherwise the spreads and frontier storage are
+        // pure overhead.
+        const newPathNodes = step.pathVar
+          ? [...(pathNodes ?? []), targetNode]
+          : undefined;
+        const newPathEdges = step.pathVar
+          ? [...(pathEdges ?? []), edge]
+          : undefined;
 
         if (newHops >= step.minHops && newHops <= step.maxHops) {
           const newRow = new Map(curRow);
@@ -255,7 +268,7 @@ export class Executor {
 
           // Bind named path variable: interleave nodes and edges
           // [node0, edge0, node1, edge1, ..., nodeN]
-          if (step.pathVar) {
+          if (step.pathVar && newPathNodes && newPathEdges) {
             const pathValue: (Node | Edge)[] = [newPathNodes[0]];
             for (let i = 0; i < newPathEdges.length; i++) {
               pathValue.push(newPathEdges[i], newPathNodes[i + 1]);
