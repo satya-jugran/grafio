@@ -604,7 +604,13 @@ export class Semantic {
   private _containsAggregate(expr: Expression): boolean {
     switch (expr.kind) {
       case 'FunctionCall':
-        return Semantic.AGGREGATE_FUNCTIONS.has(expr.name);
+        // The function itself may be an aggregate (COUNT), or it may be
+        // a non-aggregate wrapper (COALESCE) whose arguments contain
+        // aggregate calls.  Both cases make this an aggregate expression.
+        return (
+          Semantic.AGGREGATE_FUNCTIONS.has(expr.name) ||
+          expr.args.some((arg) => this._containsAggregate(arg))
+        );
 
       case 'Binary':
         return this._containsAggregate(expr.left) || this._containsAggregate(expr.right);
