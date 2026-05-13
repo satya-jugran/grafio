@@ -726,6 +726,29 @@ describe('Executor', () => {
         expect(result.columns).toEqual(['count']);
       });
 
+      // Reproduction: MATCH (n) — unlabeled node with aggregate
+      it('COUNT(n) with unlabeled node MATCH (n)', async () => {
+        const graph = await buildAggregateGraph();
+        const result = await executeQuery(
+          'MATCH (n) RETURN count(n) AS total',
+          {},
+          graph,
+        );
+        expect(result.rows).toHaveLength(1);
+        expect(result.rows[0].total).toBe(4);
+      });
+
+      it('COUNT(*) with unlabeled node MATCH (n)', async () => {
+        const graph = await buildAggregateGraph();
+        const result = await executeQuery(
+          'MATCH (n) RETURN count(*) AS total',
+          {},
+          graph,
+        );
+        expect(result.rows).toHaveLength(1);
+        expect(result.rows[0].total).toBe(4);
+      });
+
       it('AVG(p.age) AS avg_age returns correct average', async () => {
         const graph = await buildAggregateGraph();
         const result = await executeQuery(

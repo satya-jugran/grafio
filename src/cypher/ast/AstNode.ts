@@ -48,10 +48,12 @@ export interface QueryAst {
 
 // ── Clauses ───────────────────────────────────────────────────────
 
+export type MatchPattern = PatternPath | NamedPath;
+
 export interface MatchClause {
   kind: 'Match';
-  /** One or more pattern paths in the MATCH clause. */
-  patterns: PatternPath[];
+  /** One or more pattern paths (or named paths) in the MATCH clause. */
+  patterns: MatchPattern[];
 }
 
 export interface WhereClause {
@@ -116,6 +118,32 @@ export interface LimitClause {
  * Example: `(a:Person)-[:KNOWS]->(b:Person)-[:LIVES_IN]->(c:City)`
  * produces one PatternPath with two segments.
  */
+/**
+ * A named pattern path assigns a variable to a pattern path.
+ * Used in queries like: `MATCH path = (a)-[:REL]->(b) RETURN path`
+ */
+export interface NamedPath {
+  kind: 'NamedPath';
+  /** The variable name assigned to this path, e.g. `path` in `path = (a)->(b)` */
+  name: string;
+  /** The pattern path being named */
+  pattern: PatternPath;
+}
+
+/**
+ * Helper type to extract segments from either PatternPath or NamedPath.
+ * Usage: function that accepts either and needs to access .segments
+ */
+export type PatternSegments<T extends PatternPath | NamedPath> = T extends NamedPath ? T['pattern']['segments'] : T extends PatternPath ? T['segments'] : never;
+
+/**
+ * Returns the segments array from a PatternPath or NamedPath.
+ * For NamedPath, returns the inner pattern's segments.
+ */
+export function getPatternSegments(pattern: PatternPath | NamedPath): PatternSegment[] {
+  return pattern.kind === 'NamedPath' ? pattern.pattern.segments : pattern.segments;
+}
+
 export interface PatternPath {
   kind: 'PatternPath';
   /** Ordered list of alternating node and edge patterns.

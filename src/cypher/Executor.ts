@@ -175,6 +175,12 @@ export class Executor {
       const newRow = new Map(row);
       if (step.edgeVar) newRow.set(step.edgeVar, edge);
       newRow.set(step.target, targetNode);
+
+      // Bind named path variable: [sourceNode, edge, targetNode]
+      if (step.pathVar) {
+        newRow.set(step.pathVar, [sourceNode, edge, targetNode]);
+      }
+
       result.push(newRow);
     }
     return result;
@@ -191,14 +197,22 @@ export class Executor {
     // path should still be explored downstream.
     const visited = new Map<string, number>([[sourceNode.id, 0]]);
 
-    const frontier: Array<{ node: Node; row: Row; hops: number }> = [
-      { node: sourceNode, row, hops: 0 },
+    const frontier: Array<{
+      node: Node;
+      row: Row;
+      hops: number;
+      /** Node objects in traversal order (for pathVar). */
+      pathNodes: Node[];
+      /** Edge objects in traversal order (for pathVar). */
+      pathEdges: Edge[];
+    }> = [
+      { node: sourceNode, row, hops: 0, pathNodes: [sourceNode], pathEdges: [] },
     ];
 
     const isBFS = step.strategy !== 'multi-hop-dfs';
 
     while (frontier.length > 0) {
-      const { node, row: curRow, hops } = isBFS
+      const { node, row: curRow, hops, pathNodes, pathEdges } = isBFS
         ? frontier.shift()!   // BFS: dequeue from front (FIFO)
         : frontier.pop()!;    // DFS: pop from back (LIFO)
 
@@ -219,11 +233,24 @@ export class Executor {
         if (!targetNode) continue;
 
         const newHops = hops + 1;
+        const newPathNodes = [...pathNodes, targetNode];
+        const newPathEdges = [...pathEdges, edge];
 
         if (newHops >= step.minHops && newHops <= step.maxHops) {
           const newRow = new Map(curRow);
           if (step.edgeVar) newRow.set(step.edgeVar, edge);
           newRow.set(step.target, targetNode);
+
+          // Bind named path variable: interleave nodes and edges
+          // [node0, edge0, node1, edge1, ..., nodeN]
+          if (step.pathVar) {
+            const pathValue: (Node | Edge)[] = [newPathNodes[0]];
+            for (let i = 0; i < newPathEdges.length; i++) {
+              pathValue.push(newPathEdges[i], newPathNodes[i + 1]);
+            }
+            newRow.set(step.pathVar, pathValue);
+          }
+
           result.push(newRow);
         }
 
@@ -233,7 +260,13 @@ export class Executor {
         if (newHops < step.maxHops && (prevHops === undefined || newHops <= prevHops)) {
           visited.set(targetId, newHops);
           const nextRow = new Map(curRow);
-          frontier.push({ node: targetNode, row: nextRow, hops: newHops });
+          frontier.push({
+            node: targetNode,
+            row: nextRow,
+            hops: newHops,
+            pathNodes: newPathNodes,
+            pathEdges: newPathEdges,
+          });
         }
       }
     }

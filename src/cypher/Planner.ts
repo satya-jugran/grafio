@@ -23,6 +23,7 @@
 import {
   QueryAst,
   PatternPath,
+  NamedPath,
   PatternSegment,
   NodePattern,
   EdgePattern,
@@ -192,17 +193,20 @@ export class Planner {
    * scan/expand chains appended in order.
    */
   private _planPatterns(ast: QueryAst, steps: PlanStep[]): void {
-    for (const path of ast.match.patterns) {
-      this._planPatternPath(path, steps, ast);
+    for (const pattern of ast.match.patterns) {
+      this._planPatternPath(pattern, steps, ast);
     }
   }
 
   /**
-   * Convert a single pattern path into plan steps.
+   * Convert a single pattern path (or named path) into plan steps.
    */
-  private _planPatternPath(path: PatternPath, steps: PlanStep[], ast: QueryAst): void {
-    const segments = path.segments;
+  private _planPatternPath(pattern: PatternPath | NamedPath, steps: PlanStep[], ast: QueryAst): void {
+    const segments = pattern.kind === 'NamedPath' ? pattern.pattern.segments : pattern.segments;
     if (segments.length === 0) return;
+
+    // Extract named path variable if present.
+    const pathVar = pattern.kind === 'NamedPath' ? pattern.name : undefined;
 
     // The first segment is always a NodePattern.
     const firstNode = segments[0] as NodePattern;
@@ -212,7 +216,7 @@ export class Planner {
     for (let i = 1; i < segments.length; i += 2) {
       const edge = segments[i] as EdgePattern;
       const targetNode = segments[i + 1] as NodePattern;
-      this._planEdgeExpand(edge, targetNode, steps, ast);
+      this._planEdgeExpand(edge, targetNode, steps, ast, pathVar);
     }
   }
 
@@ -258,6 +262,7 @@ export class Planner {
     targetNode: NodePattern,
     steps: PlanStep[],
     ast: QueryAst,
+    pathVar?: string,
   ): void {
     // Find the source variable: it's the variable of the most recent
     // NodeScanStep or the target of the most recent EdgeExpandStep.
@@ -282,7 +287,7 @@ export class Planner {
     const edgeVar = edge.variable ??
       (hasEdgeProps ? this._syntheticVar('edge', steps.length) : undefined);
 
-    steps.push({
+    const expandStep: EdgeExpandStep = {
       kind: 'EdgeExpandStep',
       source,
       edgeVar,
@@ -292,7 +297,14 @@ export class Planner {
       minHops: edge.minHops,
       maxHops: edge.maxHops,
       strategy,
-    });
+    };
+
+    // Propagate named path variable if present.
+    if (pathVar) {
+      expandStep.pathVar = pathVar;
+    }
+
+    steps.push(expandStep);
 
     // Emit FilterStep for inline properties on the edge pattern.
     if (hasEdgeProps && edgeVar) {
@@ -823,8 +835,14 @@ export class Planner {
         }
       }
 
-      // Simple plan: replace all steps with AggregateStep → ProjectStep.
-      steps.length = 0;
+      // Only use the simple plan (clear NodeScanStep, delegate to
+      // storage-level aggregation) when the node has a label so the
+      // Executor can issue getNodeCount/getNodes with a type filter.
+      // Unlabeled nodes (e.g. MATCH (n)) must keep the NodeScanStep
+      // so the in-process aggregation path has rows to evaluate.
+      if (sourceType !== undefined) {
+        steps.length = 0;
+      }
     }
 
     // ── Emit AggregateStep ────────────────────────────────────────
