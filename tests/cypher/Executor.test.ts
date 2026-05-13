@@ -697,4 +697,242 @@ describe('Executor', () => {
       expect(result.summary.propertiesSet).toBe(0);
     });
   });
+
+  // ── Aggregate Execution ──────────────────────────────────────────
+
+  /** Build graph with Person nodes for aggregate testing. */
+  async function buildAggregateGraph(): Promise<Graph> {
+    const g = new Graph();
+    await g.addNode('Person', { age: 30, city: 'NYC', salary: 70000, name: 'Alice' });
+    await g.addNode('Person', { age: 25, city: 'NYC', salary: 50000, name: 'Bob' });
+    await g.addNode('Person', { age: 35, city: 'LA', salary: 80000, name: 'Charlie' });
+    await g.addNode('Person', { age: 30, city: 'LA', salary: 60000, name: 'Diana' });
+    return g;
+  }
+
+  describe('Aggregate Execution', () => {
+    // ── Path A: Storage-level aggregation (simple plans) ──────────
+
+    describe('storage-level aggregation (Path A)', () => {
+      it('COUNT(p) returns total node count', async () => {
+        const graph = await buildAggregateGraph();
+        const result = await executeQuery(
+          'MATCH (p:Person) RETURN COUNT(p)',
+          {},
+          graph,
+        );
+        expect(result.rows).toHaveLength(1);
+        expect(result.rows[0].count).toBe(4);
+        expect(result.columns).toEqual(['count']);
+      });
+
+      it('AVG(p.age) AS avg_age returns correct average', async () => {
+        const graph = await buildAggregateGraph();
+        const result = await executeQuery(
+          'MATCH (p:Person) RETURN AVG(p.age) AS avg_age',
+          {},
+          graph,
+        );
+        expect(result.rows).toHaveLength(1);
+        expect(result.rows[0].avg_age).toBe(30);
+      });
+
+      it('SUM(p.salary) AS total returns correct sum', async () => {
+        const graph = await buildAggregateGraph();
+        const result = await executeQuery(
+          'MATCH (p:Person) RETURN SUM(p.salary) AS total',
+          {},
+          graph,
+        );
+        expect(result.rows).toHaveLength(1);
+        expect(result.rows[0].total).toBe(260000);
+      });
+
+      it('MIN(p.age) AS min_age returns minimum', async () => {
+        const graph = await buildAggregateGraph();
+        const result = await executeQuery(
+          'MATCH (p:Person) RETURN MIN(p.age) AS min_age',
+          {},
+          graph,
+        );
+        expect(result.rows).toHaveLength(1);
+        expect(result.rows[0].min_age).toBe(25);
+      });
+
+      it('MAX(p.age) AS max_age returns maximum', async () => {
+        const graph = await buildAggregateGraph();
+        const result = await executeQuery(
+          'MATCH (p:Person) RETURN MAX(p.age) AS max_age',
+          {},
+          graph,
+        );
+        expect(result.rows).toHaveLength(1);
+        expect(result.rows[0].max_age).toBe(35);
+      });
+
+      it('multiple aggregates MIN, MAX, AVG on same property', async () => {
+        const graph = await buildAggregateGraph();
+        const result = await executeQuery(
+          'MATCH (p:Person) RETURN MIN(p.age), MAX(p.age), AVG(p.age)',
+          {},
+          graph,
+        );
+        expect(result.rows).toHaveLength(1);
+        expect(result.rows[0].min).toBe(25);
+        expect(result.rows[0].max).toBe(35);
+        expect(result.rows[0].avg).toBe(30);
+      });
+
+      it('COLLECT(p.name) returns array of property values', async () => {
+        const graph = await buildAggregateGraph();
+        const result = await executeQuery(
+          'MATCH (p:Person) RETURN COLLECT(p.name)',
+          {},
+          graph,
+        );
+        expect(result.rows).toHaveLength(1);
+        const names = result.rows[0].collect as unknown[];
+        expect(names).toHaveLength(4);
+        expect(names).toContain('Alice');
+        expect(names).toContain('Bob');
+        expect(names).toContain('Charlie');
+        expect(names).toContain('Diana');
+      });
+
+      it('COUNT(DISTINCT p.age) counts distinct numeric values', async () => {
+        const graph = await buildAggregateGraph();
+        // Distinct ages: 30, 25, 35 → 3 distinct values
+        const result = await executeQuery(
+          'MATCH (p:Person) RETURN COUNT(DISTINCT p.age)',
+          {},
+          graph,
+        );
+        expect(result.rows).toHaveLength(1);
+        expect(result.rows[0].count).toBe(3);
+      });
+
+      it('AVG(DISTINCT p.age) averages distinct values', async () => {
+        const graph = await buildAggregateGraph();
+        // Distinct ages: 30, 25, 35 → avg = 30
+        const result = await executeQuery(
+          'MATCH (p:Person) RETURN AVG(DISTINCT p.age)',
+          {},
+          graph,
+        );
+        expect(result.rows).toHaveLength(1);
+        expect(result.rows[0].avg).toBe(30);
+      });
+    });
+
+    // ── Path B: In-process aggregation (group-by) ────────────────
+
+    describe('in-process aggregation (Path B)', () => {
+      it('COUNT(*) counts all matched rows', async () => {
+        const graph = await buildAggregateGraph();
+        const result = await executeQuery(
+          'MATCH (p:Person) RETURN COUNT(*)',
+          {},
+          graph,
+        );
+        expect(result.rows).toHaveLength(1);
+        expect(result.rows[0].count).toBe(4);
+      });
+
+      it('group-by p.city with COUNT(p) produces per-group counts', async () => {
+        const graph = await buildAggregateGraph();
+        const result = await executeQuery(
+          'MATCH (p:Person) RETURN p.city, COUNT(p)',
+          {},
+          graph,
+        );
+        expect(result.rows).toHaveLength(2);
+        const byCity = new Map(result.rows.map((r) => [r.p_city, r.count]));
+        expect(byCity.get('NYC')).toBe(2);
+        expect(byCity.get('LA')).toBe(2);
+      });
+
+      it('group-by p.city with AVG(p.age) produces per-group averages', async () => {
+        const graph = await buildAggregateGraph();
+        const result = await executeQuery(
+          'MATCH (p:Person) RETURN p.city, AVG(p.age)',
+          {},
+          graph,
+        );
+        expect(result.rows).toHaveLength(2);
+        const byCity = new Map(result.rows.map((r) => [r.p_city, r.avg]));
+        expect(byCity.get('NYC')).toBe(27.5); // (30+25)/2
+        expect(byCity.get('LA')).toBe(32.5);  // (35+30)/2
+      });
+    });
+
+    // ── Edge cases: empty result set ──────────────────────────────
+
+    describe('edge cases (empty result set)', () => {
+      it('COUNT on empty set returns 0', async () => {
+        const graph = await buildAggregateGraph();
+        const result = await executeQuery(
+          'MATCH (p:Person) WHERE p.age > 100 RETURN COUNT(p)',
+          {},
+          graph,
+        );
+        expect(result.rows).toHaveLength(1);
+        expect(result.rows[0].count).toBe(0);
+      });
+
+      it('SUM on empty set returns 0', async () => {
+        const graph = await buildAggregateGraph();
+        const result = await executeQuery(
+          'MATCH (p:Person) WHERE p.age > 100 RETURN SUM(p.salary) AS total',
+          {},
+          graph,
+        );
+        expect(result.rows).toHaveLength(1);
+        expect(result.rows[0].total).toBe(0);
+      });
+
+      it('AVG on empty set returns 0', async () => {
+        const graph = await buildAggregateGraph();
+        const result = await executeQuery(
+          'MATCH (p:Person) WHERE p.age > 100 RETURN AVG(p.age) AS avg_age',
+          {},
+          graph,
+        );
+        expect(result.rows).toHaveLength(1);
+        expect(result.rows[0].avg_age).toBe(0);
+      });
+
+      it('MIN on empty set returns null', async () => {
+        const graph = await buildAggregateGraph();
+        const result = await executeQuery(
+          'MATCH (p:Person) WHERE p.age > 100 RETURN MIN(p.age) AS min_age',
+          {},
+          graph,
+        );
+        expect(result.rows).toHaveLength(1);
+        expect(result.rows[0].min_age).toBeNull();
+      });
+
+      it('MAX on empty set returns null', async () => {
+        const graph = await buildAggregateGraph();
+        const result = await executeQuery(
+          'MATCH (p:Person) WHERE p.age > 100 RETURN MAX(p.age) AS max_age',
+          {},
+          graph,
+        );
+        expect(result.rows).toHaveLength(1);
+        expect(result.rows[0].max_age).toBeNull();
+      });
+
+      it('COLLECT on empty set returns empty array', async () => {
+        const graph = await buildAggregateGraph();
+        const result = await executeQuery(
+          'MATCH (p:Person) WHERE p.age > 100 RETURN COLLECT(p.name) AS names',
+          {},
+          graph,
+        );
+        expect(result.rows).toHaveLength(1);
+        expect(result.rows[0].names).toEqual([]);
+      });
+    });
+  });
 });

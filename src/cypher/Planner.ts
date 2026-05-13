@@ -31,6 +31,7 @@ import {
   PropertyAccessExpr,
   PropertyMap,
   ParameterRef,
+  FunctionCallExpr,
 } from './ast/AstNode';
 import {
   QueryPlan,
@@ -43,6 +44,8 @@ import {
   SortStep,
   SortSpec,
   LimitStep,
+  AggregateStep,
+  AggregateSpec,
 } from './plan/QueryPlan';
 
 // ── Planner ───────────────────────────────────────────────────────
@@ -56,6 +59,9 @@ import {
  * ```
  */
 export class Planner {
+  /** Set when the current query contains aggregate functions. */
+  private _hasAggregates = false;
+
   /**
    * Translate a typed AST into a {@link QueryPlan}.
    *
@@ -87,7 +93,18 @@ export class Planner {
       steps.push(this._planLimit(ast));
     }
 
-    // ── 5. Projection (RETURN) — last, since it strips variables ──
+    // ── 5. Aggregate detection & projection (RETURN) ─────────────
+    const hasAggregates = ast.return.items.some((item) =>
+      this._hasAggregateFunction(item.expression),
+    );
+
+    this._hasAggregates = hasAggregates;
+
+    if (hasAggregates) {
+      this._planAggregation(ast, steps);
+    }
+
+    // Projection — last, since it strips variables ────────────────
     steps.push(this._planProjection(ast));
 
     return { steps };
@@ -226,12 +243,34 @@ export class Planner {
 
   /**
    * Convert RETURN items into a {@link ProjectStep}.
+   *
+   * When aggregates are present in the query, the expressions are
+   * replaced with {@link IdentifierExpr} references that match the
+   * aliases produced by the {@link AggregateStep}. This avoids
+   * evaluating {@link FunctionCallExpr} nodes (which the generic
+   * expression evaluator cannot handle) and correctly resolves
+   * group-by keys from the post-aggregation row.
    */
   private _planProjection(ast: QueryAst): ProjectStep {
-    const columns: ProjectColumn[] = ast.return.items.map((item) => ({
-      expression: item.expression,
-      alias: item.alias ?? this._deriveAlias(item.expression),
-    }));
+    const columns: ProjectColumn[] = ast.return.items.map((item) => {
+      const alias = item.alias ?? this._deriveAlias(item.expression);
+
+      if (this._hasAggregates) {
+        // After AggregateStep, the row only contains aggregate and
+        // group-by aliases. Emit an Identifier that matches the
+        // stored key so the Executor can resolve it via normal
+        // variable lookup.
+        return {
+          expression: { kind: 'Identifier' as const, name: alias },
+          alias,
+        };
+      }
+
+      return {
+        expression: item.expression,
+        alias,
+      };
+    });
 
     return { kind: 'ProjectStep', columns, distinct: ast.return.distinct };
   }
@@ -352,5 +391,232 @@ export class Planner {
       default:
         return `expr`;
     }
+  }
+
+  // ── Aggregate planning ───────────────────────────────────────────
+
+  /** Set of aggregate function names recognised by the planner. */
+  private static readonly AGGREGATE_FUNCTIONS: ReadonlySet<string> = new Set([
+    'COUNT', 'SUM', 'AVG', 'MIN', 'MAX', 'COLLECT',
+  ]);
+
+  /**
+   * Recursively walk an expression tree to determine whether it contains
+   * any aggregate function call ({@link FunctionCallExpr}).
+   *
+   * @returns `true` if the expression or any sub-expression is an
+   *          aggregate function call.
+   */
+  private _hasAggregateFunction(expr: Expression): boolean {
+    if (
+      expr.kind === 'FunctionCall' &&
+      Planner.AGGREGATE_FUNCTIONS.has(expr.name)
+    ) {
+      return true;
+    }
+
+    // Recurse into child expressions.
+    switch (expr.kind) {
+      case 'Binary':
+        return (
+          this._hasAggregateFunction(expr.left) ||
+          this._hasAggregateFunction(expr.right)
+        );
+      case 'Unary':
+        return this._hasAggregateFunction(expr.operand);
+      case 'PropertyAccess':
+        return this._hasAggregateFunction(expr.object);
+      case 'In':
+        return (
+          this._hasAggregateFunction(expr.expression) ||
+          this._hasAggregateFunction(expr.list)
+        );
+      case 'IsNull':
+        return this._hasAggregateFunction(expr.expression);
+      case 'FunctionCall':
+        return expr.args.some((arg) => this._hasAggregateFunction(arg));
+      case 'List':
+        return expr.elements.some((el) => this._hasAggregateFunction(el));
+      default:
+        return false;
+    }
+  }
+
+  /**
+   * Extract the innermost {@link FunctionCallExpr} with an aggregate name
+   * from an expression tree.
+   *
+   * For a simple aggregate like `COUNT(p)` this returns the
+   * `FunctionCallExpr` itself.  For a wrapped expression like
+   * `COUNT(p) + 1` it recurses into the binary operands.
+   *
+   * @returns The aggregate `FunctionCallExpr`, or `null` if none found.
+   */
+  private _extractAggregateFunctionCall(
+    expr: Expression,
+  ): FunctionCallExpr | null {
+    if (
+      expr.kind === 'FunctionCall' &&
+      Planner.AGGREGATE_FUNCTIONS.has(expr.name)
+    ) {
+      return expr;
+    }
+
+    switch (expr.kind) {
+      case 'Binary':
+        return (
+          this._extractAggregateFunctionCall(expr.left) ??
+          this._extractAggregateFunctionCall(expr.right)
+        );
+      case 'Unary':
+        return this._extractAggregateFunctionCall(expr.operand);
+      case 'PropertyAccess':
+        return this._extractAggregateFunctionCall(expr.object);
+      case 'FunctionCall':
+        for (const arg of expr.args) {
+          const found = this._extractAggregateFunctionCall(arg);
+          if (found) return found;
+        }
+        return null;
+      default:
+        return null;
+    }
+  }
+
+  /**
+   * Extract the root variable name from an aggregate argument expression.
+   *
+   * - `p`        → `'p'`
+   * - `p.age`    → `'p'`
+   * - `*`        → `null`  (COUNT(*) has no variable)
+   * - anything   → `null`
+   */
+  private _extractVariableName(expr: Expression): string | null {
+    // COUNT(*) sentinel — no variable reference.
+    if (expr.kind === 'Literal' && expr.value === '*') {
+      return null;
+    }
+
+    if (expr.kind === 'Identifier') {
+      return expr.name;
+    }
+
+    if (expr.kind === 'PropertyAccess') {
+      return this._extractVariableName(expr.object);
+    }
+
+    return null;
+  }
+
+  /**
+   * Determine whether the current plan is "simple" — i.e. it consists of
+   * a single {@link NodeScanStep} with no {@link EdgeExpandStep} and no
+   * {@code WHERE} clause.
+   *
+   * Simple plans allow the {@link Executor} to use storage-level
+   * aggregation (e.g. {@code getNodeCount}) instead of materialising
+   * every row.
+   */
+  private _isSimplePlan(steps: PlanStep[], ast: QueryAst): boolean {
+    if (ast.where) return false;
+
+    let nodeScanCount = 0;
+    for (const step of steps) {
+      if (step.kind === 'EdgeExpandStep') return false;
+      if (step.kind === 'NodeScanStep') nodeScanCount++;
+    }
+
+    return nodeScanCount === 1;
+  }
+
+  /**
+   * Build and insert an {@link AggregateStep} into the plan, handling
+   * both simple (storage-level) and complex (in-process) aggregation
+   * shapes.
+   *
+   * ### Plan shape decision
+   *
+   * - **Simple plan** ({@link _isSimplePlan} returns `true` AND the
+   *   aggregates reference a single variable with a known type): the
+   *   existing steps are cleared and replaced with
+   *   `AggregateStep → ProjectStep`.
+   *
+   * - **Complex plan**: the `AggregateStep` is inserted before the
+   *   `ProjectStep`, keeping the full pipeline
+   *   (`NodeScanStep → … → AggregateStep → ProjectStep`).
+   */
+  private _planAggregation(ast: QueryAst, steps: PlanStep[]): void {
+    // ── Split RETURN items ───────────────────────────────────────
+    const aggItems = ast.return.items.filter((item) =>
+      this._hasAggregateFunction(item.expression),
+    );
+    const groupByItems = ast.return.items.filter(
+      (item) => !this._hasAggregateFunction(item.expression),
+    );
+
+    // ── Build AggregateSpec array ─────────────────────────────────
+    const aggregates: AggregateSpec[] = aggItems.map((item) => {
+      const fnCall = this._extractAggregateFunctionCall(item.expression)!;
+
+      // For COUNT(*), the Parser produces args: [{ kind: 'Literal', value: '*' }].
+      // For regular aggregates, use the first argument expression.
+      const aggExpr: Expression =
+        fnCall.args.length > 0
+          ? fnCall.args[0]
+          : { kind: 'Literal', value: null };
+
+      return {
+        function: fnCall.name as AggregateSpec['function'],
+        expression: aggExpr,
+        distinct: (fnCall as any).distinct === true,
+        alias: item.alias ?? this._deriveAlias(item.expression),
+      };
+    });
+
+    // ── Build groupBy expressions ─────────────────────────────────
+    const groupBy: Expression[] = groupByItems.map((item) => item.expression);
+
+    // ── Determine sourceVariable ──────────────────────────────────
+    let sourceVariable: string | undefined;
+    const vars = new Set<string>();
+    for (const agg of aggregates) {
+      const v = this._extractVariableName(agg.expression);
+      if (v) vars.add(v);
+    }
+    if (vars.size === 1) {
+      sourceVariable = [...vars][0];
+    }
+
+    // ── Plan shape decision ───────────────────────────────────────
+    let sourceType: string | undefined;
+    const isSimple =
+      this._isSimplePlan(steps, ast) &&
+      sourceVariable !== undefined &&
+      groupBy.length === 0;
+
+    if (isSimple) {
+      // Extract sourceType from the NodeScanStep that binds sourceVariable.
+      for (const step of steps) {
+        if (
+          step.kind === 'NodeScanStep' &&
+          step.variable === sourceVariable
+        ) {
+          sourceType = step.label || undefined;
+          break;
+        }
+      }
+
+      // Simple plan: replace all steps with AggregateStep → ProjectStep.
+      steps.length = 0;
+    }
+
+    // ── Emit AggregateStep ────────────────────────────────────────
+    steps.push({
+      kind: 'AggregateStep',
+      aggregates,
+      groupBy,
+      sourceVariable,
+      sourceType,
+    });
   }
 }

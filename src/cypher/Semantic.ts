@@ -96,6 +96,7 @@ export class Semantic {
     this._resolveScopes.bind(this),
     this._checkUnresolvedVars.bind(this),
     this._checkDuplicateBindings.bind(this),
+    this._checkAggregateGrouping.bind(this),
   ];
 
   /** Cached scope table populated by `_resolveScopes` and consumed by later passes. */
@@ -319,5 +320,127 @@ export class Semantic {
     }
 
     return ast;
+  }
+
+  // ── Pass 4: Aggregate grouping validation ──────────────────────
+
+  /** Set of aggregate function names recognised by the semantic analyser. */
+  private static readonly AGGREGATE_FUNCTIONS: ReadonlySet<string> = new Set([
+    'COUNT', 'SUM', 'AVG', 'MIN', 'MAX', 'COLLECT',
+  ]);
+
+  /**
+   * Validate aggregate function usage in RETURN and WHERE clauses.
+   *
+   * Rules enforced:
+   * 1. Aggregate functions MUST NOT appear in WHERE clauses.
+   * 2. When aggregates are present in RETURN, non-aggregate RETURN items
+   *    must be simple identifiers or property accesses (valid grouping keys).
+   *
+   * @throws {CypherSemanticError} if any rule is violated.
+   */
+  private _checkAggregateGrouping(ast: QueryAst): QueryAst {
+    // Rule 1: No aggregate functions in WHERE.
+    if (ast.where && this._containsAggregate(ast.where.expression)) {
+      throw new CypherSemanticError(
+        'Aggregate functions cannot be used in WHERE clauses',
+      );
+    }
+
+    // Determine whether any RETURN item contains an aggregate function.
+    const hasAggregate = ast.return.items.some(
+      item => this._containsAggregate(item.expression),
+    );
+
+    if (!hasAggregate) {
+      return ast;
+    }
+
+    // Rule 2: Non-aggregate RETURN items must be valid grouping keys.
+    for (const item of ast.return.items) {
+      if (this._containsAggregate(item.expression)) {
+        continue; // aggregate expression — allowed
+      }
+
+      if (!this._isGroupingKey(item.expression)) {
+        throw new CypherSemanticError(
+          `Non-aggregate RETURN item must be a simple identifier or ` +
+          `property access to serve as a grouping key, but found ` +
+          `'${this._describeExpr(item.expression)}'`,
+        );
+      }
+    }
+
+    return ast;
+  }
+
+  /**
+   * Recursively check whether an expression tree contains any aggregate
+   * function call ({@link FunctionCallExpr}).
+   */
+  private _containsAggregate(expr: Expression): boolean {
+    switch (expr.kind) {
+      case 'FunctionCall':
+        return Semantic.AGGREGATE_FUNCTIONS.has(expr.name);
+
+      case 'Binary':
+        return this._containsAggregate(expr.left) || this._containsAggregate(expr.right);
+
+      case 'Unary':
+        return this._containsAggregate(expr.operand);
+
+      case 'PropertyAccess':
+        return this._containsAggregate(expr.object);
+
+      case 'In':
+        return this._containsAggregate(expr.expression) || this._containsAggregate(expr.list);
+
+      case 'IsNull':
+        return this._containsAggregate(expr.expression);
+
+      case 'List':
+        return expr.elements.some(e => this._containsAggregate(e));
+
+      case 'Identifier':
+      case 'Literal':
+      case 'Parameter':
+        return false;
+    }
+  }
+
+  /**
+   * Determine whether an expression is a valid grouping key — a simple
+   * identifier or a property access on a bound variable.
+   */
+  private _isGroupingKey(expr: Expression): boolean {
+    switch (expr.kind) {
+      case 'Identifier':
+      case 'PropertyAccess':
+        return true;
+
+      default:
+        return false;
+    }
+  }
+
+  /**
+   * Produce a short human-readable description of an expression for
+   * error messages.
+   */
+  private _describeExpr(expr: Expression): string {
+    switch (expr.kind) {
+      case 'Identifier':
+        return expr.name;
+      case 'PropertyAccess':
+        return `${this._describeExpr(expr.object)}.${expr.property}`;
+      case 'Literal':
+        return String(expr.value);
+      case 'Parameter':
+        return `$${expr.name}`;
+      case 'FunctionCall':
+        return `${expr.name}(...)`;
+      default:
+        return 'expression';
+    }
   }
 }

@@ -31,6 +31,8 @@ import {
   ProjectStep,
   SortStep,
   LimitStep,
+  AggregateStep,
+  AggregateSpec,
 } from './plan/QueryPlan';
 import { CypherResult, CypherRow, CypherSummary } from './Result';
 import { Expression } from './ast/AstNode';
@@ -99,7 +101,7 @@ export class Executor {
       case 'LimitStep':
         return this._executeLimit(step, rows, params);
       case 'AggregateStep':
-        throw new CypherRuntimeError('Aggregation is not yet supported');
+        return this._executeAggregate(step, rows, params);
     }
   }
 
@@ -333,6 +335,397 @@ export class Executor {
       : Infinity;
     const end = limitVal === Infinity ? undefined : start + limitVal;
     return rows.slice(start, end);
+  }
+
+  // ── AggregateStep ───────────────────────────────────────────────
+
+  /**
+   * Execute an {@link AggregateStep}, dispatching to storage-level
+   * aggregation (Path A) for simple plans or in-process aggregation
+   * (Path B) for complex plans with preceding pipeline steps.
+   */
+  private async _executeAggregate(
+    step: AggregateStep,
+    rows: Row[],
+    params: Record<string, unknown>,
+  ): Promise<Row[]> {
+    // Path A: Storage-level optimisation for simple plans.
+    if (this._canUseStorageLevel(step)) {
+      return this._executeAggregateStorageLevel(step);
+    }
+
+    // Path B: In-process aggregation over materialised rows.
+    return this._executeAggregateInProcess(step, rows, params);
+  }
+
+  /**
+   * Determine whether the {@link AggregateStep} qualifies for the
+   * storage-level fast path (Path A).
+   *
+   * Conditions (all must be true):
+   * 1. `sourceVariable` is set.
+   * 2. `sourceType` is set.
+   * 3. Every aggregate expression is "simple" — a variable reference,
+   *    a property access on `sourceVariable`, or the COUNT(*) literal.
+   */
+  private _canUseStorageLevel(step: AggregateStep): boolean {
+    if (!step.sourceVariable || !step.sourceType) return false;
+
+    for (const spec of step.aggregates) {
+      if (!this._isSimpleAggregateExpr(spec.expression, step.sourceVariable)) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  /**
+   * Check whether an aggregate expression is "simple" — i.e. it only
+   * references `sourceVar` (either directly or via a property access)
+   * or is the `COUNT(*)` sentinel literal.
+   */
+  private _isSimpleAggregateExpr(
+    expr: Expression,
+    sourceVar: string,
+  ): boolean {
+    // COUNT(*)
+    if (expr.kind === 'Literal' && expr.value === '*') return true;
+
+    // COUNT(p)
+    if (expr.kind === 'Identifier' && expr.name === sourceVar) return true;
+
+    // SUM(p.age), AVG(p.age), MIN(p.age), MAX(p.age), COLLECT(p.name)
+    if (
+      expr.kind === 'PropertyAccess' &&
+      expr.object.kind === 'Identifier' &&
+      expr.object.name === sourceVar
+    ) {
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Extract the property key from a simple aggregate expression.
+   *
+   * @returns The property name for a {@code PropertyAccess} on
+   *          {@code sourceVar}, or {@code null} for variable/literal
+   *          references (COUNT variants).
+   */
+  private _extractPropertyKey(
+    expr: Expression,
+    sourceVar: string,
+  ): string | null {
+    if (
+      expr.kind === 'PropertyAccess' &&
+      expr.object.kind === 'Identifier' &&
+      expr.object.name === sourceVar
+    ) {
+      return expr.property;
+    }
+    return null;
+  }
+
+  // ── Path A: Storage-level aggregation ───────────────────────────
+
+  /**
+   * Execute aggregates by calling storage-layer methods directly,
+   * avoiding full row materialisation.
+   *
+   * Coalesces multiple aggregates on the same property (with the same
+   * `distinct` flag) into a single {@code aggregateNodeProperty} call.
+   */
+  private async _executeAggregateStorageLevel(
+    step: AggregateStep,
+  ): Promise<Row[]> {
+    const sourceType = step.sourceType!;
+    const resultRow = new Map<string, unknown>();
+
+    // Partition aggregates by their storage call.
+    // - `countAggs`: COUNT(p) / COUNT(*) → entity count
+    // - `propertyAggs`: keyed by `propKey|distinct` → aggregateNodeProperty
+    // - `collectAggs`: COLLECT(p.name) → getNodes + extract
+    const countAggs: AggregateSpec[] = [];
+    const propertyAggs = new Map<string, AggregateSpec[]>();
+    const collectAggs: AggregateSpec[] = [];
+
+    for (const spec of step.aggregates) {
+      if (spec.function === 'COLLECT') {
+        collectAggs.push(spec);
+        continue;
+      }
+
+      const propKey = this._extractPropertyKey(
+        spec.expression,
+        step.sourceVariable!,
+      );
+
+      if (propKey === null) {
+        // COUNT(p) or COUNT(*) — entity-level count
+        countAggs.push(spec);
+      } else {
+        const coalesceKey = `${propKey}|${spec.distinct}`;
+        if (!propertyAggs.has(coalesceKey)) {
+          propertyAggs.set(coalesceKey, []);
+        }
+        propertyAggs.get(coalesceKey)!.push(spec);
+      }
+    }
+
+    // ── Entity-level COUNT ─────────────────────────────────────────
+    if (countAggs.length > 0) {
+      const nodes = await this._graph.getNodes({
+        filter: { types: [sourceType] },
+      });
+      for (const spec of countAggs) {
+        resultRow.set(spec.alias, nodes.length);
+      }
+    }
+
+    // ── Property aggregates (coalesced) ────────────────────────────
+    for (const [coalesceKey, specs] of propertyAggs) {
+      const [propKey, distinctStr] = coalesceKey.split('|');
+      const distinct = distinctStr === 'true';
+
+      const aggResult = await this._graph.aggregateNodeProperty(propKey, {
+        filter: { types: [sourceType] },
+        distinct,
+      });
+
+      for (const spec of specs) {
+        resultRow.set(spec.alias, this._extractAggField(aggResult, spec.function));
+      }
+    }
+
+    // ── COLLECT aggregates ─────────────────────────────────────────
+    if (collectAggs.length > 0) {
+      const nodes = await this._graph.getNodes({
+        filter: { types: [sourceType] },
+      });
+
+      for (const spec of collectAggs) {
+        const propKey = this._extractPropertyKey(
+          spec.expression,
+          step.sourceVariable!,
+        );
+        const values = nodes
+          .map((n) => (propKey ? n.properties[propKey] : n))
+          .filter((v) => v !== undefined);
+
+        resultRow.set(
+          spec.alias,
+          spec.distinct ? [...new Set(values)] : values,
+        );
+      }
+    }
+
+    return [resultRow];
+  }
+
+  /**
+   * Extract the relevant field from an {@link AggregateResult} based
+   * on the aggregate function name.
+   */
+  private _extractAggField(
+    result: { count: number; sum?: number; avg?: number; min?: number; max?: number },
+    fn: string,
+  ): unknown {
+    switch (fn) {
+      case 'COUNT':
+        return result.count;
+      case 'SUM':
+        return result.sum ?? 0;
+      case 'AVG':
+        return result.avg ?? 0;
+      case 'MIN':
+        return result.min ?? null;
+      case 'MAX':
+        return result.max ?? null;
+      default:
+        return null;
+    }
+  }
+
+  // ── Path B: In-process aggregation ──────────────────────────────
+
+  /**
+   * Compute aggregates in-process over the materialised row buffer.
+   *
+   * Supports both ungrouped (scalar) aggregation and grouped
+   * aggregation via {@code step.groupBy}.
+   */
+  private _executeAggregateInProcess(
+    step: AggregateStep,
+    rows: Row[],
+    params: Record<string, unknown>,
+  ): Row[] {
+    if (step.groupBy.length === 0) {
+      // Scalar aggregation — collapse all rows into one.
+      const resultRow = new Map<string, unknown>();
+      for (const spec of step.aggregates) {
+        resultRow.set(
+          spec.alias,
+          this._computeAggregate(spec, rows, params),
+        );
+      }
+      return [resultRow];
+    }
+
+    // Grouped aggregation.
+    const groups = new Map<string, { keyValues: unknown[]; rows: Row[] }>();
+
+    for (const row of rows) {
+      // Compute the group key by evaluating groupBy expressions.
+      const keyValues: unknown[] = step.groupBy.map((expr) =>
+        this._evaluate(expr, row, params),
+      );
+      const keyStr = this._serializeGroupKey(keyValues);
+
+      if (!groups.has(keyStr)) {
+        groups.set(keyStr, { keyValues, rows: [] });
+      }
+      groups.get(keyStr)!.rows.push(row);
+    }
+
+    // Emit one row per group.
+    const result: Row[] = [];
+    for (const [, group] of groups) {
+      const resultRow = new Map<string, unknown>();
+
+      // Include group-by values in the output.
+      for (let i = 0; i < step.groupBy.length; i++) {
+        // Derive alias from the group-by expression (simple case: identifier name).
+        const alias = this._deriveGroupByAlias(step.groupBy[i]);
+        resultRow.set(alias, group.keyValues[i]);
+      }
+
+      // Compute aggregates over the group's rows.
+      for (const spec of step.aggregates) {
+        resultRow.set(
+          spec.alias,
+          this._computeAggregate(spec, group.rows, params),
+        );
+      }
+
+      result.push(resultRow);
+    }
+
+    return result;
+  }
+
+  /**
+   * Compute a single aggregate function over a set of rows.
+   */
+  private _computeAggregate(
+    spec: AggregateSpec,
+    rows: Row[],
+    params: Record<string, unknown>,
+  ): unknown {
+    const { expression, distinct } = spec;
+
+    // Evaluate expression for each row, filtering out null/undefined.
+    let values: unknown[] = rows
+      .map((row) => this._evaluateExpressionForAggregate(expression, row, params))
+      .filter((v) => v !== null && v !== undefined);
+
+    // Apply DISTINCT deduplication.
+    if (distinct) {
+      values = [...new Set(values)];
+    }
+
+    switch (spec.function) {
+      case 'COUNT':
+        return values.length;
+
+      case 'SUM': {
+        const nums = values.map(Number).filter((n) => !isNaN(n));
+        return nums.reduce((a, b) => a + b, 0);
+      }
+
+      case 'AVG': {
+        const nums = values.map(Number).filter((n) => !isNaN(n));
+        if (nums.length === 0) return 0;
+        return nums.reduce((a, b) => a + b, 0) / nums.length;
+      }
+
+      case 'MIN': {
+        if (values.length === 0) return null;
+        return values.reduce((a, b) =>
+          this._compare(a, b) <= 0 ? a : b,
+        );
+      }
+
+      case 'MAX': {
+        if (values.length === 0) return null;
+        return values.reduce((a, b) =>
+          this._compare(a, b) >= 0 ? a : b,
+        );
+      }
+
+      case 'COLLECT':
+        return values;
+
+      default:
+        throw new CypherRuntimeError(
+          `Unknown aggregate function: ${spec.function}`,
+        );
+    }
+  }
+
+  /**
+   * Evaluate an aggregate expression against a row.
+   *
+   * For {@code COUNT(*)}, the expression is a literal {@code '*'} —
+   * treat that as a non-null sentinel so every row is counted.
+   * All other expressions are delegated to {@link _evaluate}.
+   */
+  private _evaluateExpressionForAggregate(
+    expr: Expression,
+    row: Row,
+    params: Record<string, unknown>,
+  ): unknown {
+    // COUNT(*) — every row contributes.
+    if (expr.kind === 'Literal' && expr.value === '*') {
+      return 1; // non-null sentinel
+    }
+
+    return this._evaluate(expr, row, params);
+  }
+
+  /**
+   * Build a stable string key from an array of group-by values,
+   * used to partition rows into groups.
+   */
+  private _serializeGroupKey(keyValues: unknown[]): string {
+    return keyValues
+      .map((v) => {
+        if (v === null) return '\x00null';
+        if (v === undefined) return '\x00undef';
+        if (typeof v === 'object' && v !== null && 'id' in (v as object)) {
+          return (v as { id: string }).id;
+        }
+        return String(v);
+      })
+      .join('\x00');
+  }
+
+  /**
+   * Derive an output alias from a group-by expression.
+   *
+   * For simple identifiers, use the variable name.  For everything
+   * else, produce a synthetic name.
+   */
+  private _deriveGroupByAlias(expr: Expression): string {
+    if (expr.kind === 'Identifier') return expr.name;
+    if (
+      expr.kind === 'PropertyAccess' &&
+      expr.object.kind === 'Identifier'
+    ) {
+      return `${expr.object.name}_${expr.property}`;
+    }
+    return `group_${expr.kind}`;
   }
 
   // ── Expression evaluator ────────────────────────────────────────

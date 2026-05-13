@@ -158,16 +158,41 @@ export interface LimitStep {
 }
 
 /**
- * Placeholder for future aggregation support.
+ * A single aggregate function specification within an {@link AggregateStep}.
+ */
+export interface AggregateSpec {
+  /** The aggregate function name. */
+  function: 'COUNT' | 'SUM' | 'AVG' | 'MIN' | 'MAX' | 'COLLECT';
+  /** The expression to aggregate. */
+  expression: Expression;
+  /** Whether DISTINCT was specified (e.g. `COUNT(DISTINCT p.city)`). */
+  distinct: boolean;
+  /** The output alias for the aggregated value. */
+  alias: string;
+}
+
+/**
+ * Execute one or more aggregate functions, with optional grouping.
  *
- * Currently gated by {@link CypherNotSupportedError} in {@link CypherEngine}.
+ * The {@link Planner} determines whether to emit a simple plan (direct
+ * storage call) or a complex plan (full pipeline + in-process aggregation)
+ * based on whether joins precede this step.
  */
 export interface AggregateStep {
   kind: 'AggregateStep';
-  /** The aggregation function name (e.g. 'COUNT'). */
-  function: string;
-  /** The expression to aggregate. */
-  expression: Expression;
-  /** The output alias for the aggregated value. */
-  alias: string;
+  /** Aggregate function specifications. */
+  aggregates: AggregateSpec[];
+  /** Group-by expressions (non-aggregated RETURN items). */
+  groupBy: Expression[];
+  /**
+   * The entity variable being aggregated over (e.g., 'p' in COUNT(p)).
+   * Set by the Planner when the aggregate expression is a simple
+   * identifier or property access on a single variable.
+   */
+  sourceVariable?: string;
+  /**
+   * The entity type (label) being aggregated (e.g., 'Person').
+   * Set by the Planner from the NodeScanStep that binds sourceVariable.
+   */
+  sourceType?: string;
 }

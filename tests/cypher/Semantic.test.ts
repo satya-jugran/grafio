@@ -70,4 +70,48 @@ describe('Semantic', () => {
         .toThrow(CypherSemanticError);
     });
   });
+
+  // ── Semantic Analysis for Aggregates ────────────────────────────
+  describe('Semantic Analysis for Aggregates', () => {
+    // -- Valid aggregate queries --
+
+    it('allows COUNT(p) in RETURN', () => {
+      expect(() => analyse('MATCH (p:Person) RETURN COUNT(p)'))
+        .not.toThrow();
+    });
+
+    it('allows p.city as grouping key with COUNT(p)', () => {
+      expect(() => analyse('MATCH (p:Person) RETURN p.city, COUNT(p)'))
+        .not.toThrow();
+    });
+
+    it('allows p.name as grouping key with COUNT(p)', () => {
+      expect(() => analyse('MATCH (p:Person) RETURN p.name, COUNT(p)'))
+        .not.toThrow();
+    });
+
+    it('allows query with no aggregates at all', () => {
+      expect(() => analyse('MATCH (p:Person) RETURN p.name, p.age'))
+        .not.toThrow();
+    });
+
+    // -- Invalid: Aggregate in WHERE --
+
+    it('rejects COUNT in WHERE clause', () => {
+      expect(() => analyse('MATCH (p:Person) WHERE COUNT(p) > 5 RETURN p'))
+        .toThrow(CypherSemanticError);
+    });
+
+    it('rejects AVG in WHERE clause', () => {
+      expect(() => analyse('MATCH (p:Person) WHERE AVG(p.age) > 30 RETURN p'))
+        .toThrow(CypherSemanticError);
+    });
+
+    // -- Invalid: Non-grouping-key expression with aggregates --
+
+    it('rejects complex expression as grouping key', () => {
+      expect(() => analyse('MATCH (p:Person) RETURN p.age + 1, COUNT(p)'))
+        .toThrow(CypherSemanticError);
+    });
+  });
 });

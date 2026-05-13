@@ -46,13 +46,6 @@ const GATED_TOKENS: ReadonlySet<TokenKind> = new Set([
   TokenKind.REMOVE,
   TokenKind.DELETE,
   TokenKind.DETACH,
-  // Aggregation functions
-  TokenKind.COUNT,
-  TokenKind.SUM,
-  TokenKind.AVG,
-  TokenKind.MIN,
-  TokenKind.MAX,
-  TokenKind.COLLECT,
   // Other unsupported clauses
   TokenKind.OPTIONAL,
   TokenKind.WITH,

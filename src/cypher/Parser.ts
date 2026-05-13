@@ -563,7 +563,7 @@ export class Parser {
     return this._parsePrimary();
   }
 
-  /** Parse a primary expression (literal, identifier, parameter, parenthesised). */
+  /** Parse a primary expression (literal, identifier, parameter, parenthesised, function call). */
   private _parsePrimary(): Expression {
     const token = this._peek();
 
@@ -594,6 +594,12 @@ export class Parser {
 
       case TokenKind.IDENT: {
         this._advance();
+
+        // Check for function call: ident(...)
+        if (this._check(TokenKind.LPAREN)) {
+          return this._parseFunctionCall(token.value);
+        }
+
         let expr: Expression = { kind: 'Identifier', name: token.value };
 
         // Chained property access: ident.prop1.prop2
@@ -604,6 +610,18 @@ export class Parser {
         }
 
         return expr;
+      }
+
+      // Aggregate function tokens (COUNT, SUM, AVG, MIN, MAX, COLLECT)
+      case TokenKind.COUNT:
+      case TokenKind.SUM:
+      case TokenKind.AVG:
+      case TokenKind.MIN:
+      case TokenKind.MAX:
+      case TokenKind.COLLECT: {
+        const name = token.kind;
+        this._advance();
+        return this._parseFunctionCall(name);
       }
 
       case TokenKind.LPAREN: {
@@ -635,6 +653,60 @@ export class Parser {
           token.col,
         );
     }
+  }
+
+  /**
+   * Parse a function call: name(args).
+   *
+   * Handles aggregate functions (COUNT, SUM, etc.) as well as generic
+   * identifier-based function calls.
+   *
+   * @param name The function name (will be uppercased).
+   */
+  private _parseFunctionCall(name: string): FunctionCallExpr {
+    this._consume(TokenKind.LPAREN, "Expected '(' after function name");
+
+    let distinct = false;
+
+    // DISTINCT modifier: COUNT(DISTINCT expr), SUM(DISTINCT expr), etc.
+    if (this._check(TokenKind.DISTINCT)) {
+      distinct = true;
+      this._advance();
+    }
+
+    let args: Expression[];
+
+    // Handle COUNT(*) — the * is a special argument
+    if (this._check(TokenKind.STAR)) {
+      this._advance();
+      // Represent COUNT(*) args with a sentinel value
+      args = [{ kind: 'Literal', value: '*' } as unknown as Expression];
+    } else if (!this._check(TokenKind.RPAREN)) {
+      // Parse comma-separated argument expressions
+      args = [];
+      do {
+        args.push(this._parseExpression());
+      } while (this._check(TokenKind.COMMA) && this._advance());
+    } else {
+      // Zero arguments: e.g., COUNT() — semantically invalid, but parsed
+      args = [];
+    }
+
+    this._consume(TokenKind.RPAREN, "Expected ')' after function arguments");
+
+    // Attach distinct metadata for downstream phases (Planner/Semantic).
+    // The FunctionCallExpr type doesn't declare 'distinct' yet, so we
+    // attach it as an extra property for later use.
+    const result: FunctionCallExpr = {
+      kind: 'FunctionCall',
+      name: name.toUpperCase(),
+      args,
+    };
+    if (distinct) {
+      (result as any).distinct = true;
+    }
+
+    return result;
   }
 
   /** Parse `IS [NOT] NULL` postfix. */
