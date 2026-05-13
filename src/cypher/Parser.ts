@@ -704,16 +704,13 @@ export class Parser {
 
     this._consume(TokenKind.RPAREN, "Expected ')' after function arguments");
 
-    // Attach distinct metadata for downstream phases (Planner/Semantic).
-    // The FunctionCallExpr type doesn't declare 'distinct' yet, so we
-    // attach it as an extra property for later use.
     const result: FunctionCallExpr = {
       kind: 'FunctionCall',
       name: name.toUpperCase(),
       args,
     };
     if (distinct) {
-      (result as any).distinct = true;
+      result.distinct = true;
     }
 
     return result;

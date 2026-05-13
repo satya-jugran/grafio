@@ -262,4 +262,6 @@ export interface FunctionCallExpr {
   name: string;
   /** Argument expressions. */
   args: Expression[];
+  /** Whether DISTINCT modifier was applied, e.g. `COUNT(DISTINCT x)`. */
+  distinct?: boolean;
 }

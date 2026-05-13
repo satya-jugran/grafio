@@ -622,7 +622,7 @@ export class Planner {
             extracted.push({
               function: e.name as AggregateSpec['function'],
               expression: aggExpr,
-              distinct: (e as any).distinct === true,
+              distinct: e.distinct === true,
               alias: internalAlias,
             });
             return { kind: 'Identifier', name: internalAlias };
@@ -734,7 +734,7 @@ export class Planner {
           allAggregates.push({
             function: fnCall.name as AggregateSpec['function'],
             expression: aggExpr,
-            distinct: (fnCall as any).distinct === true,
+            distinct: fnCall.distinct === true,
             alias,
           });
           rewrittenProjections.set(item, {
