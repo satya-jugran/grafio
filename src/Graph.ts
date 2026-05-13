@@ -101,6 +101,22 @@ export class Graph {
   }
 
   /**
+   * Returns the count of nodes matching the query options (O(1) without filter).
+   * @param options - Optional GraphQueryOptions for filtering
+   */
+  async getNodeCount(options?: GraphQueryOptions): Promise<number> {
+    return this._index.getNodeCount(options);
+  }
+
+  /**
+   * Returns the count of edges matching the query options (O(1) without filter).
+   * @param options - Optional GraphQueryOptions for filtering
+   */
+  async getEdgeCount(options?: GraphQueryOptions): Promise<number> {
+    return this._index.getEdgeCount(options);
+  }
+
+  /**
    * Checks if a node exists in the graph.
    * @param id - Id of the node
    * @param transaction - Optional transaction for consistent reads within a transaction

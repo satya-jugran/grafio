@@ -70,4 +70,89 @@ describe('Semantic', () => {
         .toThrow(CypherSemanticError);
     });
   });
+
+  // ── Semantic Analysis for Aggregates ────────────────────────────
+  describe('Semantic Analysis for Aggregates', () => {
+    // -- Valid aggregate queries --
+
+    it('allows COUNT(p) in RETURN', () => {
+      expect(() => analyse('MATCH (p:Person) RETURN COUNT(p)'))
+        .not.toThrow();
+    });
+
+    it('allows p.city as grouping key with COUNT(p)', () => {
+      expect(() => analyse('MATCH (p:Person) RETURN p.city, COUNT(p)'))
+        .not.toThrow();
+    });
+
+    it('allows p.name as grouping key with COUNT(p)', () => {
+      expect(() => analyse('MATCH (p:Person) RETURN p.name, COUNT(p)'))
+        .not.toThrow();
+    });
+
+    it('allows query with no aggregates at all', () => {
+      expect(() => analyse('MATCH (p:Person) RETURN p.name, p.age'))
+        .not.toThrow();
+    });
+
+    // -- Invalid: Aggregate in WHERE --
+
+    it('rejects COUNT in WHERE clause', () => {
+      expect(() => analyse('MATCH (p:Person) WHERE COUNT(p) > 5 RETURN p'))
+        .toThrow(CypherSemanticError);
+    });
+
+    it('rejects AVG in WHERE clause', () => {
+      expect(() => analyse('MATCH (p:Person) WHERE AVG(p.age) > 30 RETURN p'))
+        .toThrow(CypherSemanticError);
+    });
+
+    // -- Invalid: Non-grouping-key expression with aggregates --
+
+    it('rejects complex expression as grouping key', () => {
+      expect(() => analyse('MATCH (p:Person) RETURN p.age + 1, COUNT(p)'))
+        .toThrow(CypherSemanticError);
+    });
+  });
+
+  // ── HAVING validation ────────────────────────────────────────────
+  describe('HAVING validation', () => {
+    it('allows HAVING with valid aggregate alias reference', () => {
+      expect(() => analyse('MATCH (p:Person) RETURN p.city, COUNT(*) AS cnt HAVING cnt > 5'))
+        .not.toThrow();
+    });
+
+    it('allows HAVING with aggregate function call', () => {
+      expect(() => analyse('MATCH (p:Person) RETURN COUNT(*) AS cnt HAVING COUNT(*) > 5'))
+        .not.toThrow();
+    });
+
+    it('rejects HAVING with undefined variable', () => {
+      expect(() => analyse('MATCH (p:Person) RETURN COUNT(*) AS cnt HAVING x > 5'))
+        .toThrow(CypherSemanticError);
+    });
+
+    it('allows HAVING with MATCH-scope variable (no aggregates)', () => {
+      expect(() => analyse("MATCH (p:Person) RETURN p.name HAVING p.name = 'Alice'"))
+        .not.toThrow();
+    });
+  });
+
+  // ── ORDER BY with aggregate aliases ──────────────────────────────
+  describe('ORDER BY with aggregate aliases', () => {
+    it('allows ORDER BY with aggregate alias when aggregates present', () => {
+      expect(() => analyse('MATCH (p:Person) RETURN p.city, COUNT(*) AS cnt ORDER BY cnt DESC'))
+        .not.toThrow();
+    });
+
+    it('allows ORDER BY with group-by key alias when aggregates present', () => {
+      expect(() => analyse('MATCH (p:Person) RETURN p.city, COUNT(*) AS cnt ORDER BY p_city DESC'))
+        .not.toThrow();
+    });
+
+    it('rejects ORDER BY with undefined variable when aggregates present', () => {
+      expect(() => analyse('MATCH (p:Person) RETURN p.city, COUNT(*) AS cnt ORDER BY foo'))
+        .toThrow(CypherSemanticError);
+    });
+  });
 });

@@ -80,6 +80,26 @@ export class GraphIndex {
     return data.map(d => new Edge(d.sourceId, d.targetId, d.type, d.properties, d.id));
   }
 
+  /** Returns the count of nodes matching the query options (O(1) without filter). */
+  async getNodeCount(options?: GraphQueryOptions): Promise<number> {
+    const handle = options?.transaction?._getHandle();
+    const storageOptions: StorageQueryOptions | undefined = options ? {
+      filter: options.filter,
+      transaction: handle,
+    } : undefined;
+    return this._store.getNodeCount(storageOptions);
+  }
+
+  /** Returns the count of edges matching the query options (O(1) without filter). */
+  async getEdgeCount(options?: GraphQueryOptions): Promise<number> {
+    const handle = options?.transaction?._getHandle();
+    const storageOptions: StorageQueryOptions | undefined = options ? {
+      filter: options.filter,
+      transaction: handle,
+    } : undefined;
+    return this._store.getEdgeCount(storageOptions);
+  }
+
   /** Checks if a node exists in the graph. */
   async hasNode(id: string, transaction?: GraphTransaction): Promise<boolean> {
     const handle = transaction?._getHandle();

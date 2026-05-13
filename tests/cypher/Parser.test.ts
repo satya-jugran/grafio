@@ -337,4 +337,163 @@ describe('Parser', () => {
       expect((expr as any).op).toBe('OR');
     });
   });
+
+  // ── Function Calls / Aggregates ─────────────────────────────────
+  describe('Function Calls / Aggregates', () => {
+    it('parses COUNT(n) as FunctionCallExpr', () => {
+      const ast = parse('MATCH (n) RETURN COUNT(n)');
+      const expr = ast.return.items[0].expression;
+      expect(expr.kind).toBe('FunctionCall');
+      expect((expr as any).name).toBe('COUNT');
+      expect((expr as any).args).toHaveLength(1);
+      expect((expr as any).args[0].kind).toBe('Identifier');
+      expect((expr as any).args[0].name).toBe('n');
+    });
+
+    it('parses COUNT(*) as FunctionCallExpr with star literal', () => {
+      const ast = parse('MATCH (n) RETURN COUNT(*)');
+      const expr = ast.return.items[0].expression;
+      expect(expr.kind).toBe('FunctionCall');
+      expect((expr as any).name).toBe('COUNT');
+      expect((expr as any).args).toHaveLength(1);
+      expect((expr as any).args[0].kind).toBe('Literal');
+      expect((expr as any).args[0].value).toBe('*');
+    });
+
+    it('parses SUM(n.age) as FunctionCallExpr with PropertyAccess arg', () => {
+      const ast = parse('MATCH (n) RETURN SUM(n.age)');
+      const expr = ast.return.items[0].expression;
+      expect(expr.kind).toBe('FunctionCall');
+      expect((expr as any).name).toBe('SUM');
+      expect((expr as any).args).toHaveLength(1);
+      expect((expr as any).args[0].kind).toBe('PropertyAccess');
+    });
+
+    it('parses AVG(n.age) as FunctionCallExpr', () => {
+      const ast = parse('MATCH (n) RETURN AVG(n.age)');
+      const expr = ast.return.items[0].expression;
+      expect(expr.kind).toBe('FunctionCall');
+      expect((expr as any).name).toBe('AVG');
+    });
+
+    it('parses MIN(n.age) as FunctionCallExpr', () => {
+      const ast = parse('MATCH (n) RETURN MIN(n.age)');
+      const expr = ast.return.items[0].expression;
+      expect(expr.kind).toBe('FunctionCall');
+      expect((expr as any).name).toBe('MIN');
+    });
+
+    it('parses MAX(n.age) as FunctionCallExpr', () => {
+      const ast = parse('MATCH (n) RETURN MAX(n.age)');
+      const expr = ast.return.items[0].expression;
+      expect(expr.kind).toBe('FunctionCall');
+      expect((expr as any).name).toBe('MAX');
+    });
+
+    it('parses COLLECT(n.name) as FunctionCallExpr', () => {
+      const ast = parse('MATCH (n) RETURN COLLECT(n.name)');
+      const expr = ast.return.items[0].expression;
+      expect(expr.kind).toBe('FunctionCall');
+      expect((expr as any).name).toBe('COLLECT');
+    });
+
+    it('parses COUNT(DISTINCT n.city) with distinct flag', () => {
+      const ast = parse('MATCH (n) RETURN COUNT(DISTINCT n.city)');
+      const expr = ast.return.items[0].expression;
+      expect(expr.kind).toBe('FunctionCall');
+      expect((expr as any).name).toBe('COUNT');
+      expect((expr as any).distinct).toBe(true);
+      expect((expr as any).args).toHaveLength(1);
+      expect((expr as any).args[0].kind).toBe('PropertyAccess');
+    });
+
+    it('parses SUM(DISTINCT n.salary) with distinct flag', () => {
+      const ast = parse('MATCH (n) RETURN SUM(DISTINCT n.salary)');
+      const expr = ast.return.items[0].expression;
+      expect(expr.kind).toBe('FunctionCall');
+      expect((expr as any).name).toBe('SUM');
+      expect((expr as any).distinct).toBe(true);
+    });
+
+    it('parses COUNT(p.age) within a full RETURN clause', () => {
+      const ast = parse('MATCH (p:Person) RETURN COUNT(p.age)');
+      expect(ast.return.items).toHaveLength(1);
+      const expr = ast.return.items[0].expression;
+      expect(expr.kind).toBe('FunctionCall');
+      expect((expr as any).name).toBe('COUNT');
+      expect((expr as any).args[0].kind).toBe('PropertyAccess');
+      expect((expr as any).args[0].object.name).toBe('p');
+      expect((expr as any).args[0].property).toBe('age');
+    });
+
+    it('parses function call with no args', () => {
+      const ast = parse('MATCH (n) RETURN myFunc()');
+      const expr = ast.return.items[0].expression;
+      expect(expr.kind).toBe('FunctionCall');
+      expect((expr as any).name).toBe('MYFUNC');
+      expect((expr as any).args).toHaveLength(0);
+    });
+
+    it('parses function call with multiple args', () => {
+      const ast = parse('MATCH (n) RETURN coalesce(n.name, n.id)');
+      const expr = ast.return.items[0].expression;
+      expect(expr.kind).toBe('FunctionCall');
+      expect((expr as any).name).toBe('COALESCE');
+      expect((expr as any).args).toHaveLength(2);
+      expect((expr as any).args[0].kind).toBe('PropertyAccess');
+      expect((expr as any).args[1].kind).toBe('PropertyAccess');
+    });
+
+    it('parses nested function calls', () => {
+      const ast = parse('MATCH (n) RETURN COUNT(COLLECT(n))');
+      const outer = ast.return.items[0].expression;
+      expect(outer.kind).toBe('FunctionCall');
+      expect((outer as any).name).toBe('COUNT');
+      expect((outer as any).args).toHaveLength(1);
+
+      const inner = (outer as any).args[0];
+      expect(inner.kind).toBe('FunctionCall');
+      expect(inner.name).toBe('COLLECT');
+      expect(inner.args).toHaveLength(1);
+      expect(inner.args[0].kind).toBe('Identifier');
+      expect(inner.args[0].name).toBe('n');
+    });
+  });
+
+  // ── HAVING clause ───────────────────────────────────────────────
+  describe('HAVING clause', () => {
+    it('parses HAVING with alias reference', () => {
+      const ast = parse('MATCH (p:Person) RETURN p.city, COUNT(*) AS cnt HAVING cnt > 5');
+      expect(ast.having).toBeDefined();
+      expect(ast.having!.kind).toBe('Having');
+      expect(ast.having!.expression.kind).toBe('Binary');
+      const bin = ast.having!.expression as any;
+      expect(bin.op).toBe('>');
+      expect(bin.left.kind).toBe('Identifier');
+      expect(bin.left.name).toBe('cnt');
+      expect(bin.right.kind).toBe('Literal');
+      expect(bin.right.value).toBe(5);
+    });
+
+    it('parses HAVING with aggregate function', () => {
+      const ast = parse('MATCH (p:Person) RETURN COUNT(*) AS cnt HAVING COUNT(*) > 5');
+      expect(ast.having).toBeDefined();
+      expect(ast.having!.kind).toBe('Having');
+      expect(ast.having!.expression.kind).toBe('Binary');
+      const bin = ast.having!.expression as any;
+      expect(bin.left.kind).toBe('FunctionCall');
+    });
+
+    it('parses HAVING without aggregates (valid per spec)', () => {
+      const ast = parse("MATCH (p:Person) RETURN p.name HAVING p.name = 'Alice'");
+      expect(ast.having).toBeDefined();
+      expect(ast.having!.expression.kind).toBe('Binary');
+    });
+
+    it('parses HAVING before ORDER BY', () => {
+      const ast = parse('MATCH (p:Person) RETURN p.city, COUNT(*) AS cnt HAVING cnt > 5 ORDER BY cnt');
+      expect(ast.having).toBeDefined();
+      expect(ast.orderBy).toBeDefined();
+    });
+  });
 });

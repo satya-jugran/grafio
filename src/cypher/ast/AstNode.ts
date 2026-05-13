@@ -36,6 +36,8 @@ export interface QueryAst {
   where?: WhereClause;
   /** The RETURN clause (required). */
   return: ReturnClause;
+  /** Optional HAVING clause (post-aggregation filter). */
+  having?: HavingClause;
   /** Optional ORDER BY clause. */
   orderBy?: OrderByClause;
   /** Optional SKIP expression. */
@@ -55,6 +57,12 @@ export interface MatchClause {
 export interface WhereClause {
   kind: 'Where';
   /** The boolean expression that filters rows. */
+  expression: Expression;
+}
+
+export interface HavingClause {
+  kind: 'Having';
+  /** The boolean expression to evaluate against post-aggregation rows. */
   expression: Expression;
 }
 
@@ -254,4 +262,6 @@ export interface FunctionCallExpr {
   name: string;
   /** Argument expressions. */
   args: Expression[];
+  /** Whether DISTINCT modifier was applied, e.g. `COUNT(DISTINCT x)`. */
+  distinct?: boolean;
 }

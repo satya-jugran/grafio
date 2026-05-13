@@ -230,6 +230,235 @@ describe('CypherEngine Integration', () => {
     });
   });
 
+  // ── Aggregate Queries ───────────────────────────────────────────
+  describe('Aggregate Queries', () => {
+    let graph: Graph;
+    let engine: CypherEngine;
+
+    beforeAll(async () => {
+      graph = new Graph();
+      // Reuse social graph data (8 Person nodes with ages 28,25,32,29,27,35,26,31)
+      await buildSocialGraph(graph);
+      engine = new CypherEngine(graph);
+    });
+
+    it('COUNT(n) returns total Person node count', async () => {
+      const result = await engine.execute('MATCH (n:Person) RETURN COUNT(n)');
+      expect(result.rows).toHaveLength(1);
+      expect(result.rows[0].count).toBe(8);
+      expect(result.columns).toEqual(['count']);
+    });
+
+    it('AVG(n.age) returns correct average', async () => {
+      // Ages: 28,25,32,29,27,35,26,31 → sum=233, count=8, avg=29.125
+      const result = await engine.execute(
+        'MATCH (n:Person) RETURN AVG(n.age) AS avg_val',
+      );
+      expect(result.rows).toHaveLength(1);
+      expect(result.rows[0].avg_val).toBe(29.125);
+    });
+
+    it('group-by n.occupation with COUNT(n) produces per-group counts', async () => {
+      // Occupations: Engineer(2), Designer(2), Manager(1), Developer(1),
+      //              Data Scientist(1), Director(1)
+      const result = await engine.execute(
+        'MATCH (n:Person) RETURN n.occupation, COUNT(n)',
+      );
+      // Should have 6 groups (6 distinct occupations)
+      expect(result.rows.length).toBe(6);
+      const byOccupation = new Map(
+        result.rows.map((r) => [r.n_occupation, r.count]),
+      );
+      expect(byOccupation.get('Engineer')).toBe(2);
+      expect(byOccupation.get('Designer')).toBe(2);
+      expect(byOccupation.get('Manager')).toBe(1);
+      expect(byOccupation.get('Developer')).toBe(1);
+    });
+
+    it('correctly returns DISTINCT aggregate results', async () => {
+      // Ages: 28,25,32,29,27,35,26,31 → distinct values all unique → 8
+      const result = await engine.execute(
+        'MATCH (n:Person) RETURN COUNT(DISTINCT n.age) AS distinct_ages',
+      );
+      expect(result.rows).toHaveLength(1);
+      expect(result.rows[0].distinct_ages).toBe(8);
+    });
+  });
+
+  // ── Relationship-Traversal Aggregation ─────────────────────────────
+  describe('Relationship-Traversal Aggregation', () => {
+    let graph: Graph;
+    let engine: CypherEngine;
+
+    beforeAll(async () => {
+      graph = new Graph();
+      // Minimal graph: 3 Person nodes connected by KNOWS edges
+      const alice = await graph.addNode('Person', { name: 'Alice', age: 30 });
+      const bob = await graph.addNode('Person', { name: 'Bob', age: 25 });
+      const charlie = await graph.addNode('Person', { name: 'Charlie', age: 35 });
+
+      // Directed KNOWS edges: Alice→Bob, Alice→Charlie, Bob→Charlie
+      await graph.addEdge(alice.id, bob.id, 'KNOWS', {});
+      await graph.addEdge(alice.id, charlie.id, 'KNOWS', {});
+      await graph.addEdge(bob.id, charlie.id, 'KNOWS', {});
+
+      engine = new CypherEngine(graph);
+    });
+
+    /**
+     * Counts all target nodes across every KNOWS relationship.
+     * Traversals: Alice→Bob, Alice→Charlie, Bob→Charlie = 3.
+     */
+    it('COUNT(f) across all KNOWS relationships', async () => {
+      const result = await engine.execute(
+        'MATCH (p:Person)-[:KNOWS]->(f:Person) RETURN COUNT(f)',
+      );
+      expect(result.rows).toHaveLength(1);
+      expect(result.rows[0].count).toBe(3);
+    });
+
+    /**
+     * Counts friends of a specific source node (Alice).
+     * Alice→Bob, Alice→Charlie = 2.
+     */
+    it('COUNT(f) for a specific source node via WHERE', async () => {
+      const result = await engine.execute(
+        "MATCH (p:Person)-[:KNOWS]->(f:Person) WHERE p.name = 'Alice' RETURN COUNT(f)",
+      );
+      expect(result.rows).toHaveLength(1);
+      expect(result.rows[0].count).toBe(2);
+    });
+
+    /**
+     * Average age of all friend nodes reached via KNOWS.
+     * Target ages: Bob(25), Charlie(35), Charlie(35) → avg = 95/3 ≈ 31.67.
+     */
+    it('AVG(f.age) across traversed target nodes', async () => {
+      const result = await engine.execute(
+        'MATCH (p:Person)-[:KNOWS]->(f:Person) RETURN AVG(f.age) AS avg_friend_age',
+      );
+      expect(result.rows).toHaveLength(1);
+      expect(result.rows[0].avg_friend_age).toBeCloseTo(95 / 3, 5);
+    });
+
+    /**
+     * Group-by source name with COUNT of outgoing friends.
+     * Alice: 2 (Bob, Charlie), Bob: 1 (Charlie).
+     * Charlie has no outgoing KNOWS so does not appear.
+     */
+    it('group-by p.name with COUNT(f) produces per-person friend counts', async () => {
+      const result = await engine.execute(
+        'MATCH (p:Person)-[:KNOWS]->(f:Person) RETURN p.name, COUNT(f) AS friend_count',
+      );
+      // Only persons with outgoing KNOWS appear: Alice and Bob
+      expect(result.rows).toHaveLength(2);
+      const byName = new Map(
+        result.rows.map((r) => [r.p_name, r.friend_count]),
+      );
+      expect(byName.get('Alice')).toBe(2);
+      expect(byName.get('Bob')).toBe(1);
+    });
+
+    /**
+     * MIN and MAX of f.age across all KNOWS traversals.
+     * Target ages: 25, 35, 35 → MIN=25, MAX=35.
+     */
+    it('MIN(f.age) and MAX(f.age) across traversed targets', async () => {
+      const result = await engine.execute(
+        'MATCH (p:Person)-[:KNOWS]->(f:Person) RETURN MIN(f.age), MAX(f.age)',
+      );
+      expect(result.rows).toHaveLength(1);
+      expect(result.rows[0].min).toBe(25);
+      expect(result.rows[0].max).toBe(35);
+    });
+  });
+
+  // ── HAVING, ORDER BY, Aggregate Expressions, DISTINCT ────────────
+  describe('HAVING, ORDER BY, Aggregate Expressions, DISTINCT', () => {
+    let graph: Graph;
+    let engine: CypherEngine;
+
+    beforeAll(async () => {
+      graph = new Graph();
+      await buildSocialGraph(graph);
+      engine = new CypherEngine(graph);
+    });
+
+    it('filters groups with HAVING cnt > 1', async () => {
+      const result = await engine.execute(
+        'MATCH (p:Person) RETURN p.occupation, COUNT(*) AS cnt HAVING cnt > 1',
+      );
+      // Occupations with more than 1 person: Engineer (Alice, Henry), Designer (Bob, Grace)
+      const occupations = result.rows.map((r) => r.p_occupation);
+      expect(occupations).toContain('Engineer');
+      expect(occupations).toContain('Designer');
+      // Each returned row should have cnt > 1
+      for (const row of result.rows) {
+        expect(row.cnt).toBeGreaterThan(1);
+      }
+    });
+
+    it('orders by aggregate alias DESC', async () => {
+      const result = await engine.execute(
+        'MATCH (p:Person) RETURN p.city, COUNT(*) AS cnt ORDER BY cnt DESC',
+      );
+      expect(result.rows.length).toBeGreaterThan(0);
+      // Verify descending order
+      for (let i = 1; i < result.rows.length; i++) {
+        expect(result.rows[i - 1].cnt as number).toBeGreaterThanOrEqual(result.rows[i].cnt as number);
+      }
+    });
+
+    it('computes COUNT(*) + 1 AS result', async () => {
+      const result = await engine.execute(
+        'MATCH (p:Person) RETURN COUNT(*) + 1 AS result',
+      );
+      expect(result.rows).toHaveLength(1);
+      expect(result.rows[0].result).toBe(9); // 8 persons + 1
+    });
+
+    it('returns DISTINCT cities', async () => {
+      const result = await engine.execute(
+        'MATCH (p:Person) RETURN DISTINCT p.city AS city ORDER BY p.city ASC',
+      );
+      const cities = result.rows.map((r) => r.city);
+      // All 8 persons have distinct cities
+      expect(cities).toEqual([
+        'Austin', 'Boston', 'Chicago', 'Denver',
+        'LA', 'NYC', 'Portland', 'Seattle',
+      ]);
+    });
+
+    it('combines HAVING, ORDER BY, and multiple aggregates', async () => {
+      const result = await engine.execute(
+        'MATCH (p:Person) RETURN p.occupation, COUNT(*) AS cnt, AVG(p.age) AS avg_age HAVING cnt > 1 ORDER BY avg_age DESC',
+      );
+      // Occupations with more than 1 person: Engineer(2), Designer(2)
+      expect(result.rows.length).toBeGreaterThanOrEqual(1);
+      // Verify descending order by avg_age
+      for (let i = 1; i < result.rows.length; i++) {
+        expect(result.rows[i - 1].avg_age as number).toBeGreaterThanOrEqual(result.rows[i].avg_age as number);
+      }
+      // Verify all rows have cnt > 1
+      for (const row of result.rows) {
+        expect(row.cnt).toBeGreaterThan(1);
+      }
+    });
+
+    it('filters groups with raw aggregate HAVING COUNT(*) > 1', async () => {
+      const result = await engine.execute(
+        'MATCH (p:Person) RETURN p.occupation, COUNT(*) AS cnt HAVING COUNT(*) > 1',
+      );
+      // Occupations with more than 1 person: Engineer (Alice, Henry), Designer (Bob, Grace)
+      const occupations = result.rows.map((r) => r.p_occupation);
+      expect(occupations).toContain('Engineer');
+      expect(occupations).toContain('Designer');
+      for (const row of result.rows) {
+        expect(row.cnt).toBeGreaterThan(1);
+      }
+    });
+  });
+
   describe('Validation Gate', () => {
     it('rejects CREATE clause', async () => {
       const graph = new Graph();
@@ -243,13 +472,6 @@ describe('CypherEngine Integration', () => {
       const engine = new CypherEngine(new Graph());
       await expect(
         engine.execute('MATCH (n) DELETE n'),
-      ).rejects.toThrow(CypherNotSupportedError);
-    });
-
-    it('rejects COUNT aggregation', async () => {
-      const engine = new CypherEngine(new Graph());
-      await expect(
-        engine.execute('MATCH (n) RETURN COUNT(n)'),
       ).rejects.toThrow(CypherNotSupportedError);
     });
   });

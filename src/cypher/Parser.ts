@@ -44,6 +44,7 @@ import {
   QueryAst,
   MatchClause,
   WhereClause,
+  HavingClause,
   ReturnClause,
   ReturnItem,
   OrderByClause,
@@ -133,6 +134,7 @@ export class Parser {
     const match = this._parseMatchClause();
     const where = this._check(TokenKind.WHERE) ? this._parseWhereClause() : undefined;
     const ret = this._parseReturnClause();
+    const having = this._check(TokenKind.HAVING) ? this._parseHavingClause() : undefined;
     const orderBy = this._check(TokenKind.ORDER) ? this._parseOrderByClause() : undefined;
     const skip = this._check(TokenKind.SKIP) ? this._parseSkipClause() : undefined;
     const limit = this._check(TokenKind.LIMIT) ? this._parseLimitClause() : undefined;
@@ -152,6 +154,7 @@ export class Parser {
       match,
       where,
       return: ret,
+      having,
       orderBy,
       skip,
       limit,
@@ -178,6 +181,13 @@ export class Parser {
     this._consume(TokenKind.WHERE, "Expected 'WHERE'");
     const expression = this._parseExpression();
     return { kind: 'Where', expression };
+  }
+
+  /** HAVING expression */
+  private _parseHavingClause(): HavingClause {
+    this._consume(TokenKind.HAVING, "Expected 'HAVING'");
+    const expression = this._parseExpression();
+    return { kind: 'Having', expression };
   }
 
   /** RETURN [DISTINCT] returnItem (',' returnItem)* */
@@ -563,7 +573,7 @@ export class Parser {
     return this._parsePrimary();
   }
 
-  /** Parse a primary expression (literal, identifier, parameter, parenthesised). */
+  /** Parse a primary expression (literal, identifier, parameter, parenthesised, function call). */
   private _parsePrimary(): Expression {
     const token = this._peek();
 
@@ -594,6 +604,12 @@ export class Parser {
 
       case TokenKind.IDENT: {
         this._advance();
+
+        // Check for function call: ident(...)
+        if (this._check(TokenKind.LPAREN)) {
+          return this._parseFunctionCall(token.value);
+        }
+
         let expr: Expression = { kind: 'Identifier', name: token.value };
 
         // Chained property access: ident.prop1.prop2
@@ -604,6 +620,18 @@ export class Parser {
         }
 
         return expr;
+      }
+
+      // Aggregate function tokens (COUNT, SUM, AVG, MIN, MAX, COLLECT)
+      case TokenKind.COUNT:
+      case TokenKind.SUM:
+      case TokenKind.AVG:
+      case TokenKind.MIN:
+      case TokenKind.MAX:
+      case TokenKind.COLLECT: {
+        const name = token.kind;
+        this._advance();
+        return this._parseFunctionCall(name);
       }
 
       case TokenKind.LPAREN: {
@@ -635,6 +663,57 @@ export class Parser {
           token.col,
         );
     }
+  }
+
+  /**
+   * Parse a function call: name(args).
+   *
+   * Handles aggregate functions (COUNT, SUM, etc.) as well as generic
+   * identifier-based function calls.
+   *
+   * @param name The function name (will be uppercased).
+   */
+  private _parseFunctionCall(name: string): FunctionCallExpr {
+    this._consume(TokenKind.LPAREN, "Expected '(' after function name");
+
+    let distinct = false;
+
+    // DISTINCT modifier: COUNT(DISTINCT expr), SUM(DISTINCT expr), etc.
+    if (this._check(TokenKind.DISTINCT)) {
+      distinct = true;
+      this._advance();
+    }
+
+    let args: Expression[];
+
+    // Handle COUNT(*) — the * is a special argument
+    if (this._check(TokenKind.STAR)) {
+      this._advance();
+      // Represent COUNT(*) args with a sentinel value
+      args = [{ kind: 'Literal', value: '*' } as unknown as Expression];
+    } else if (!this._check(TokenKind.RPAREN)) {
+      // Parse comma-separated argument expressions
+      args = [];
+      do {
+        args.push(this._parseExpression());
+      } while (this._check(TokenKind.COMMA) && this._advance());
+    } else {
+      // Zero arguments: e.g., COUNT() — semantically invalid, but parsed
+      args = [];
+    }
+
+    this._consume(TokenKind.RPAREN, "Expected ')' after function arguments");
+
+    const result: FunctionCallExpr = {
+      kind: 'FunctionCall',
+      name: name.toUpperCase(),
+      args,
+    };
+    if (distinct) {
+      result.distinct = true;
+    }
+
+    return result;
   }
 
   /** Parse `IS [NOT] NULL` postfix. */
