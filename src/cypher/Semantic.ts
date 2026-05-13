@@ -31,8 +31,11 @@ import {
   OrderByItem,
   SkipClause,
   LimitClause,
+  MatchPattern,
   PatternPath,
+  NamedPath,
   PatternSegment,
+  getPatternSegments,
   NodePattern,
   EdgePattern,
   Expression,
@@ -57,7 +60,7 @@ export interface ScopeEntry {
   /** Which pattern path (0-based index in the MATCH clause). */
   patternIndex: number;
   /** The kind of pattern element that introduced this binding. */
-  bindingKind: 'node' | 'edge';
+  bindingKind: 'node' | 'edge' | 'path';
 }
 
 /**
@@ -142,18 +145,23 @@ export class Semantic {
     this._scope = new Map();
 
     for (let i = 0; i < ast.match.patterns.length; i++) {
-      const path = ast.match.patterns[i];
-      this._collectPatternScope(path, i);
+      const pattern = ast.match.patterns[i];
+      this._collectPatternScope(pattern, i);
     }
 
     return ast;
   }
 
   /**
-   * Extract variable bindings from a single pattern path.
+   * Extract variable bindings from a single pattern path (or named path).
    */
-  private _collectPatternScope(path: PatternPath, patternIndex: number): void {
-    for (const segment of path.segments) {
+  private _collectPatternScope(pattern: MatchPattern, patternIndex: number): void {
+    // If this is a named path, also bind the path variable itself
+    if (pattern.kind === 'NamedPath') {
+      this._addBinding(pattern.name, patternIndex, 'path');
+    }
+    const segments = getPatternSegments(pattern);
+    for (const segment of segments) {
       if (segment.kind === 'NodePattern') {
         if (segment.variable) {
           this._addBinding(segment.variable, patternIndex, 'node');
@@ -173,7 +181,7 @@ export class Semantic {
   private _addBinding(
     name: string,
     patternIndex: number,
-    bindingKind: 'node' | 'edge',
+    bindingKind: 'node' | 'edge' | 'path',
   ): void {
     if (!this._scope.has(name)) {
       this._scope.set(name, { name, patternIndex, bindingKind });
@@ -391,9 +399,10 @@ export class Semantic {
     const seen = new Map<string, { patternIndex: number; bindingKind: string }>();
 
     for (let i = 0; i < ast.match.patterns.length; i++) {
-      const path = ast.match.patterns[i];
+      const pattern = ast.match.patterns[i];
+      const segments = getPatternSegments(pattern);
 
-      for (const segment of path.segments) {
+      for (const segment of segments) {
         let varName: string | undefined;
         let bindingKind: string = 'pattern element';
 

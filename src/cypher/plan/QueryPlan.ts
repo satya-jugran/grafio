@@ -84,6 +84,12 @@ export interface EdgeExpandStep {
   strategy: 'single-hop' | 'multi-hop-bfs' | 'multi-hop-dfs';
   /** Reserved for future DFS optimisation: optional cap on result rows. */
   maxResults?: number;
+  /**
+   * Named path variable — set when this expansion is part of a named path
+   * (`MATCH p = (a)-[:REL]->(b)`). The executor binds this variable to the
+   * reconstructed path value (array of alternating nodes and edges).
+   */
+  pathVar?: string;
 }
 
 /**
@@ -203,4 +209,9 @@ export interface AggregateStep {
    * Set by the Planner from the NodeScanStep that binds sourceVariable.
    */
   sourceType?: string;
+  /**
+   * When true, the Planner cleared all prior steps and the Executor
+   * should attempt the O(1) storage-level aggregation path.
+   */
+  useStorageLevel?: boolean;
 }

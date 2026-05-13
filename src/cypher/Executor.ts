@@ -175,6 +175,24 @@ export class Executor {
       const newRow = new Map(row);
       if (step.edgeVar) newRow.set(step.edgeVar, edge);
       newRow.set(step.target, targetNode);
+
+      // Bind named path variable.
+      // For the first EdgeExpandStep in a named path this creates
+      // [sourceNode, edge, targetNode].  For subsequent steps on the
+      // same named path (e.g. MATCH p = (a)-[:R]->(b)-[:S]->(c)) the
+      // row already carries a prefix from the prior step; we append
+      // [edge, targetNode] to extend it rather than overwriting.
+      if (step.pathVar) {
+        const existingPath = newRow.get(step.pathVar) as
+          | (Node | Edge)[]
+          | undefined;
+        if (existingPath && existingPath.length > 0) {
+          newRow.set(step.pathVar, [...existingPath, edge, targetNode]);
+        } else {
+          newRow.set(step.pathVar, [sourceNode, edge, targetNode]);
+        }
+      }
+
       result.push(newRow);
     }
     return result;
@@ -191,14 +209,28 @@ export class Executor {
     // path should still be explored downstream.
     const visited = new Map<string, number>([[sourceNode.id, 0]]);
 
-    const frontier: Array<{ node: Node; row: Row; hops: number }> = [
-      { node: sourceNode, row, hops: 0 },
+    const frontier: Array<{
+      node: Node;
+      row: Row;
+      hops: number;
+      /** Node objects in traversal order (for pathVar). */
+      pathNodes?: Node[];
+      /** Edge objects in traversal order (for pathVar). */
+      pathEdges?: Edge[];
+    }> = [
+      {
+        node: sourceNode,
+        row,
+        hops: 0,
+        pathNodes: step.pathVar ? [sourceNode] : undefined,
+        pathEdges: step.pathVar ? [] : undefined,
+      },
     ];
 
     const isBFS = step.strategy !== 'multi-hop-dfs';
 
     while (frontier.length > 0) {
-      const { node, row: curRow, hops } = isBFS
+      const { node, row: curRow, hops, pathNodes, pathEdges } = isBFS
         ? frontier.shift()!   // BFS: dequeue from front (FIFO)
         : frontier.pop()!;    // DFS: pop from back (LIFO)
 
@@ -219,11 +251,31 @@ export class Executor {
         if (!targetNode) continue;
 
         const newHops = hops + 1;
+        // Only track path state when a named path variable is requested
+        // (step.pathVar).  Otherwise the spreads and frontier storage are
+        // pure overhead.
+        const newPathNodes = step.pathVar
+          ? [...(pathNodes ?? []), targetNode]
+          : undefined;
+        const newPathEdges = step.pathVar
+          ? [...(pathEdges ?? []), edge]
+          : undefined;
 
         if (newHops >= step.minHops && newHops <= step.maxHops) {
           const newRow = new Map(curRow);
           if (step.edgeVar) newRow.set(step.edgeVar, edge);
           newRow.set(step.target, targetNode);
+
+          // Bind named path variable: interleave nodes and edges
+          // [node0, edge0, node1, edge1, ..., nodeN]
+          if (step.pathVar && newPathNodes && newPathEdges) {
+            const pathValue: (Node | Edge)[] = [newPathNodes[0]];
+            for (let i = 0; i < newPathEdges.length; i++) {
+              pathValue.push(newPathEdges[i], newPathNodes[i + 1]);
+            }
+            newRow.set(step.pathVar, pathValue);
+          }
+
           result.push(newRow);
         }
 
@@ -233,7 +285,13 @@ export class Executor {
         if (newHops < step.maxHops && (prevHops === undefined || newHops <= prevHops)) {
           visited.set(targetId, newHops);
           const nextRow = new Map(curRow);
-          frontier.push({ node: targetNode, row: nextRow, hops: newHops });
+          frontier.push({
+            node: targetNode,
+            row: nextRow,
+            hops: newHops,
+            pathNodes: newPathNodes,
+            pathEdges: newPathEdges,
+          });
         }
       }
     }
@@ -349,8 +407,9 @@ export class Executor {
     rows: Row[],
     params: Record<string, unknown>,
   ): Promise<Row[]> {
-    // Path A: Storage-level optimisation for simple plans.
-    if (this._canUseStorageLevel(step)) {
+    // Path A: Storage-level optimisation — only attempted when the
+    // Planner cleared prior steps and set useStorageLevel.
+    if (step.useStorageLevel && this._canUseStorageLevel(step)) {
       return this._executeAggregateStorageLevel(step);
     }
 
@@ -369,7 +428,11 @@ export class Executor {
    *    a property access on `sourceVariable`, or the COUNT(*) literal.
    */
   private _canUseStorageLevel(step: AggregateStep): boolean {
-    if (!step.sourceVariable || !step.sourceType) return false;
+    if (!step.sourceVariable) return false;
+    // Storage-level aggregation only supports scalar (non-grouped)
+    // aggregates.  GROUP BY queries must use the in-process path so
+    // the group key aliases are populated from the row data.
+    if (step.groupBy.length > 0) return false;
 
     for (const spec of step.aggregates) {
       if (!this._isSimpleAggregateExpr(spec.expression, step.sourceVariable)) {
@@ -440,7 +503,10 @@ export class Executor {
   private async _executeAggregateStorageLevel(
     step: AggregateStep,
   ): Promise<Row[]> {
-    const sourceType = step.sourceType!;
+    const sourceType = step.sourceType;
+    // When sourceType is undefined (unlabeled MATCH) the storage APIs
+    // accept undefined / empty filter to mean "all types".
+    const typeFilter = sourceType ? { types: [sourceType] } : undefined;
     const resultRow = new Map<string, unknown>();
 
     // Partition aggregates by their storage call.
@@ -476,9 +542,9 @@ export class Executor {
 
     // ── Entity-level COUNT ─────────────────────────────────────────
     if (countAggs.length > 0) {
-      const nodeCount = await this._graph.getNodeCount({
-        filter: { types: [sourceType] },
-      });
+      const nodeCount = await this._graph.getNodeCount(
+        typeFilter ? { filter: typeFilter } : undefined,
+      );
       for (const spec of countAggs) {
         resultRow.set(spec.alias, nodeCount);
       }
@@ -490,7 +556,7 @@ export class Executor {
       const distinct = distinctStr === 'true';
 
       const aggResult = await this._graph.aggregateNodeProperty(propKey, {
-        filter: { types: [sourceType] },
+        filter: typeFilter as { types: string[] },
         distinct,
       });
 
@@ -501,9 +567,9 @@ export class Executor {
 
     // ── COLLECT aggregates ─────────────────────────────────────────
     if (collectAggs.length > 0) {
-      const nodes = await this._graph.getNodes({
-        filter: { types: [sourceType] },
-      });
+      const nodes = await this._graph.getNodes(
+        typeFilter ? { filter: typeFilter } : undefined,
+      );
 
       for (const spec of collectAggs) {
         const propKey = this._extractPropertyKey(

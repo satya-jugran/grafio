@@ -51,7 +51,9 @@ import {
   OrderByItem,
   SkipClause,
   LimitClause,
+  MatchPattern,
   PatternPath,
+  NamedPath,
   PatternSegment,
   NodePattern,
   EdgePattern,
@@ -166,7 +168,7 @@ export class Parser {
   /** MATCH patternPath (',' patternPath)* */
   private _parseMatchClause(): MatchClause {
     this._consume(TokenKind.MATCH, "Expected 'MATCH'");
-    const patterns: PatternPath[] = [this._parsePatternPath()];
+    const patterns: MatchPattern[] = [this._parsePatternPath()];
 
     while (this._check(TokenKind.COMMA)) {
       this._advance();
@@ -268,11 +270,31 @@ export class Parser {
   // ── Pattern parsers ─────────────────────────────────────────────
 
   /**
+   * Parses either a named path (`path = (pattern)`) or a plain pattern path.
+   *
+   * namedPath → IDENT EQ patternPath
    * patternPath → nodePattern (edgePattern nodePattern)*
    *
    * A path always starts and ends with a node. Edges alternate between nodes.
    */
-  private _parsePatternPath(): PatternPath {
+  private _parsePatternPath(): PatternPath | NamedPath {
+    // Check for named path: IDENT = (pattern)
+    if (this._check(TokenKind.IDENT) && this._peek(1).kind === TokenKind.EQ && this._peek(2).kind === TokenKind.LPAREN) {
+      const name = this._advance().value; // consume IDENT
+      this._advance(); // consume EQ
+      const pattern = this._parsePlainPatternPath();
+      return { kind: 'NamedPath', name, pattern };
+    }
+
+    // Otherwise, parse a plain pattern path
+    return this._parsePlainPatternPath();
+  }
+
+  /**
+   * Parse a plain pattern path (without named path syntax).
+   * Internal helper for use within named paths.
+   */
+  private _parsePlainPatternPath(): PatternPath {
     const segments: PatternSegment[] = [this._parseNodePattern()];
 
     // Keep consuming edge+node pairs while the next token starts an edge.
