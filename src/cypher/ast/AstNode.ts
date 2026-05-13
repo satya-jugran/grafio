@@ -131,12 +131,6 @@ export interface NamedPath {
 }
 
 /**
- * Helper type to extract segments from either PatternPath or NamedPath.
- * Usage: function that accepts either and needs to access .segments
- */
-export type PatternSegments<T extends PatternPath | NamedPath> = T extends NamedPath ? T['pattern']['segments'] : T extends PatternPath ? T['segments'] : never;
-
-/**
  * Returns the segments array from a PatternPath or NamedPath.
  * For NamedPath, returns the inner pattern's segments.
  */

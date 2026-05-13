@@ -35,6 +35,7 @@ import {
   PatternPath,
   NamedPath,
   PatternSegment,
+  getPatternSegments,
   NodePattern,
   EdgePattern,
   Expression,
@@ -159,7 +160,7 @@ export class Semantic {
     if (pattern.kind === 'NamedPath') {
       this._addBinding(pattern.name, patternIndex, 'path');
     }
-    const segments = pattern.kind === 'NamedPath' ? pattern.pattern.segments : pattern.segments;
+    const segments = getPatternSegments(pattern);
     for (const segment of segments) {
       if (segment.kind === 'NodePattern') {
         if (segment.variable) {
@@ -399,7 +400,7 @@ export class Semantic {
 
     for (let i = 0; i < ast.match.patterns.length; i++) {
       const pattern = ast.match.patterns[i];
-      const segments = pattern.kind === 'NamedPath' ? pattern.pattern.segments : pattern.segments;
+      const segments = getPatternSegments(pattern);
 
       for (const segment of segments) {
         let varName: string | undefined;

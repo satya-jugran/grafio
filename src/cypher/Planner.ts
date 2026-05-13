@@ -25,6 +25,7 @@ import {
   PatternPath,
   NamedPath,
   PatternSegment,
+  getPatternSegments,
   NodePattern,
   EdgePattern,
   Expression,
@@ -202,7 +203,7 @@ export class Planner {
    * Convert a single pattern path (or named path) into plan steps.
    */
   private _planPatternPath(pattern: PatternPath | NamedPath, steps: PlanStep[], ast: QueryAst): void {
-    const segments = pattern.kind === 'NamedPath' ? pattern.pattern.segments : pattern.segments;
+    const segments = getPatternSegments(pattern);
     if (segments.length === 0) return;
 
     // Extract named path variable if present.
