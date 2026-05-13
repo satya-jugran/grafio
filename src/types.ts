@@ -42,7 +42,7 @@ export interface AggregateResult {
 
 /**
  * Unified query options for storage layer node and edge queries.
- * Used internally by storage providers. For Graph-level queries, use GraphQueryOptions.
+ * For Graph-level queries, use GraphQueryOptions.
  */
 export interface QueryOptions {
   /**
