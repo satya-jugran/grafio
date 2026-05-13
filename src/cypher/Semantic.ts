@@ -703,8 +703,20 @@ export class Semantic {
         allowedAliases,
       );
     } else {
-      // No aggregates → HAVING is essentially an additional WHERE filter.
-      // Validate against MATCH-scope variables only.
+      // No aggregates in RETURN, but HAVING may still contain aggregate
+      // functions (e.g. MATCH ... RETURN p.name HAVING COUNT(*) > 5).
+      // Aggregates are only executable with an AggregateStep in the plan;
+      // without aggregates in RETURN, the Planner takes the non-aggregate
+      // path and the Executor will fail on raw FunctionCall nodes.
+      if (this._containsAggregate(ast.having.expression)) {
+        throw new CypherSemanticError(
+          'HAVING contains aggregate functions but RETURN has no ' +
+          'aggregates. Add an aggregate (e.g. COUNT(*)) to RETURN, ' +
+          'or remove the aggregate from HAVING.',
+        );
+      }
+
+      // HAVING without aggregates is essentially an additional WHERE filter.
       this._checkExpressionVars(ast.having.expression, 'HAVING');
     }
 
