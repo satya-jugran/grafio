@@ -972,6 +972,31 @@ describe('Executor', () => {
       expect(result.rows).toHaveLength(1);
       expect(result.rows[0].p_name).toBe('Alice');
     });
+
+    it('filters groups with raw aggregate HAVING COUNT(*) > 1', async () => {
+      const graph = await buildAggregateGraph();
+      const result = await executeQuery(
+        'MATCH (p:Person) RETURN p.city, COUNT(*) AS cnt HAVING COUNT(*) > 1',
+        {},
+        graph,
+      );
+      // NYC has 2, LA has 2 — both groups pass COUNT(*) > 1
+      expect(result.rows).toHaveLength(2);
+      const byCity = new Map(result.rows.map((r) => [r.p_city, r.cnt]));
+      expect(byCity.get('NYC')).toBe(2);
+      expect(byCity.get('LA')).toBe(2);
+    });
+
+    it('filters groups with raw aggregate HAVING COUNT(*) > 10', async () => {
+      const graph = await buildAggregateGraph();
+      const result = await executeQuery(
+        'MATCH (p:Person) RETURN p.city, COUNT(*) AS cnt HAVING COUNT(*) > 10',
+        {},
+        graph,
+      );
+      // Both groups have 2 persons — neither passes COUNT(*) > 10
+      expect(result.rows).toHaveLength(0);
+    });
   });
 
   // ── ORDER BY with aggregates execution ───────────────────────────
@@ -999,6 +1024,19 @@ describe('Executor', () => {
       expect(result.rows).toHaveLength(2);
       expect(result.rows[0].p_city).toBe('LA');
       expect(result.rows[1].p_city).toBe('NYC');
+    });
+
+    it('sorts by raw aggregate ORDER BY COUNT(*) DESC', async () => {
+      const graph = await buildAggregateGraph();
+      const result = await executeQuery(
+        'MATCH (p:Person) RETURN p.city, COUNT(*) AS cnt ORDER BY COUNT(*) DESC',
+        {},
+        graph,
+      );
+      // Both cities have count 2, order is stable
+      expect(result.rows).toHaveLength(2);
+      expect(result.rows[0].cnt).toBe(2);
+      expect(result.rows[1].cnt).toBe(2);
     });
   });
 

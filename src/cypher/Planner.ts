@@ -105,9 +105,11 @@ export class Planner {
       // ── Aggregate path ──────────────────────────────────────────
       //   3a. Pagination (SKIP / LIMIT) — applied before aggregation
       //   3b. AggregateStep
-      //   3c. HAVING — post-aggregation filter
+      //   3c. HAVING — post-aggregation filter (rewrite aggregate
+      //       FunctionCalls to __agg_* identifiers)
       //   3d. Sort (ORDER BY) — after aggregation so expressions can
       //       reference aggregate aliases and group-by key aliases.
+      //       Aggregate FunctionCalls are rewritten to __agg_* ids.
 
       if (ast.skip || ast.limit) {
         steps.push(this._planLimit(ast));
@@ -115,15 +117,36 @@ export class Planner {
 
       this._planAggregation(ast, steps);
 
+      // The AggregateStep is now the last element in steps.
+      // Rewrite HAVING / ORDER BY expressions that contain aggregate
+      // FunctionCalls so they reference __agg_* identifiers produced
+      // by the AggregateStep.  The Executor cannot evaluate raw
+      // FunctionCall nodes (they throw "Function 'X' is not yet
+      // supported"), but Identifier lookups work fine.
+      const aggStep = steps[steps.length - 1] as AggregateStep;
+
       if (ast.having) {
+        const { rewritten, extracted } = this._extractAndRewriteAggregates(
+          ast.having.expression,
+          'having',
+        );
+        aggStep.aggregates.push(...extracted);
         steps.push({
           kind: 'FilterStep',
-          predicate: ast.having.expression,
+          predicate: rewritten,
         });
       }
 
       if (ast.orderBy) {
-        steps.push(this._planSort(ast));
+        const items: SortSpec[] = ast.orderBy.items.map((item) => {
+          const { rewritten, extracted } = this._extractAndRewriteAggregates(
+            item.expression,
+            'orderby',
+          );
+          aggStep.aggregates.push(...extracted);
+          return { expression: rewritten, direction: item.direction };
+        });
+        steps.push({ kind: 'SortStep', items });
       }
     } else {
       // ── Non-aggregate path ───────────────────────────────────────

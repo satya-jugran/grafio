@@ -444,6 +444,19 @@ describe('CypherEngine Integration', () => {
         expect(row.cnt).toBeGreaterThan(1);
       }
     });
+
+    it('filters groups with raw aggregate HAVING COUNT(*) > 1', async () => {
+      const result = await engine.execute(
+        'MATCH (p:Person) RETURN p.occupation, COUNT(*) AS cnt HAVING COUNT(*) > 1',
+      );
+      // Occupations with more than 1 person: Engineer (Alice, Henry), Designer (Bob, Grace)
+      const occupations = result.rows.map((r) => r.p_occupation);
+      expect(occupations).toContain('Engineer');
+      expect(occupations).toContain('Designer');
+      for (const row of result.rows) {
+        expect(row.cnt).toBeGreaterThan(1);
+      }
+    });
   });
 
   describe('Validation Gate', () => {
