@@ -60,7 +60,11 @@ export interface QueryOptions {
      * Example: properties: [{ key: 'active', value: true }] matches nodes
      * where node.properties.active === true.
      */
-    properties?: Array<{ key: string; value: unknown }>;
+    properties?: Array<{
+      key: string;
+      value: unknown;
+      op?: '=' | '<>' | '>' | '<' | '>=' | '<=' | 'CONTAINS' | 'STARTS_WITH' | 'ENDS_WITH' | 'IN' | 'NOT_IN' | 'IS_NULL' | 'IS_NOT_NULL';
+    }>;
   };
   /** Order results by the specified field */
   orderBy?: IOrderBy;

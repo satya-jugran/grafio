@@ -247,7 +247,7 @@ export class CachedStorageProvider implements IStorageProvider {
           // Check if edge matches the property filters
           const properties = options?.filter?.properties;
           const propertyMatch = !properties || properties.length === 0 || properties.every(
-            (prop) => edge.properties?.[prop.key] === prop.value
+            (prop) => this._matchesPropertyFilter(edge.properties?.[prop.key], prop)
           );
           if (!propertyMatch) continue;
 
@@ -292,7 +292,7 @@ export class CachedStorageProvider implements IStorageProvider {
           // Check if edge matches the property filters
           const properties = options?.filter?.properties;
           const propertyMatch = !properties || properties.length === 0 || properties.every(
-            (prop) => edge.properties?.[prop.key] === prop.value
+            (prop) => this._matchesPropertyFilter(edge.properties?.[prop.key], prop)
           );
           if (!propertyMatch) continue;
 
@@ -490,6 +490,45 @@ export class CachedStorageProvider implements IStorageProvider {
       await this._cacheManager.invalidateNode(this._graphId, id);
     } else {
       await this._cacheManager.invalidateEdge(this._graphId, id);
+    }
+  }
+
+  /**
+   * Checks if a property value matches a filter specification with operator support.
+   */
+  private _matchesPropertyFilter(actualValue: unknown, filter: { key: string; value: unknown; op?: string }): boolean {
+    const filterValue = filter.value;
+    const op = filter.op ?? '=';
+
+    switch (op) {
+      case '=':
+        return actualValue === filterValue;
+      case '<>':
+        return actualValue !== filterValue;
+      case '>':
+        return typeof actualValue === 'number' && typeof filterValue === 'number' && actualValue > filterValue;
+      case '<':
+        return typeof actualValue === 'number' && typeof filterValue === 'number' && actualValue < filterValue;
+      case '>=':
+        return typeof actualValue === 'number' && typeof filterValue === 'number' && actualValue >= filterValue;
+      case '<=':
+        return typeof actualValue === 'number' && typeof filterValue === 'number' && actualValue <= filterValue;
+      case 'CONTAINS':
+        return typeof actualValue === 'string' && typeof filterValue === 'string' && actualValue.includes(filterValue);
+      case 'STARTS_WITH':
+        return typeof actualValue === 'string' && typeof filterValue === 'string' && actualValue.startsWith(filterValue);
+      case 'ENDS_WITH':
+        return typeof actualValue === 'string' && typeof filterValue === 'string' && actualValue.endsWith(filterValue);
+      case 'IN':
+        return Array.isArray(filterValue) && filterValue.includes(actualValue);
+      case 'NOT_IN':
+        return Array.isArray(filterValue) && !filterValue.includes(actualValue);
+      case 'IS_NULL':
+        return actualValue === null || actualValue === undefined;
+      case 'IS_NOT_NULL':
+        return actualValue !== null && actualValue !== undefined;
+      default:
+        return actualValue === filterValue;
     }
   }
 

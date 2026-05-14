@@ -1185,6 +1185,45 @@ export class InMemoryStorageProvider implements IStorageProvider {
     return this._transactionOverlays.get(id) ?? null;
   }
 
+  /**
+   * Checks if a property value matches a filter specification with operator support.
+   */
+  private _matchesPropertyFilter(actualValue: unknown, filter: { key: string; value: unknown; op?: string }): boolean {
+    const filterValue = filter.value;
+    const op = filter.op ?? '=';
+
+    switch (op) {
+      case '=':
+        return actualValue === filterValue;
+      case '<>':
+        return actualValue !== filterValue;
+      case '>':
+        return typeof actualValue === 'number' && typeof filterValue === 'number' && actualValue > filterValue;
+      case '<':
+        return typeof actualValue === 'number' && typeof filterValue === 'number' && actualValue < filterValue;
+      case '>=':
+        return typeof actualValue === 'number' && typeof filterValue === 'number' && actualValue >= filterValue;
+      case '<=':
+        return typeof actualValue === 'number' && typeof filterValue === 'number' && actualValue <= filterValue;
+      case 'CONTAINS':
+        return typeof actualValue === 'string' && typeof filterValue === 'string' && actualValue.includes(filterValue);
+      case 'STARTS_WITH':
+        return typeof actualValue === 'string' && typeof filterValue === 'string' && actualValue.startsWith(filterValue);
+      case 'ENDS_WITH':
+        return typeof actualValue === 'string' && typeof filterValue === 'string' && actualValue.endsWith(filterValue);
+      case 'IN':
+        return Array.isArray(filterValue) && filterValue.includes(actualValue);
+      case 'NOT_IN':
+        return Array.isArray(filterValue) && !filterValue.includes(actualValue);
+      case 'IS_NULL':
+        return actualValue === null || actualValue === undefined;
+      case 'IS_NOT_NULL':
+        return actualValue !== null && actualValue !== undefined;
+      default:
+        return actualValue === filterValue;
+    }
+  }
+
   private _matchesNodeFilters(node: NodeData, options?: StorageQueryOptions): boolean {
     if (!options?.filter) return true;
 
@@ -1199,8 +1238,8 @@ export class InMemoryStorageProvider implements IStorageProvider {
 
     // Check property filters (AND - all must match)
     if (filter.properties && filter.properties.length > 0) {
-      for (const { key, value } of filter.properties) {
-        if (node.properties[key] !== value) {
+      for (const propFilter of filter.properties) {
+        if (!this._matchesPropertyFilter(node.properties[propFilter.key], propFilter)) {
           return false;
         }
       }
@@ -1223,8 +1262,8 @@ export class InMemoryStorageProvider implements IStorageProvider {
 
     // Check property filters (AND - all must match)
     if (filter.properties && filter.properties.length > 0) {
-      for (const { key, value } of filter.properties) {
-        if (edge.properties[key] !== value) {
+      for (const propFilter of filter.properties) {
+        if (!this._matchesPropertyFilter(edge.properties[propFilter.key], propFilter)) {
           return false;
         }
       }

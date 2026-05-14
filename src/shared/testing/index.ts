@@ -14,3 +14,4 @@ export * from './graphToMermaidScenarios';
 export * from './graphFactoryScenarios';
 export * from './graphTransactionScenarios';
 export * from './graphIndexScenarios';
+export * from './graphFilterScenarios';

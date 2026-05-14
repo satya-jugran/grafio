@@ -4,136 +4,7 @@ import { CachedStorageProvider } from '../../src/storage/CachedStorageProvider';
 import { CacheManager } from '../../src/storage/cache/CacheManager';
 import { CacheConfig } from '../../src/storage/cache/CacheConfig';
 import { ITransactionHandle } from '../../src/storage/IStorageProvider';
-
-// Mock IStorageProvider for testing CachedStorageProvider behavior
-class MockStorageProvider {
-  public nodes: Map<string, NodeData> = new Map();
-  public edges: Map<string, EdgeData> = new Map();
-  public insertNodeCalls: Array<{ node: NodeData; transaction?: ITransactionHandle }> = [];
-  public insertEdgeCalls: Array<{ edge: EdgeData; transaction?: ITransactionHandle }> = [];
-  public hasNodeCalls: string[] = [];
-  public getNodeCalls: string[] = [];
-
-  async insertNode(node: NodeData, transaction?: ITransactionHandle): Promise<void> {
-    this.insertNodeCalls.push({ node, transaction });
-    this.nodes.set(node.id, node);
-  }
-
-  async insertEdge(edge: EdgeData, transaction?: ITransactionHandle): Promise<void> {
-    this.insertEdgeCalls.push({ edge, transaction });
-    this.edges.set(edge.id, edge);
-  }
-
-  async deleteNode(id: string, transaction?: ITransactionHandle): Promise<void> {
-    this.nodes.delete(id);
-  }
-
-  async deleteEdge(id: string, transaction?: ITransactionHandle): Promise<void> {
-    this.edges.delete(id);
-  }
-
-  async hasNode(id: string, transaction?: ITransactionHandle): Promise<boolean> {
-    this.hasNodeCalls.push(id);
-    return this.nodes.has(id);
-  }
-
-  async hasEdge(id: string, transaction?: ITransactionHandle): Promise<boolean> {
-    return this.edges.has(id);
-  }
-
-  async getNode(id: string, transaction?: ITransactionHandle): Promise<NodeData | undefined> {
-    this.getNodeCalls.push(id);
-    return this.nodes.get(id);
-  }
-
-  async getEdge(id: string, transaction?: ITransactionHandle): Promise<EdgeData | undefined> {
-    return this.edges.get(id);
-  }
-
-  async getNodes(options?: { filter?: { types?: string[] }; limit?: number; orderBy?: { field: string; direction: 'asc' | 'desc' } }): Promise<NodeData[]> {
-    let nodes = Array.from(this.nodes.values());
-    if (options?.filter?.types) {
-      nodes = nodes.filter(n => options.filter!.types!.includes(n.type));
-    }
-    if (options?.orderBy?.field === 'updatedOn' || options?.orderBy?.field === 'createdOn') {
-      nodes.sort((a, b) => {
-        const aVal = (a as any)[options.orderBy!.field];
-        const bVal = (b as any)[options.orderBy!.field];
-        if (aVal === undefined && bVal === undefined) return 0;
-        if (aVal === undefined) return options.orderBy!.direction === 'asc' ? 1 : -1;
-        if (bVal === undefined) return options.orderBy!.direction === 'asc' ? -1 : 1;
-        return options.orderBy!.direction === 'asc' ? aVal - bVal : bVal - aVal;
-      });
-    }
-    if (options?.limit) nodes = nodes.slice(0, options.limit);
-    return nodes;
-  }
-
-  async getEdges(options?: { filter?: { types?: string[] }; limit?: number; orderBy?: { field: string; direction: 'asc' | 'desc' } }): Promise<EdgeData[]> {
-    let edges = Array.from(this.edges.values());
-    if (options?.filter?.types) {
-      edges = edges.filter(e => options.filter!.types!.includes(e.type));
-    }
-    if (options?.orderBy?.field === 'updatedOn' || options?.orderBy?.field === 'createdOn') {
-      edges.sort((a, b) => {
-        const aVal = (a as any)[options.orderBy!.field];
-        const bVal = (b as any)[options.orderBy!.field];
-        if (aVal === undefined && bVal === undefined) return 0;
-        if (aVal === undefined) return options.orderBy!.direction === 'asc' ? 1 : -1;
-        if (bVal === undefined) return options.orderBy!.direction === 'asc' ? -1 : 1;
-        return options.orderBy!.direction === 'asc' ? aVal - bVal : bVal - aVal;
-      });
-    }
-    if (options?.limit) edges = edges.slice(0, options.limit);
-    return edges;
-  }
-
-  async getEdgesBySource(nodeId: string, options?: { filter?: { types?: string[] } }): Promise<EdgeData[]> {
-    let edges = Array.from(this.edges.values()).filter(e => e.sourceId === nodeId);
-    if (options?.filter?.types) {
-      edges = edges.filter(e => options.filter!.types!.includes(e.type));
-    }
-    return edges;
-  }
-
-  async getEdgesByTarget(nodeId: string, options?: { filter?: { types?: string[] } }): Promise<EdgeData[]> {
-    let edges = Array.from(this.edges.values()).filter(e => e.targetId === nodeId);
-    if (options?.filter?.types) {
-      edges = edges.filter(e => options.filter!.types!.includes(e.type));
-    }
-    return edges;
-  }
-
-  async getTotalNodeCount(): Promise<number> {
-    return this.nodes.size;
-  }
-
-  async getTotalEdgeCount(): Promise<number> {
-    return this.edges.size;
-  }
-
-  async addProperty(): Promise<void> {}
-  async updateProperty(): Promise<void> {}
-  async deleteProperty(): Promise<void> {}
-  async clearProperties(): Promise<void> {}
-  async createIndex(): Promise<void> {}
-  async exportJSON() { return { nodes: [], edges: [] }; }
-  async importJSON() {}
-
-  supportsTransactions(): boolean { return true; }
-  async beginTransaction(): Promise<ITransactionHandle> {
-    return { id: 'txn-1',  context: {} };
-  }
-  async commitTransaction(): Promise<void> {}
-  async rollbackTransaction(): Promise<void> {}
-
-  clear() {
-    this.nodes.clear();
-    this.edges.clear();
-    this.insertNodeCalls = [];
-    this.insertEdgeCalls = [];
-  }
-}
+import { InMemoryStorageProvider } from '../../src';
 
 describe('CachedStorageProvider', () => {
   const defaultConfig: CacheConfig = {
@@ -144,12 +15,12 @@ describe('CachedStorageProvider', () => {
     preloadStrategy: 'none',
   };
 
-  let mockProvider: MockStorageProvider;
+  let mockProvider: InMemoryStorageProvider;
   let cacheManager: CacheManager;
   let provider: CachedStorageProvider;
 
   beforeEach(() => {
-    mockProvider = new MockStorageProvider();
+    mockProvider = new InMemoryStorageProvider();
     cacheManager = new CacheManager(defaultConfig);
     provider = new CachedStorageProvider(mockProvider as any, 'graph-test', cacheManager, defaultConfig);
   });
@@ -168,7 +39,7 @@ describe('CachedStorageProvider', () => {
       expect(cached).toBeUndefined();
 
       // But underlying storage should have it
-      expect(mockProvider.nodes.has('node-1')).toBe(true);
+      expect(await mockProvider.hasNode('node-1', txn)).toBe(true);
     });
 
     it('should populate cache after commit when insert was in transaction', async () => {
@@ -199,20 +70,25 @@ describe('CachedStorageProvider', () => {
 
       // Now query inside transaction — should hit underlying (which knows about the node)
       const txn = await provider.beginTransaction();
+      const cacheHitCountBefore = (await cacheManager.getStats()).hitCount;
       const result = await provider.hasNode('node-1', txn);
+      const cacheHitCountAfter = (await cacheManager.getStats()).hitCount;
 
       expect(result).toBe(true);
-      // hasNodeCalls tracks calls to underlying (bypass cache)
-      expect(mockProvider.hasNodeCalls).toContain('node-1');
+      // Cache hit should not have increased
+      expect(cacheHitCountAfter).toBe(cacheHitCountBefore);
     });
 
     it('should bypass cache on getNode when inside transaction', async () => {
       await provider.insertNode({ id: 'node-1', type: 'Test', properties: {} });
 
       const txn = await provider.beginTransaction();
+      const cacheHitCountBefore = (await cacheManager.getStats()).hitCount;
       await provider.getNode('node-1', txn);
+      const cacheHitCountAfter = (await cacheManager.getStats()).hitCount;
 
-      expect(mockProvider.getNodeCalls).toContain('node-1');
+      // Cache hit should not have increased
+      expect(cacheHitCountAfter).toBe(cacheHitCountBefore);
     });
   });
 
@@ -276,12 +152,15 @@ describe('CachedStorageProvider', () => {
       // Pre-populate cache directly
       await cacheManager.setNode('graph-test', 'node-cached', { id: 'node-cached', type: 'Test', properties: {} });
 
+      const cacheHitCountBefore = (await cacheManager.getStats()).hitCount;
       const node = await provider.getNode('node-cached');
+      const cacheHitCountAfter = (await cacheManager.getStats()).hitCount;
 
       expect(node).not.toBeUndefined();
       expect(node!.id).toBe('node-cached');
-      // Underlying getNode should NOT be called when cache hit
-      expect(mockProvider.getNodeCalls).not.toContain('node-cached');
+
+      // Cache hit should have occurred, so hitCount should increase by 1 
+      expect(cacheHitCountAfter).toBe(cacheHitCountBefore + 1);
     });
   });
 
@@ -441,11 +320,13 @@ describe('CachedStorageProvider', () => {
       // Pre-populate cache directly
       await cacheManager.setNode('graph-test', 'node-cached', { id: 'node-cached', type: 'Test', properties: {} });
 
+      const cacheHitCountBefore = (await cacheManager.getStats()).hitCount;
       const result = await provider.hasNode('node-cached');
+      const cacheHitCountAfter = (await cacheManager.getStats()).hitCount;
 
       expect(result).toBe(true);
-      // Underlying hasNode should NOT be called when cache hit
-      expect(mockProvider.hasNodeCalls).not.toContain('node-cached');
+      // Cache hit should have occurred, so hitCount should increase by 1
+      expect(cacheHitCountAfter).toBe(cacheHitCountBefore + 1);
     });
 
     it('should cache node data after hasNode finds it in underlying on cache miss', async () => {
@@ -520,12 +401,14 @@ describe('CachedStorageProvider', () => {
       // Pre-populate cache directly
       await cacheManager.setEdge('graph-test', 'edge-cached', { id: 'edge-cached', type: 'Test', sourceId: 'n1', targetId: 'n2', properties: {} });
 
+      const cacheHitCountBefore = (await cacheManager.getStats()).hitCount;
       const edge = await provider.getEdge('edge-cached');
+      const cacheHitCountAfter = (await cacheManager.getStats()).hitCount;
 
       expect(edge).not.toBeUndefined();
       expect(edge!.id).toBe('edge-cached');
-      // getEdgeCalls should NOT include 'edge-cached' when cache hit
-      expect(mockProvider.getNodeCalls).not.toContain('edge-cached');
+      // Cache hit should have occurred, so hitCount should increase by 1
+      expect(cacheHitCountAfter).toBe(cacheHitCountBefore + 1);
     });
 
     it('should return undefined when getEdge finds no edge in underlying on cache miss', async () => {
@@ -617,54 +500,66 @@ describe('CachedStorageProvider', () => {
 
   describe('delegation to underlying — property operations', () => {
     it('should delegate addProperty', async () => {
+      await provider.insertNode({ id: 'node-1', type: 'Test', properties: { } });
       const spy = jest.spyOn(mockProvider, 'addProperty');
       await provider.addProperty('node', 'node-1', 'name', 'Alice');
       expect(spy).toHaveBeenCalledWith('node', 'node-1', 'name', 'Alice', undefined);
     });
 
     it('should delegate updateProperty', async () => {
+      await provider.insertNode({ id: 'node-1', type: 'Test', properties: { name: 'Alice' } });
       const spy = jest.spyOn(mockProvider, 'updateProperty');
       await provider.updateProperty('node', 'node-1', 'name', 'Bob');
       expect(spy).toHaveBeenCalledWith('node', 'node-1', 'name', 'Bob', undefined);
     });
 
     it('should delegate deleteProperty', async () => {
+      await provider.insertNode({ id: 'node-1', type: 'Test', properties: { name: 'Alice' } });
       const spy = jest.spyOn(mockProvider, 'deleteProperty');
       await provider.deleteProperty('node', 'node-1', 'name');
       expect(spy).toHaveBeenCalledWith('node', 'node-1', 'name', undefined);
     });
 
     it('should delegate clearProperties', async () => {
+      await provider.insertNode({ id: 'node-1', type: 'Test', properties: { name: 'Alice', age: 30 } });
       const spy = jest.spyOn(mockProvider, 'clearProperties');
       await provider.clearProperties('node', 'node-1');
       expect(spy).toHaveBeenCalledWith('node', 'node-1', undefined);
     });
 
     it('should invalidate edge cache when addProperty targets edge', async () => {
-      await cacheManager.setEdge('graph-test', 'edge-1', { id: 'edge-1', type: 'Test', sourceId: 'n1', targetId: 'n2', properties: {} });
+      await provider.insertEdge({ id: 'edge-1', type: 'Test', sourceId: 'n1', targetId: 'n2', properties: {} });
+      let cached = await cacheManager.getEdge('graph-test', 'edge-1');
+      expect(cached).not.toBeUndefined();
       await provider.addProperty('edge', 'edge-1', 'weight', 5);
-      const cached = await cacheManager.getEdge('graph-test', 'edge-1');
+      cached = await cacheManager.getEdge('graph-test', 'edge-1');
       expect(cached).toBeUndefined();
     });
 
     it('should invalidate edge cache when updateProperty targets edge', async () => {
-      await cacheManager.setEdge('graph-test', 'edge-1', { id: 'edge-1', type: 'Test', sourceId: 'n1', targetId: 'n2', properties: {} });
+      await provider.insertEdge({ id: 'edge-1', type: 'Test', sourceId: 'n1', targetId: 'n2', properties: { weight: 5 } });
+      let cached = await cacheManager.getEdge('graph-test', 'edge-1');
+      expect(cached).not.toBeUndefined();
       await provider.updateProperty('edge', 'edge-1', 'weight', 10);
-      const cached = await cacheManager.getEdge('graph-test', 'edge-1');
+      cached = await cacheManager.getEdge('graph-test', 'edge-1');
       expect(cached).toBeUndefined();
     });
 
     it('should invalidate edge cache when deleteProperty targets edge', async () => {
-      await cacheManager.setEdge('graph-test', 'edge-1', { id: 'edge-1', type: 'Test', sourceId: 'n1', targetId: 'n2', properties: {} });
+      await provider.insertEdge({ id: 'edge-1', type: 'Test', sourceId: 'n1', targetId: 'n2', properties: { weight: 5 } });
+      let cached = await cacheManager.getEdge('graph-test', 'edge-1');
+      expect(cached).not.toBeUndefined();
       await provider.deleteProperty('edge', 'edge-1', 'weight');
-      const cached = await cacheManager.getEdge('graph-test', 'edge-1');
+      cached = await cacheManager.getEdge('graph-test', 'edge-1');
       expect(cached).toBeUndefined();
     });
 
     it('should invalidate edge cache when clearProperties targets edge', async () => {
-      await cacheManager.setEdge('graph-test', 'edge-1', { id: 'edge-1', type: 'Test', sourceId: 'n1', targetId: 'n2', properties: {} });
+      await provider.insertEdge({ id: 'edge-1', type: 'Test', sourceId: 'n1', targetId: 'n2', properties: {} });
+      let cached = await cacheManager.getEdge('graph-test', 'edge-1');
+      expect(cached).not.toBeUndefined();
       await provider.clearProperties('edge', 'edge-1');
-      const cached = await cacheManager.getEdge('graph-test', 'edge-1');
+      cached = await cacheManager.getEdge('graph-test', 'edge-1');
       expect(cached).toBeUndefined();
     });
   });
@@ -735,7 +630,7 @@ describe('CachedStorageProvider', () => {
       await warmProvider.warmCache();
 
       // Manually add a node to underlying but not to cache
-      mockProvider.nodes.set('node-3', { id: 'node-3', type: 'Test', properties: {} });
+      mockProvider.insertNode({ id: 'node-3', type: 'Test', properties: {} });
 
       const nodes = await warmProvider.getNodes({ orderBy: { field: 'updatedOn', direction: 'asc' } });
 
@@ -845,7 +740,7 @@ describe('CachedStorageProvider', () => {
     it('should limit results when limit <= cachedCount', async () => {
       // Insert 5 edges
       for (let i = 1; i <= 5; i++) {
-        await provider.insertEdge({ id: `edge-${i}`, type: 'Test', sourceId: `n${i}`, targetId: `n${i+1}`, properties: {} });
+        await provider.insertEdge({ id: `edge-${i}`, type: 'Test', sourceId: `n${i}`, targetId: `n${i + 1}`, properties: {} });
       }
 
       const warmConfig: CacheConfig = { ...defaultConfig, preloadStrategy: 'all' };
