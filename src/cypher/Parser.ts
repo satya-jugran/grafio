@@ -635,10 +635,13 @@ export class Parser {
         let expr: Expression = { kind: 'Identifier', name: token.value };
 
         // Chained property access: ident.prop1.prop2
+        // The property name may be a reserved keyword (e.g. `order`
+        // in `ch.order`).  Use _advance() instead of _consume(IDENT)
+        // so keyword tokens are accepted as property identifiers.
         while (this._check(TokenKind.DOT)) {
           this._advance();
-          const prop = this._consume(TokenKind.IDENT, 'Expected property name after .');
-          expr = { kind: 'PropertyAccess', object: expr, property: prop.value };
+          const prop = this._advance().value;
+          expr = { kind: 'PropertyAccess', object: expr, property: prop };
         }
 
         return expr;
