@@ -1,18 +1,8 @@
 import { afterAll, beforeAll, beforeEach, describe, it, expect } from '@jest/globals';
 import { Graph, IStorageProvider, Node } from '../../index';
 
-/**
- * Shared test scenarios for the Facebook Social Graph.
- * Both InMemory and MongoDB providers run the exact same assertions.
- *
- * @param provider - Storage provider instance
- */
-export function runSocialGraphScenarios(provider?: IStorageProvider): void {
-  describe('Facebook Social Graph', () => {
-    let graph: Graph;
-
-    beforeEach(async () => {
-      graph = new Graph(provider);
+export async function prepareSocialGraph(provider?: IStorageProvider): Promise<Graph> {
+ const graph = new Graph(provider);
       // Create index on 'name' property since socialGraphScenarios queries by name
       await graph.createIndex('node', 'name');
 
@@ -208,6 +198,22 @@ export function runSocialGraphScenarios(provider?: IStorageProvider): void {
       await graph.addEdge(c16.id, photoFood.id, 'ON_PHOTO', {});
       await graph.addEdge(frank.id, c17.id, 'COMMENTED_ON_PHOTO', { timestamp: '2024-07-06T17:00:00Z' });
       await graph.addEdge(c17.id, photoMountain.id, 'ON_PHOTO', {});
+      
+      return graph;
+}
+
+/**
+ * Shared test scenarios for the Facebook Social Graph.
+ * Both InMemory and MongoDB providers run the exact same assertions.
+ *
+ * @param provider - Storage provider instance
+ */
+export function runSocialGraphScenarios(provider?: IStorageProvider): void {
+  describe('Facebook Social Graph', () => {
+    let graph: Graph;
+
+    beforeEach(async () => {
+      graph = await prepareSocialGraph(provider);
     });
 
     // ========================================

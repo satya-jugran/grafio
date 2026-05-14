@@ -3,11 +3,17 @@ import { Lexer } from '../../src/cypher/Lexer';
 import { Parser } from '../../src/cypher/Parser';
 import { CypherSyntaxError } from '../../src/cypher/errors';
 import { TokenKind } from '../../src/cypher/Token';
+import { getPatternSegments, type MatchPattern, type PatternSegment } from '../../src/cypher/ast/AstNode';
 
 /** Helper: lex + parse in one call. */
 function parse(query: string) {
   const tokens = new Lexer(query).tokenise();
   return new Parser(tokens).parse();
+}
+
+/** Helper: get segments from a MatchPattern (handles PatternPath | NamedPath) */
+function getSegments(pattern: MatchPattern): PatternSegment[] {
+  return getPatternSegments(pattern);
 }
 
 describe('Parser', () => {
@@ -21,9 +27,10 @@ describe('Parser', () => {
       expect(ast.match.patterns).toHaveLength(1);
 
       const path = ast.match.patterns[0];
-      expect(path.segments).toHaveLength(1);
-      expect(path.segments[0].kind).toBe('NodePattern');
-      expect((path.segments[0] as any).variable).toBe('n');
+      const segments = getSegments(path);
+      expect(segments).toHaveLength(1);
+      expect(segments[0].kind).toBe('NodePattern');
+      expect((segments[0] as any).variable).toBe('n');
 
       expect(ast.return.kind).toBe('Return');
       expect(ast.return.items).toHaveLength(1);
@@ -41,20 +48,20 @@ describe('Parser', () => {
   describe('typed nodes', () => {
     it('parses (n:Person)', () => {
       const ast = parse('MATCH (n:Person) RETURN n');
-      const node = ast.match.patterns[0].segments[0];
+      const node = getSegments(ast.match.patterns[0])[0];
       expect(node.kind).toBe('NodePattern');
       expect((node as any).labels).toEqual(['Person']);
     });
 
     it('parses (n:Person|Employee) multi-label', () => {
       const ast = parse('MATCH (n:Person|Employee) RETURN n');
-      const node = ast.match.patterns[0].segments[0];
+      const node = getSegments(ast.match.patterns[0])[0];
       expect((node as any).labels).toEqual(['Person', 'Employee']);
     });
 
     it('parses anonymous node (:Person)', () => {
       const ast = parse('MATCH (:Person) RETURN 1');
-      const node = ast.match.patterns[0].segments[0];
+      const node = getSegments(ast.match.patterns[0])[0];
       expect((node as any).variable).toBeUndefined();
       expect((node as any).labels).toEqual(['Person']);
     });
@@ -64,49 +71,49 @@ describe('Parser', () => {
   describe('inline properties', () => {
     it('parses node with inline properties', () => {
       const ast = parse("MATCH (n:Person {name: 'Alice', age: 30}) RETURN n");
-      const node = ast.match.patterns[0].segments[0];
+      const node = getSegments(ast.match.patterns[0])[0];
       expect((node as any).properties).toEqual({ name: 'Alice', age: 30 });
     });
 
     it('parses inline properties with param', () => {
       const ast = parse('MATCH (n {name: $name}) RETURN n');
-      const node = ast.match.patterns[0].segments[0];
+      const node = getSegments(ast.match.patterns[0])[0];
       expect((node as any).properties.name).toEqual({ kind: 'Parameter', name: 'name' });
     });
 
     it('parses float property value', () => {
       const ast = parse('MATCH (n {score: 3.14}) RETURN n');
-      const node = ast.match.patterns[0].segments[0];
+      const node = getSegments(ast.match.patterns[0])[0];
       expect((node as any).properties.score).toBe(3.14);
     });
 
     it('parses boolean property value (true)', () => {
       const ast = parse('MATCH (n {active: true}) RETURN n');
-      const node = ast.match.patterns[0].segments[0];
+      const node = getSegments(ast.match.patterns[0])[0];
       expect((node as any).properties.active).toBe(true);
     });
 
     it('parses boolean property value (false)', () => {
       const ast = parse('MATCH (n {active: false}) RETURN n');
-      const node = ast.match.patterns[0].segments[0];
+      const node = getSegments(ast.match.patterns[0])[0];
       expect((node as any).properties.active).toBe(false);
     });
 
     it('parses null property value', () => {
       const ast = parse('MATCH (n {email: null}) RETURN n');
-      const node = ast.match.patterns[0].segments[0];
+      const node = getSegments(ast.match.patterns[0])[0];
       expect((node as any).properties.email).toBeNull();
     });
 
     it('parses negative integer property value', () => {
       const ast = parse('MATCH (n {score: -5}) RETURN n');
-      const node = ast.match.patterns[0].segments[0];
+      const node = getSegments(ast.match.patterns[0])[0];
       expect((node as any).properties.score).toBe(-5);
     });
 
     it('parses negative float property value', () => {
       const ast = parse('MATCH (n {score: -3.14}) RETURN n');
-      const node = ast.match.patterns[0].segments[0];
+      const node = getSegments(ast.match.patterns[0])[0];
       expect((node as any).properties.score).toBe(-3.14);
     });
 
@@ -120,9 +127,9 @@ describe('Parser', () => {
     it('parses directed edge -->', () => {
       const ast = parse('MATCH (a)-[:KNOWS]->(b) RETURN b');
       const path = ast.match.patterns[0];
-      expect(path.segments).toHaveLength(3);
+      expect(getSegments(path)).toHaveLength(3);
 
-      const edge = path.segments[1];
+      const edge = getSegments(path)[1];
       expect(edge.kind).toBe('EdgePattern');
       expect((edge as any).types).toEqual(['KNOWS']);
       expect((edge as any).direction).toBe('out');
@@ -130,25 +137,25 @@ describe('Parser', () => {
 
     it('parses reverse edge <--', () => {
       const ast = parse('MATCH (a)<-[:KNOWS]-(b) RETURN b');
-      const edge = ast.match.patterns[0].segments[1];
+      const edge = getSegments(ast.match.patterns[0])[1];
       expect((edge as any).direction).toBe('in');
     });
 
     it('parses edge with variable', () => {
       const ast = parse('MATCH (a)-[r:KNOWS]->(b) RETURN r');
-      const edge = ast.match.patterns[0].segments[1];
+      const edge = getSegments(ast.match.patterns[0])[1];
       expect((edge as any).variable).toBe('r');
     });
 
     it('parses edge without type', () => {
       const ast = parse('MATCH (a)-[]->(b) RETURN b');
-      const edge = ast.match.patterns[0].segments[1];
+      const edge = getSegments(ast.match.patterns[0])[1];
       expect((edge as any).types).toEqual([]);
     });
 
     it('parses edge with inline properties', () => {
       const ast = parse("MATCH (a)-[:KNOWS {since: 2020}]->(b) RETURN b");
-      const edge = ast.match.patterns[0].segments[1];
+      const edge = getSegments(ast.match.patterns[0])[1];
       expect((edge as any).properties).toEqual({ since: 2020 });
     });
   });
@@ -157,28 +164,28 @@ describe('Parser', () => {
   describe('variable-length edges', () => {
     it('parses [*] (unbounded)', () => {
       const ast = parse('MATCH (a)-[*]->(b) RETURN b');
-      const edge = ast.match.patterns[0].segments[1];
+      const edge = getSegments(ast.match.patterns[0])[1];
       expect((edge as any).minHops).toBe(1);
       expect((edge as any).maxHops).toBe(Infinity);
     });
 
     it('parses [*1..3]', () => {
       const ast = parse('MATCH (a)-[*1..3]->(b) RETURN b');
-      const edge = ast.match.patterns[0].segments[1];
+      const edge = getSegments(ast.match.patterns[0])[1];
       expect((edge as any).minHops).toBe(1);
       expect((edge as any).maxHops).toBe(3);
     });
 
     it('parses [*3] (exact)', () => {
       const ast = parse('MATCH (a)-[*3]->(b) RETURN b');
-      const edge = ast.match.patterns[0].segments[1];
+      const edge = getSegments(ast.match.patterns[0])[1];
       expect((edge as any).minHops).toBe(3);
       expect((edge as any).maxHops).toBe(3);
     });
 
     it('parses [*..5]', () => {
       const ast = parse('MATCH (a)-[*..5]->(b) RETURN b');
-      const edge = ast.match.patterns[0].segments[1];
+      const edge = getSegments(ast.match.patterns[0])[1];
       expect((edge as any).minHops).toBe(1);
       expect((edge as any).maxHops).toBe(5);
     });
@@ -305,7 +312,7 @@ describe('Parser', () => {
     it('parses multi-hop path', () => {
       const ast = parse('MATCH (a:Person)-[:KNOWS]->(b:Person)-[:WORKS_AT]->(c:Company) RETURN c');
       const path = ast.match.patterns[0];
-      expect(path.segments).toHaveLength(5); // N-E-N-E-N
+      expect(getSegments(path)).toHaveLength(5); // N-E-N-E-N
     });
   });
 

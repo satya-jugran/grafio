@@ -1,4 +1,4 @@
-export * from './graphScenarios';
+export * from './educationGraphScenarios';
 export { default as educationGraphData } from './education-graph.json';
 export * from './socialGraphScenarios';
 export * from './graphNodeScenarios';
