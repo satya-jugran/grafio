@@ -105,6 +105,17 @@ describe('CypherEngine Integration', () => {
       expect(names).toContain('Frank');
     });
 
+    it('filter by parameter correctly', async () => {
+      const result = await engine.execute(
+        'MATCH (p) WHERE p.age > $age RETURN p.name AS name, p.age AS age ORDER BY p.age ASC',
+        { age: 30 },
+      );
+      const names = result.rows.map((r) => r.name);
+      expect(names).toContain('Henry');
+      expect(names).toContain('Charlie');
+      expect(names).toContain('Frank');
+    });
+
     it('follows single-hop KNOWS relationship', async () => {
       const result = await engine.execute(
         "MATCH (p:Person)-[:KNOWS]->(f:Person) WHERE p.name = 'Alice' RETURN f.name AS friend ORDER BY f.name ASC",
@@ -456,6 +467,54 @@ describe('CypherEngine Integration', () => {
       for (const row of result.rows) {
         expect(row.cnt).toBeGreaterThan(1);
       }
+    });
+  });
+
+  describe('id() function', () => {
+    it('returns the internal id of a node', async () => {
+      const graph = new Graph();
+      await buildSocialGraph(graph);
+      const engine = new CypherEngine(graph);
+
+      const result = await engine.execute(
+        'MATCH (p:Person {name: "Alice"}) RETURN id(p) AS nodeId',
+      );
+      expect(result.rows).toHaveLength(1);
+      expect(typeof result.rows[0].nodeId).toBe('string');
+      expect((result.rows[0].nodeId as string).length).toBeGreaterThan(0);
+    });
+
+    it('can be used in a WHERE clause to compare ids', async () => {
+      const graph = new Graph();
+      await buildSocialGraph(graph);
+      const engine = new CypherEngine(graph);
+
+      // Get Alice's id first
+      const aliceResult = await engine.execute(
+        'MATCH (p:Person {name: "Alice"}) RETURN id(p) AS nodeId',
+      );
+      const aliceId = aliceResult.rows[0].nodeId as string;
+
+      // Use id() in WHERE
+      const result = await engine.execute(
+        `MATCH (p:Person) WHERE id(p) = '${aliceId}' RETURN p.name AS name`,
+      );
+      expect(result.rows).toHaveLength(1);
+      expect(result.rows[0].name).toBe('Alice');
+    });
+
+    it('returns different ids for different nodes', async () => {
+      const graph = new Graph();
+      await buildSocialGraph(graph);
+      const engine = new CypherEngine(graph);
+
+      const result = await engine.execute(
+        'MATCH (p:Person) RETURN id(p) AS nodeId ORDER BY p.name ASC',
+      );
+      expect(result.rows).toHaveLength(8);
+      const ids = result.rows.map((r) => r.nodeId as string);
+      const uniqueIds = new Set(ids);
+      expect(uniqueIds.size).toBe(8); // all distinct
     });
   });
 

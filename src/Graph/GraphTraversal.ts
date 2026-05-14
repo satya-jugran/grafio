@@ -102,8 +102,8 @@ export class GraphTraversal {
     const bothWildcards = (sourceId === '*' || (Array.isArray(sourceId) && sourceId.includes('*'))) &&
       (targetId === '*' || (Array.isArray(targetId) && targetId.includes('*')));
     const requestedMaxResults = options.maxResults ?? 100;
-    const maxResults = onlyOneWildcard ? Math.min(requestedMaxResults, 10)
-      : bothWildcards ? Math.min(requestedMaxResults, 5) : requestedMaxResults;
+    const maxResults = onlyOneWildcard ? Math.min(requestedMaxResults, 50)
+      : bothWildcards ? Math.min(requestedMaxResults, 10) : requestedMaxResults;
 
     for (const src of sources) {
       for (const tgt of targets) {

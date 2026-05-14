@@ -895,10 +895,31 @@ export class Executor {
         return expr.elements.map((e) => this._evaluate(e, row, params));
       }
 
-      case 'FunctionCall':
-        throw new CypherRuntimeError(
-          `Function '${expr.name}' is not yet supported`,
-        );
+      case 'FunctionCall': {
+        switch (expr.name.toUpperCase()) {
+          // ── id(node|relationship) → internal UUID ─────────────
+          case 'ID': {
+            if (expr.args.length !== 1) {
+              throw new CypherRuntimeError(
+                `id() expects exactly 1 argument, got ${expr.args.length}`,
+              );
+            }
+            const arg = this._evaluate(expr.args[0], row, params);
+            if (arg && typeof arg === 'object' && 'id' in (arg as object)) {
+              return (arg as { id: string }).id;
+            }
+            // null argument → null per openCypher semantics
+            if (arg === null || arg === undefined) return null;
+            throw new CypherRuntimeError(
+              `id() requires a node or relationship argument, got ${typeof arg}`,
+            );
+          }
+          default:
+            throw new CypherRuntimeError(
+              `Function '${expr.name}' is not yet supported`,
+            );
+        }
+      }
     }
   }
 

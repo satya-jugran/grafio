@@ -8,6 +8,7 @@
 
 // Re-export from commonScenarios
 export { buildCommonScenarios } from './scenarios/commonScenarios';
+export { buildCommonScenariosCypher } from './scenarios/commonScenariosCypher';
 
 // Re-export functions from benchmarkRunner
 export { runScenario, printReport, printScaleHeader, printSectionTitle } from './benchmarkRunner';
