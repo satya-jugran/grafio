@@ -172,6 +172,16 @@ export class Executor {
       const targetNode = await this._graph.getNode(targetId);
       if (!targetNode) continue;
 
+      // Filter by target node type if labels were specified in the pattern
+      // (e.g. (c:Course)-[:CONTAINS]->(ch:Chapter)).
+      if (
+        step.targetTypes &&
+        step.targetTypes.length > 0 &&
+        !step.targetTypes.includes(targetNode.type)
+      ) {
+        continue;
+      }
+
       const newRow = new Map(row);
       if (step.edgeVar) newRow.set(step.edgeVar, edge);
       newRow.set(step.target, targetNode);
@@ -249,6 +259,15 @@ export class Executor {
         const targetId = step.direction === 'out' ? edge.targetId : edge.sourceId;
         const targetNode = await this._graph.getNode(targetId);
         if (!targetNode) continue;
+
+        // Filter by target node type if labels were specified in the pattern.
+        if (
+          step.targetTypes &&
+          step.targetTypes.length > 0 &&
+          !step.targetTypes.includes(targetNode.type)
+        ) {
+          continue;
+        }
 
         const newHops = hops + 1;
         // Only track path state when a named path variable is requested

@@ -305,6 +305,13 @@ export class Planner {
       expandStep.pathVar = pathVar;
     }
 
+    // Propagate target node labels so the Executor can filter by type
+    // directly during expansion (avoids PropertyAccess ambiguity with
+    // user properties named 'type').
+    if (targetNode.labels.length > 0) {
+      expandStep.targetTypes = targetNode.labels;
+    }
+
     steps.push(expandStep);
 
     // Emit FilterStep for inline properties on the edge pattern.
@@ -317,25 +324,6 @@ export class Planner {
     if (targetNode.properties && Object.keys(targetNode.properties).length > 0) {
       const filters = this._propertyMapToFilters(target, targetNode.properties);
       steps.push(...filters);
-    }
-
-    // Emit FilterStep for the target node's label.
-    // e.g. (c:Course)-[:CONTAINS]->(ch:Chapter) must only match nodes of
-    // type Chapter, not Exam or other types reached via the same edge type.
-    for (const label of targetNode.labels) {
-      steps.push({
-        kind: 'FilterStep',
-        predicate: {
-          kind: 'Binary',
-          op: '=',
-          left: {
-            kind: 'PropertyAccess',
-            object: { kind: 'Identifier', name: target },
-            property: 'type',
-          },
-          right: { kind: 'Literal', value: label },
-        },
-      });
     }
   }
 

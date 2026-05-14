@@ -90,6 +90,12 @@ export interface EdgeExpandStep {
    * reconstructed path value (array of alternating nodes and edges).
    */
   pathVar?: string;
+  /**
+   * Target node type(s) to match — set from the target node pattern's
+   * labels (e.g. `(ch:Chapter)`).  The executor filters out expanded
+   * nodes whose `type` field does not match.
+   */
+  targetTypes?: string[];
 }
 
 /**
