@@ -1,7 +1,6 @@
 import { Graph } from '../../../../index';
 import type { GraphMeta } from '../graphGenerator';
 import type { BenchmarkScenario } from '../benchmarkRunner';
-import type { StorageProvider } from './iterationFactors';
 
 /**
  * Calculates iterations based on provider factor and large graph multiplier.
@@ -35,23 +34,22 @@ function pickId(meta: GraphMeta, offset: number): string {
  * @param factor - Iteration multiplier for this provider
  */
 export function buildCommonScenarios(
-  provider: StorageProvider,
   nodeCount: number,
   factor: number
 ): BenchmarkScenario[] {
-  const isLarge = nodeCount >= 50_000;
+  const isLarge = nodeCount >= (50_000 * factor); // Threshold for "large" graph (adjusted by factor)
 
   return [
     // ── Write: Graph Construction ─────────────────────────────────────────
     // Only meaningful for in-memory (fast enough to benchmark construction)
-    ...(provider === 'in-memory' ? [{
+    {
       category: 'Write',
       name: 'Graph Construction',
       setup: () => new Graph(),
       run: async (_graph: Graph, meta: GraphMeta) => {
         const g = new Graph();
         const ids: string[] = [];
-        const batch = Math.min(500, Math.floor(meta.nodeCount / 20));
+        const batch = Math.min(500 * factor, Math.floor(meta.nodeCount / 20));
         for (let i = 0; i < batch; i++) {
           const n = await g.addNode('Person', { index: i, label: `node-${i}` });
           ids.push(n.id);
@@ -63,7 +61,7 @@ export function buildCommonScenarios(
         return g;
       },
       iterations: calcIterations(isLarge ? 5 : 10, factor, isLarge, 50_000),
-    }] : []),
+    },
 
     // ── Write: addNode ────────────────────────────────────────────────────
     {
@@ -82,7 +80,7 @@ export function buildCommonScenarios(
       name: 'addEdge (single)',
       setup: async (meta) => {
         const g = new Graph();
-        const pool = provider === 'mongodb' ? 100 : 500;
+        const pool = 100 * factor;
         const nodeIds: string[] = [];
         for (let i = 0; i < pool; i++) {
           const n = await g.addNode('Person', { index: i });
@@ -101,21 +99,6 @@ export function buildCommonScenarios(
       },
       iterations: calcIterations(5_000, factor, isLarge, 50_000),
     },
-
-    // ── Write: batch addNodes (MongoDB specific) ──────────────────────────
-    ...(provider === 'mongodb' ? [{
-      category: 'Write',
-      name: 'addNode (batch 50)',
-      setup: () => {},
-      run: async (graph: any, _meta: any) => {
-        const promises = [];
-        for (let i = 0; i < 50; i++) {
-          promises.push(graph.addNode('Product', { batchIndex: i, score: i }));
-        }
-        await Promise.all(promises);
-      },
-      iterations: calcIterations(100, factor, isLarge, 5_000),
-    }] : []),
 
     // ── Read: getNode by id ────────────────────────────────────────────────
     {
@@ -213,7 +196,7 @@ export function buildCommonScenarios(
     {
       category: 'Traversal',
       name: 'traverse DFS',
-      run: async (graph: any, meta: any) => {
+      run: async (graph: Graph, meta: any) => {
         const [src, tgt] = meta.traversalPairs[1];
         return graph.traverse(src, tgt, { method: 'dfs' });
       },
@@ -224,7 +207,7 @@ export function buildCommonScenarios(
     {
       category: 'Traversal',
       name: 'traverse BFS (typed)',
-      run: async (graph: any, meta: any) => {
+      run: async (graph: Graph, meta: any) => {
         const [src, tgt] = meta.traversalPairs[2];
         return graph.traverse(src, tgt, { method: 'bfs', nodeTypes: ['Person', 'Product'], edgeTypes: ['KNOWS', 'BOUGHT'] });
       },
@@ -235,7 +218,7 @@ export function buildCommonScenarios(
     {
       category: 'Traversal',
       name: 'traverse DFS (typed)',
-      run: async (graph: any, meta: any) => {
+      run: async (graph: Graph, meta: any) => {
         const [src, tgt] = meta.traversalPairs[2];
         return graph.traverse(src, tgt, { method: 'dfs', nodeTypes: ['Person', 'Product'], edgeTypes: ['KNOWS', 'BOUGHT'] });
       },
@@ -246,7 +229,7 @@ export function buildCommonScenarios(
     {
       category: 'Traversal',
       name: 'traverse wildcard src',
-      run: async (graph: any, meta: any) => {
+      run: async (graph: Graph, meta: any) => {
         const tgt = pickId(meta, 500);
         return graph.traverse('*', tgt, { method: 'bfs', maxResults: 10, nodeTypes: ['Person', 'Product', 'Review'], edgeTypes: ['KNOWS', 'BOUGHT', 'WRITTEN'] });
       },
@@ -267,7 +250,7 @@ export function buildCommonScenarios(
     {
       category: 'Analysis',
       name: 'isDAG (cyclic graph)',
-      run: async (graph: any, _meta: any) => {
+      run: async (graph: Graph, _meta: any) => {
         return graph.isDAG();
       },
       iterations: calcIterations(15, factor, isLarge, 50_000),
@@ -314,7 +297,7 @@ export function buildCommonScenarios(
       name: 'removeEdge',
       setup: async (meta: GraphMeta) => {
         const g = new Graph();
-        const n = provider === 'mongodb' ? 500 : 2_000;
+        const n = 2_000 * factor;
         const ids: string[] = [];
         for (let i = 0; i < n; i++) {
           const node = await g.addNode('Person', { i });
@@ -346,7 +329,7 @@ export function buildCommonScenarios(
       name: 'removeNode (cascade)',
       setup: async (meta: GraphMeta) => {
         const g = new Graph();
-        const n = provider === 'mongodb' ? 500 : 2_000;
+        const n = 2_000 * factor;
         const ids: string[] = [];
         for (let i = 0; i < n; i++) {
           const node = await g.addNode('Person', { i });
@@ -378,9 +361,7 @@ export function buildCommonScenarios(
       category: 'Mutation',
       name: 'clear (full graph)',
       setup: (meta: GraphMeta) => {
-        const size = provider === 'mongodb'
-          ? Math.min(200, Math.floor(meta.nodeCount / 10))
-          : Math.min(1000, Math.floor(meta.nodeCount / 10));
+        const size = 200 * factor;
         (meta as GraphMeta & { _clearSize?: number })._clearSize = size;
       },
       run: async (_graph: Graph, meta: GraphMeta) => {

@@ -97,10 +97,13 @@ export class GraphTraversal {
     const allPaths: string[][] = [];
     // Both wildcards: hardcode maxResults to 10 to discourage blind wildcard search
     // while still honoring a smaller caller-provided maxResults.
+    const onlyOneWildcard = (sourceId === '*' || (Array.isArray(sourceId) && sourceId.includes('*'))) !==
+      (targetId === '*' || (Array.isArray(targetId) && targetId.includes('*')));
     const bothWildcards = (sourceId === '*' || (Array.isArray(sourceId) && sourceId.includes('*'))) &&
       (targetId === '*' || (Array.isArray(targetId) && targetId.includes('*')));
     const requestedMaxResults = options.maxResults ?? 100;
-    const maxResults = bothWildcards ? Math.min(requestedMaxResults, 10) : requestedMaxResults;
+    const maxResults = onlyOneWildcard ? Math.min(requestedMaxResults, 10)
+      : bothWildcards ? Math.min(requestedMaxResults, 5) : requestedMaxResults;
 
     for (const src of sources) {
       for (const tgt of targets) {

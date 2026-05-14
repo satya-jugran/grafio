@@ -7,7 +7,7 @@
  *   npm run perf:gc   (with accurate heap measurements)
  */
 
-import { buildGraph, runScenario, printReport, printScaleHeader, printSectionTitle, buildScenarios } from '../../src/shared/testing/perf';
+import { buildGraph, runScenario, printReport, printScaleHeader, printSectionTitle, buildCommonScenarios } from '../../src/shared/testing/perf';
 
 // ─── Scale Definitions ────────────────────────────────────────────────────────
 // In-memory provider is fast — we can benchmark at significant scales.
@@ -56,7 +56,7 @@ async function main(): Promise<void> {
     // ── 2. Run all benchmark scenarios ────────────────────────────────────
     printSectionTitle('Running benchmark scenarios');
 
-    const scenarios = buildScenarios('in-memory', scale.nodeCount);
+    const scenarios = buildCommonScenarios(scale.nodeCount, 1);
     const results = [];
 
     for (const scenario of scenarios) {

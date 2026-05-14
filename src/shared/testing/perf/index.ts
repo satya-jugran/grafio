@@ -6,10 +6,6 @@
  * iteration counts calculated via iteration factors.
  */
 
-// Re-export from iterationFactors
-export { ITERATION_FACTORS, getIterationFactor } from './scenarios/iterationFactors';
-export type { StorageProvider } from './scenarios/iterationFactors';
-
 // Re-export from commonScenarios
 export { buildCommonScenarios } from './scenarios/commonScenarios';
 
@@ -20,23 +16,3 @@ export type { BenchmarkScenario, BenchmarkResult } from './benchmarkRunner';
 // Re-export from graphGenerator
 export { buildGraph } from './graphGenerator';
 export type { GraphMeta } from './graphGenerator';
-
-import type { BenchmarkScenario } from './benchmarkRunner';
-import type { StorageProvider } from './scenarios/iterationFactors';
-import { ITERATION_FACTORS } from './scenarios/iterationFactors';
-import { buildCommonScenarios } from './scenarios/commonScenarios';
-
-/**
- * Builds benchmark scenarios for a specific storage provider.
- * 
- * @param provider - The storage provider type
- * @param nodeCount - Number of nodes in the benchmark graph
- * @returns Array of benchmark scenarios with provider-specific iterations
- */
-export function buildScenarios(
-  provider: StorageProvider,
-  nodeCount: number
-): BenchmarkScenario[] {
-  const factor = ITERATION_FACTORS[provider];
-  return buildCommonScenarios(provider, nodeCount, factor);
-}
