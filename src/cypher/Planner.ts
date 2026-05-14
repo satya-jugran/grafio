@@ -318,6 +318,25 @@ export class Planner {
       const filters = this._propertyMapToFilters(target, targetNode.properties);
       steps.push(...filters);
     }
+
+    // Emit FilterStep for the target node's label.
+    // e.g. (c:Course)-[:CONTAINS]->(ch:Chapter) must only match nodes of
+    // type Chapter, not Exam or other types reached via the same edge type.
+    for (const label of targetNode.labels) {
+      steps.push({
+        kind: 'FilterStep',
+        predicate: {
+          kind: 'Binary',
+          op: '=',
+          left: {
+            kind: 'PropertyAccess',
+            object: { kind: 'Identifier', name: target },
+            property: 'type',
+          },
+          right: { kind: 'Literal', value: label },
+        },
+      });
+    }
   }
 
   // ── Projection ──────────────────────────────────────────────────

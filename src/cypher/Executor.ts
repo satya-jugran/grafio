@@ -832,9 +832,13 @@ export class Executor {
           typeof obj === 'object' &&
           'properties' in (obj as Record<string, unknown>)
         ) {
-          return (obj as { properties: Record<string, unknown> }).properties[
-            expr.property
-          ];
+          const props = (obj as { properties: Record<string, unknown> })
+            .properties;
+          if (expr.property in props) {
+            return props[expr.property];
+          }
+          // Property not in user-defined properties — fall through to
+          // top-level access for built-in fields like `type` and `id`.
         }
         if (typeof obj === 'object' && obj !== null) {
           return (obj as Record<string, unknown>)[expr.property];
