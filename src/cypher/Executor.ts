@@ -26,6 +26,7 @@ import {
   QueryPlan,
   PlanStep,
   NodeScanStep,
+  NodeSeekStep,
   EdgeExpandStep,
   FilterStep,
   ProjectStep,
@@ -89,7 +90,9 @@ export class Executor {
   ): Promise<Row[]> {
     switch (step.kind) {
       case 'NodeScanStep':
-        return this._executeNodeScan(step, rows);
+        return this._executeNodeScan(step, rows, params);
+      case 'NodeSeekStep':
+        return this._executeNodeSeek(step, rows, params);
       case 'EdgeExpandStep':
         return this._executeEdgeExpand(step, rows, params);
       case 'FilterStep':
@@ -102,15 +105,138 @@ export class Executor {
         return this._executeLimit(step, rows, params);
       case 'AggregateStep':
         return this._executeAggregate(step, rows, params);
+      default:
+        throw new CypherRuntimeError(
+          `Unknown plan step kind: ${(step as PlanStep).kind}`,
+        );
     }
   }
 
   // ── NodeScanStep ────────────────────────────────────────────────
 
-  private async _executeNodeScan(step: NodeScanStep, rows: Row[]): Promise<Row[]> {
-    const nodes = step.label
-      ? await this._graph.getNodes({ filter: { types: [step.label] } })
+  private async _executeNodeScan(
+    step: NodeScanStep,
+    rows: Row[],
+    params: Record<string, unknown>,
+  ): Promise<Row[]> {
+    // Build the storage-level filter from step.types and step.propertyFilters.
+    const filter: Record<string, unknown> = {};
+
+    if (step.types?.length) {
+      filter.types = step.types;
+    } else if (step.label) {
+      filter.types = [step.label];
+    }
+
+    if (step.propertyFilters?.length) {
+      // Resolve $param references in property values before passing to
+      // the storage layer.
+      filter.properties = this._resolvePropertyFilterParams(
+        step.propertyFilters as Array<Record<string, unknown>>,
+        params,
+      );
+    }
+
+    const nodes = Object.keys(filter).length > 0
+      ? await this._graph.getNodes({ filter } as { filter: { types?: string[]; properties?: Array<Record<string, unknown>> } }) as unknown as Node[]
       : await this._graph.getNodes();
+
+    const result: Row[] = [];
+    for (const row of rows) {
+      for (const node of nodes) {
+        const newRow = new Map(row);
+        newRow.set(step.variable, node);
+        result.push(newRow);
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Recursively resolve {@code $param} references in a
+   * {@link PropertyFilter} tree against the runtime parameter map.
+   *
+   * Parameter references are stored as {@code { kind: 'Parameter', name: 'x' }}
+   * objects by the Planner; this helper replaces them with the actual
+   * value from {@code params} before the storage layer sees them.
+   */
+  private _resolvePropertyFilterParams(
+    filters: Array<Record<string, unknown>>,
+    params: Record<string, unknown>,
+  ): Array<Record<string, unknown>> {
+    return filters.map((f) => this._resolveOneFilter(f, params));
+  }
+
+  private _resolveOneFilter(
+    f: Record<string, unknown>,
+    params: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const resolved: Record<string, unknown> = {};
+
+    for (const [k, v] of Object.entries(f)) {
+      if (k === 'AND' && Array.isArray(v)) {
+        resolved[k] = v.map((child: Record<string, unknown>) =>
+          this._resolveOneFilter(child, params),
+        );
+      } else if (k === 'OR' && Array.isArray(v)) {
+        resolved[k] = v.map((child: Record<string, unknown>) =>
+          this._resolveOneFilter(child, params),
+        );
+      } else if (
+        typeof v === 'object' &&
+        v !== null &&
+        (v as Record<string, unknown>).kind === 'Parameter'
+      ) {
+        const paramName = (v as Record<string, unknown>).name as string;
+        if (!(paramName in params)) {
+          throw new UnboundParameterError(paramName);
+        }
+        resolved[k] = params[paramName];
+      } else {
+        resolved[k] = v;
+      }
+    }
+
+    return resolved;
+  }
+
+  // ── NodeSeekStep ────────────────────────────────────────────────
+
+  /**
+   * Direct node lookup — O(1) via {@code graph.getNode(id)} for id-indexed
+   * seeks or {@code graph.getNodes({filter})} for property-indexed seeks.
+   * Delegates entirely to the Graph API; no Executor-level indexes needed.
+   */
+  private async _executeNodeSeek(
+    step: NodeSeekStep,
+    rows: Row[],
+    params: Record<string, unknown>,
+  ): Promise<Row[]> {
+    let nodes: Node[];
+
+    switch (step.index) {
+      case 'id': {
+        const id = typeof step.value === 'string' && step.value.startsWith('$')
+          ? String(params[step.value.slice(1)] ?? step.value)
+          : String(step.value);
+        const node = await this._graph.getNode(id);
+        nodes = node ? [node] : [];
+        break;
+      }
+      case 'property': {
+        const filter: {
+          types?: string[];
+          properties: Array<{ key: string; value: unknown; op?: '=' }>;
+        } = {
+          properties: [{ key: step.key!, value: step.value, op: '=' }],
+        };
+        if (step.types?.length) filter.types = step.types;
+        nodes = await this._graph.getNodes({ filter }) as unknown as Node[];
+        break;
+      }
+      default:
+        nodes = [];
+    }
 
     const result: Row[] = [];
     for (const row of rows) {

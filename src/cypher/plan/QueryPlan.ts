@@ -10,6 +10,24 @@
 
 import { Expression } from '../ast/AstNode';
 
+// ── Shared filter types ───────────────────────────────────────────
+
+/**
+ * A property-level filter that mirrors the storage layer's
+ * {@link QueryOptionsFilterProperty} (including nested AND/OR).
+ *
+ * Used by {@link NodeScanStep.propertyFilters} to push predicates into
+ * the storage layer, and by {@link NodeSeekStep} for direct lookups.
+ */
+export interface PropertyFilter {
+  key?: string;
+  value?: unknown;
+  op?: '=' | '<>' | '>' | '<' | '>=' | '<=' | 'CONTAINS' | 'STARTS_WITH'
+     | 'ENDS_WITH' | 'IN' | 'NOT_IN' | 'IS_NULL' | 'IS_NOT_NULL';
+  AND?: PropertyFilter[];
+  OR?:  PropertyFilter[];
+}
+
 // ── Query plan ────────────────────────────────────────────────────
 
 /**
@@ -27,6 +45,7 @@ export interface QueryPlan {
  */
 export type PlanStep =
   | NodeScanStep
+  | NodeSeekStep
   | EdgeExpandStep
   | FilterStep
   | ProjectStep
@@ -37,15 +56,39 @@ export type PlanStep =
 // ── Individual step types ─────────────────────────────────────────
 
 /**
- * Scan all nodes of a given label (type).
+ * Scan all nodes matching optional type and property filters.
  *
- * Maps to: `graph.getNodes({ filter: { types: [label] } })`
+ * Maps to: `graph.getNodes({ filter: { types, properties } })`
  */
 export interface NodeScanStep {
   kind: 'NodeScanStep';
   /** The label (node type) to scan. */
   label: string;
+  /** Node type(s) to filter by — mirrors storage's types: string[]. */
+  types?: string[];
   /** The variable name to bind each scanned node to. */
+  variable: string;
+  /**
+   * Optional property filters pushed down from inline pattern
+   * properties or single-variable WHERE predicates.
+   */
+  propertyFilters?: PropertyFilter[];
+}
+
+/**
+ * Direct node lookup via id or indexed property.
+ *
+ * Maps to: `graph.getNode(id)` or `graph.getNodes({ filter })`.
+ * Emitted by the Planner when a predicate enables an O(1) lookup
+ * rather than a full scan.
+ */
+export interface NodeSeekStep {
+  kind: 'NodeSeekStep';
+  /** 'id' → graph.getNode(value); 'property' → graph.getNodes({filter}) */
+  index: 'id' | 'property';
+  value: unknown;
+  key?: string;
+  types?: string[];
   variable: string;
 }
 

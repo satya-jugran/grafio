@@ -59,28 +59,48 @@ describe('Planner', () => {
   });
 
   // ── Filter ─────────────────────────────────────────────────────
-  describe('FilterStep', () => {
-    it('produces FilterStep when WHERE present', () => {
+    it('pushes single-variable WHERE predicates into NodeScanStep propertyFilters', () => {
       const p = plan("MATCH (p:Person) WHERE p.name = 'Alice' RETURN p");
-      const hasFilter = p.steps.some((s) => s.kind === 'FilterStep');
-      expect(hasFilter).toBe(true);
-    });
-
-    it('filter appears before projection', () => {
-      const p = plan("MATCH (p:Person) WHERE p.name = 'Alice' RETURN p");
-      const filterIdx = p.steps.findIndex((s) => s.kind === 'FilterStep');
-      const projectIdx = p.steps.findIndex((s) => s.kind === 'ProjectStep');
-      expect(filterIdx).toBeLessThan(projectIdx);
-    });
-
-    it('generates FilterStep from node inline properties', () => {
-      const p = plan('MATCH (s:Student {year: 2024}) RETURN s');
-      // Should have: NodeScanStep, FilterStep (for year=2024), ProjectStep
+      // Phase 2: single-variable WHERE predicate is pushed into
+      // NodeScanStep.propertyFilters — no separate FilterStep.
+      const scan = p.steps.find((s) => s.kind === 'NodeScanStep') as any;
+      expect(scan).toBeDefined();
+      expect(scan.propertyFilters).toBeDefined();
+      expect(scan.propertyFilters).toHaveLength(1);
+      expect(scan.propertyFilters[0].key).toBe('name');
+      expect(scan.propertyFilters[0].value).toBe('Alice');
+      expect(scan.propertyFilters[0].op).toBe('=');
+      // No FilterStep remains
       const filters = p.steps.filter((s) => s.kind === 'FilterStep');
-      expect(filters.length).toBeGreaterThanOrEqual(1);
+      expect(filters.length).toBe(0);
+    });
+
+    it('keeps cross-variable WHERE predicates as FilterStep', () => {
+      const p = plan("MATCH (a:Person), (b:Person) WHERE a.city = b.city RETURN a, b");
+      // Cross-variable comparison cannot be pushed → remains as FilterStep.
+      const filters = p.steps.filter((s) => s.kind === 'FilterStep');
+      expect(filters.length).toBe(1);
       const filter = filters[0] as any;
       expect(filter.predicate.kind).toBe('Binary');
       expect(filter.predicate.op).toBe('=');
+    });
+
+    it('pushes node inline properties into NodeScanStep propertyFilters', () => {
+      const p = plan('MATCH (s:Student {year: 2024}) RETURN s');
+      // Phase 1: inline properties are pushed into NodeScanStep.propertyFilters,
+      // not emitted as separate FilterSteps.
+      const scan = p.steps.find((s) => s.kind === 'NodeScanStep') as any;
+      expect(scan).toBeDefined();
+      expect(scan.propertyFilters).toBeDefined();
+      expect(scan.propertyFilters).toHaveLength(1);
+      expect(scan.propertyFilters[0].key).toBe('year');
+      expect(scan.propertyFilters[0].value).toBe(2024);
+      expect(scan.propertyFilters[0].op).toBe('=');
+      // types should be set from node labels
+      expect(scan.types).toEqual(['Student']);
+      // No separate FilterStep for inline properties
+      const filters = p.steps.filter((s) => s.kind === 'FilterStep');
+      expect(filters.length).toBe(0);
     });
 
     it('generates FilterStep from edge inline properties', () => {
@@ -124,17 +144,6 @@ describe('Planner', () => {
       expect(proj.columns[0].alias).toBe('name');
     });
 
-    it('derives alias from FunctionCall (no AS)', () => {
-      const planner = new Planner();
-      const fnExpr = { kind: 'FunctionCall' as const, name: 'COUNT', args: [] };
-      expect((planner as any)._deriveAlias(fnExpr)).toBe('count');
-    });
-
-    it('derives alias from unknown expression (default)', () => {
-      const planner = new Planner();
-      const unknownExpr = { kind: 'Binary' as const, op: '+' as const, left: {} as any, right: {} as any };
-      expect((planner as any)._deriveAlias(unknownExpr)).toBe('expr');
-    });
   });
 
   // ── Sort ───────────────────────────────────────────────────────
@@ -359,4 +368,3 @@ describe('Planner', () => {
       expect(agg.aggregates[0].function).toBe('COUNT');
     });
   });
-});

@@ -1,0 +1,387 @@
+/**
+ * Projection, sorting, pagination, and aggregation planning for the
+ * Cypher query planner.
+ *
+ * @module cypher/plan/ProjectionPlanner
+ */
+
+import {
+  QueryAst,
+  Expression,
+  FunctionCallExpr,
+  ReturnItem,
+} from '../ast/AstNode';
+import {
+  PlanStep,
+  ProjectStep,
+  ProjectColumn,
+  SortStep,
+  SortSpec,
+  LimitStep,
+  AggregateStep,
+  AggregateSpec,
+  FilterStep,
+  NodeScanStep,
+  EdgeExpandStep,
+} from './QueryPlan';
+import { CypherSemanticError } from '../errors';
+
+// ── ProjectionPlanner ──────────────────────────────────────────────
+
+export class ProjectionPlanner {
+  /** Counter for generating unique internal aggregate aliases. */
+  private _aggCounter = 0;
+
+  /** Rewritten projection expressions for aggregate queries. */
+  private _rewrittenProjections?: Map<ReturnItem, Expression>;
+
+  // ── Projection ──────────────────────────────────────────────────
+
+  /**
+   * Convert RETURN items into a {@link ProjectStep}.
+   */
+  planProjection(ast: QueryAst, hasAggregates: boolean): ProjectStep {
+    const columns: ProjectColumn[] = ast.return.items.map((item) => {
+      const alias = item.alias ?? this._deriveAlias(item.expression);
+
+      if (hasAggregates) {
+        const rewritten = this._rewrittenProjections?.get(item);
+        return {
+          expression: rewritten ?? { kind: 'Identifier' as const, name: alias },
+          alias,
+        };
+      }
+
+      return { expression: item.expression, alias };
+    });
+
+    return { kind: 'ProjectStep', columns, distinct: ast.return.distinct };
+  }
+
+  // ── Sorting ─────────────────────────────────────────────────────
+
+  planSort(ast: QueryAst): SortStep {
+    const items: SortSpec[] = ast.orderBy!.items.map((item) => ({
+      expression: item.expression,
+      direction: item.direction,
+    }));
+    return { kind: 'SortStep', items };
+  }
+
+  // ── Pagination ──────────────────────────────────────────────────
+
+  planLimit(ast: QueryAst): LimitStep {
+    return {
+      kind: 'LimitStep',
+      skipExpr: ast.skip?.expression,
+      limitExpr: ast.limit?.expression,
+    };
+  }
+
+  // ── Aggregate detection ─────────────────────────────────────────
+
+  /** Recognised aggregate function names. */
+  static readonly AGGREGATE_FUNCTIONS: ReadonlySet<string> = new Set([
+    'COUNT', 'SUM', 'AVG', 'MIN', 'MAX', 'COLLECT',
+  ]);
+
+  /**
+   * Returns `true` if any RETURN item contains an aggregate function.
+   */
+  hasAggregates(ast: QueryAst): boolean {
+    return ast.return.items.some((item) =>
+      this._hasAggregateFunction(item.expression),
+    );
+  }
+
+  private _hasAggregateFunction(expr: Expression): boolean {
+    if (
+      expr.kind === 'FunctionCall' &&
+      ProjectionPlanner.AGGREGATE_FUNCTIONS.has(expr.name)
+    ) {
+      return true;
+    }
+
+    switch (expr.kind) {
+      case 'Binary':
+        return (
+          this._hasAggregateFunction(expr.left) ||
+          this._hasAggregateFunction(expr.right)
+        );
+      case 'Unary':
+        return this._hasAggregateFunction(expr.operand);
+      case 'PropertyAccess':
+        return this._hasAggregateFunction(expr.object);
+      case 'In':
+        return (
+          this._hasAggregateFunction(expr.expression) ||
+          this._hasAggregateFunction(expr.list)
+        );
+      case 'IsNull':
+        return this._hasAggregateFunction(expr.expression);
+      case 'FunctionCall':
+        return expr.args.some((arg) => this._hasAggregateFunction(arg));
+      case 'List':
+        return expr.elements.some((el) => this._hasAggregateFunction(el));
+      default:
+        return false;
+    }
+  }
+
+  // ── Aggregate planning ──────────────────────────────────────────
+
+  /**
+   * Build and insert an {@link AggregateStep} into the plan.
+   */
+  planAggregation(ast: QueryAst, steps: PlanStep[]): void {
+    this._aggCounter = 0;
+
+    const allAggregates: AggregateSpec[] = [];
+    const groupBy: Expression[] = [];
+    const groupByAliases: string[] = [];
+    const rewrittenProjections = new Map<ReturnItem, Expression>();
+
+    for (const item of ast.return.items) {
+      if (!this._hasAggregateFunction(item.expression)) {
+        groupBy.push(item.expression);
+        const alias = item.alias ?? this._deriveAlias(item.expression);
+        groupByAliases.push(alias);
+        rewrittenProjections.set(item, { kind: 'Identifier', name: alias });
+      } else {
+        const fnCall = this._extractAggregateFunctionCall(item.expression);
+
+        if (fnCall && this._isSimpleAggregateItem(item.expression)) {
+          const aggExpr: Expression =
+            fnCall.args.length > 0
+              ? fnCall.args[0]
+              : { kind: 'Literal', value: null };
+          const alias = item.alias ?? this._deriveAlias(item.expression);
+          allAggregates.push({
+            function: fnCall.name as AggregateSpec['function'],
+            expression: aggExpr,
+            distinct: fnCall.distinct === true,
+            alias,
+          });
+          rewrittenProjections.set(item, { kind: 'Identifier', name: alias });
+        } else {
+          const { rewritten, extracted } = this._extractAndRewriteAggregates(
+            item.expression,
+            item.alias ?? this._deriveAlias(item.expression),
+          );
+          allAggregates.push(...extracted);
+          rewrittenProjections.set(item, rewritten);
+        }
+      }
+    }
+
+    this._rewrittenProjections = rewrittenProjections;
+
+    // ── Determine sourceVariable ──────────────────────────────────
+    let sourceVariable: string | undefined;
+    const vars = new Set<string>();
+    for (const agg of allAggregates) {
+      const v = this._extractVariableName(agg.expression);
+      if (v) vars.add(v);
+    }
+    if (vars.size === 1) {
+      sourceVariable = [...vars][0];
+    }
+
+    if (vars.size >= 2) {
+      throw new CypherSemanticError(
+        `Aggregates across multiple independent node patterns are not ` +
+        `supported. Use separate queries joined with WITH. ` +
+        `Aggregate source variables: ${[...vars].map(v => `'${v}'`).join(', ')}.`,
+      );
+    }
+
+    // ── Plan shape decision ───────────────────────────────────────
+    let sourceType: string | undefined;
+    const isSimple =
+      this._isSimplePlan(steps, ast) &&
+      sourceVariable !== undefined &&
+      groupBy.length === 0;
+
+    if (isSimple) {
+      for (const step of steps) {
+        if (
+          step.kind === 'NodeScanStep' &&
+          step.variable === sourceVariable
+        ) {
+          sourceType = step.label || undefined;
+          break;
+        }
+      }
+      steps.length = 0;
+    }
+
+    steps.push({
+      kind: 'AggregateStep',
+      aggregates: allAggregates,
+      groupBy,
+      groupByAliases,
+      sourceVariable,
+      sourceType,
+      useStorageLevel: isSimple,
+    });
+  }
+
+  /**
+   * Rewrite HAVING / ORDER BY expressions that contain aggregate
+   * FunctionCalls, extracting them into AggregateSpec entries.
+   */
+  extractAndRewriteAggregates(
+    expr: Expression,
+  ): { rewritten: Expression; extracted: AggregateSpec[] } {
+    return this._extractAndRewriteAggregates(expr, '');
+  }
+
+  /**
+   * Returns the rewritten projection map (set by {@link planAggregation}).
+   */
+  get rewrittenProjections(): Map<ReturnItem, Expression> | undefined {
+    return this._rewrittenProjections;
+  }
+
+  // ── Aggregate helpers ───────────────────────────────────────────
+
+  private _extractAggregateFunctionCall(
+    expr: Expression,
+  ): FunctionCallExpr | null {
+    if (
+      expr.kind === 'FunctionCall' &&
+      ProjectionPlanner.AGGREGATE_FUNCTIONS.has(expr.name)
+    ) {
+      return expr;
+    }
+
+    switch (expr.kind) {
+      case 'Binary':
+        return (
+          this._extractAggregateFunctionCall(expr.left) ??
+          this._extractAggregateFunctionCall(expr.right)
+        );
+      case 'Unary':
+        return this._extractAggregateFunctionCall(expr.operand);
+      case 'PropertyAccess':
+        return this._extractAggregateFunctionCall(expr.object);
+      case 'FunctionCall':
+        for (const arg of expr.args) {
+          const found = this._extractAggregateFunctionCall(arg);
+          if (found) return found;
+        }
+        return null;
+      default:
+        return null;
+    }
+  }
+
+  private _extractVariableName(expr: Expression): string | null {
+    if (expr.kind === 'Literal' && expr.value === '*') {
+      return null;
+    }
+    if (expr.kind === 'Identifier') {
+      return expr.name;
+    }
+    if (expr.kind === 'PropertyAccess') {
+      return this._extractVariableName(expr.object);
+    }
+    return null;
+  }
+
+  private _isSimpleAggregateItem(expr: Expression): boolean {
+    return (
+      expr.kind === 'FunctionCall' &&
+      ProjectionPlanner.AGGREGATE_FUNCTIONS.has(expr.name)
+    );
+  }
+
+  private _isAggregateFn(name: string): boolean {
+    return ProjectionPlanner.AGGREGATE_FUNCTIONS.has(name);
+  }
+
+  private _generateAggAlias(): string {
+    return `__agg_${this._aggCounter++}`;
+  }
+
+  private _extractAndRewriteAggregates(
+    expr: Expression,
+    _fallbackAlias: string,
+  ): { rewritten: Expression; extracted: AggregateSpec[] } {
+    const extracted: AggregateSpec[] = [];
+
+    const rewrite = (e: Expression): Expression => {
+      switch (e.kind) {
+        case 'FunctionCall': {
+          if (this._isAggregateFn(e.name)) {
+            const internalAlias = this._generateAggAlias();
+            const aggExpr: Expression =
+              e.args.length > 0
+                ? e.args[0]
+                : { kind: 'Literal', value: null };
+            extracted.push({
+              function: e.name as AggregateSpec['function'],
+              expression: aggExpr,
+              distinct: e.distinct === true,
+              alias: internalAlias,
+            });
+            return { kind: 'Identifier', name: internalAlias };
+          }
+          return e;
+        }
+        case 'Binary':
+          return { ...e, left: rewrite(e.left), right: rewrite(e.right) };
+        case 'Unary':
+          return { ...e, operand: rewrite(e.operand) };
+        case 'PropertyAccess':
+          return { ...e, object: rewrite(e.object) };
+        case 'In':
+          return {
+            ...e,
+            expression: rewrite(e.expression),
+            list: rewrite(e.list),
+          };
+        case 'IsNull':
+          return { ...e, expression: rewrite(e.expression) };
+        case 'List':
+          return { ...e, elements: e.elements.map(rewrite) };
+        default:
+          return e;
+      }
+    };
+
+    const rewritten = rewrite(expr);
+    return { rewritten, extracted };
+  }
+
+  private _isSimplePlan(steps: PlanStep[], ast: QueryAst): boolean {
+    if (ast.where) return false;
+
+    let nodeScanCount = 0;
+    for (const step of steps) {
+      if (step.kind === 'EdgeExpandStep') return false;
+      if (step.kind === 'NodeScanStep') nodeScanCount++;
+    }
+
+    return nodeScanCount === 1;
+  }
+
+  // ── General helpers ─────────────────────────────────────────────
+
+  private _deriveAlias(expr: Expression): string {
+    switch (expr.kind) {
+      case 'Identifier':
+        return expr.name;
+      case 'PropertyAccess':
+        return `${this._deriveAlias(expr.object)}_${expr.property}`;
+      case 'Literal':
+        return String(expr.value);
+      case 'Parameter':
+        return expr.name;
+      case 'FunctionCall':
+        return expr.name.toLowerCase();
+      default:
+        return `expr`;
+    }
+  }
+}
