@@ -66,6 +66,7 @@ export class PatternPlanner {
       });
       consumed?.add(firstNode.variable);
       this._planTrailingSegments(segments, steps, ast, pattern);
+      this._emitPerVarFilters(firstNode.variable, perVar, steps);
       return;
     }
 
@@ -103,6 +104,7 @@ export class PatternPlanner {
           const nextNode = segments[i + 1] as NodePattern;
           this.planEdgeExpand(edge, nextNode, steps, ast, pathVar);
         }
+        this._emitPerVarFilters(firstNode.variable, perVar, steps);
         return;
       }
     }
@@ -266,6 +268,131 @@ export class PatternPlanner {
     }
 
     return steps;
+  }
+
+  /**
+   * Emit per-variable WHERE predicates as FilterSteps for a variable
+   * that was not scanned via {@link planNodeScan} (e.g. when the
+   * root is reached via a reversed edge in the id-lookup reversal
+   * branch, or when the root itself is sought via NodeSeekStep).
+   */
+  private _emitPerVarFilters(
+    varName: string | undefined,
+    perVar: Map<string, PropertyFilter[]>,
+    steps: PlanStep[],
+  ): void {
+    if (!varName) return;
+    const predicates = perVar.get(varName);
+    if (!predicates || predicates.length === 0) return;
+    steps.push(...this._perVarToFilterSteps(varName, predicates));
+  }
+
+  /**
+   * Convert per-variable {@link PropertyFilter}s into {@link FilterStep}s
+   * by rebuilding the corresponding {@link Expression} AST.
+   */
+  private _perVarToFilterSteps(
+    varName: string,
+    filters: PropertyFilter[],
+  ): FilterStep[] {
+    return filters.map((f) => ({
+      kind: 'FilterStep' as const,
+      predicate: this._propertyFilterToExpr(varName, f),
+    }));
+  }
+
+  /**
+   * Convert a single {@link PropertyFilter} into an {@link Expression}.
+   * Supports binary comparisons, IS NULL, IN, and nested AND/OR.
+   */
+  private _propertyFilterToExpr(
+    varName: string,
+    f: PropertyFilter,
+  ): Expression {
+    // ── Nested AND ────────────────────────────────────────────────
+    if (f.AND) {
+      if (f.AND.length === 0) {
+        return { kind: 'Literal', value: true };
+      }
+      let left = this._propertyFilterToExpr(varName, f.AND[0]);
+      for (let i = 1; i < f.AND.length; i++) {
+        left = {
+          kind: 'Binary',
+          op: 'AND',
+          left,
+          right: this._propertyFilterToExpr(varName, f.AND[i]),
+        };
+      }
+      return left;
+    }
+
+    // ── Nested OR ─────────────────────────────────────────────────
+    if (f.OR) {
+      if (f.OR.length === 0) {
+        return { kind: 'Literal', value: false };
+      }
+      let left = this._propertyFilterToExpr(varName, f.OR[0]);
+      for (let i = 1; i < f.OR.length; i++) {
+        left = {
+          kind: 'Binary',
+          op: 'OR',
+          left,
+          right: this._propertyFilterToExpr(varName, f.OR[i]),
+        };
+      }
+      return left;
+    }
+
+    // ── IS NULL / IS NOT NULL ─────────────────────────────────────
+    if (f.op === 'IS_NULL' || f.op === 'IS_NOT_NULL') {
+      return {
+        kind: 'IsNull',
+        expression: {
+          kind: 'PropertyAccess',
+          object: { kind: 'Identifier', name: varName },
+          property: f.key!,
+        },
+        not: f.op === 'IS_NOT_NULL',
+      };
+    }
+
+    // ── IN / NOT IN ───────────────────────────────────────────────
+    if (f.op === 'IN' || f.op === 'NOT_IN') {
+      const elements: Expression[] = Array.isArray(f.value)
+        ? f.value.map((v) =>
+            typeof v === 'object' && v !== null && 'kind' in v
+              ? (v as Expression)
+              : { kind: 'Literal' as const, value: v as string | number | boolean | null },
+          )
+        : [];
+      return {
+        kind: 'In',
+        expression: {
+          kind: 'PropertyAccess',
+          object: { kind: 'Identifier', name: varName },
+          property: f.key!,
+        },
+        list: { kind: 'List', elements },
+        not: f.op === 'NOT_IN',
+      };
+    }
+
+    // ── Binary comparison (=, <>, >, <, >=, <=, CONTAINS, …) ─────
+    const rhs: Expression =
+      typeof f.value === 'object' && f.value !== null && 'kind' in f.value
+        ? (f.value as Expression)
+        : { kind: 'Literal' as const, value: f.value as string | number | boolean | null };
+
+    return {
+      kind: 'Binary',
+      op: f.op as import('../ast/AstNode').BinaryOp,
+      left: {
+        kind: 'PropertyAccess',
+        object: { kind: 'Identifier', name: varName },
+        property: f.key!,
+      },
+      right: rhs,
+    };
   }
 
   /** Find the variable of the most recently scanned, sought, or expanded-to node. */

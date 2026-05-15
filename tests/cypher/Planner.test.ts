@@ -161,6 +161,82 @@ describe('Planner', () => {
     expect(idFilters.length).toBe(0);
   });
 
+    it('emits FilterStep for root perVar predicates in reversal branch', async () => {
+      // id(b) triggers reversal (seek b, expand backwards to a).
+      // a.name = 'Alice' is in perVar['a'] and must be emitted as
+      // FilterStep after the reversed expand.
+      // NOTE: Uses two different variables (a and b) so that
+      // _classify splits the AND correctly into multi-var path.
+      const p = await plan(
+        "MATCH (a:Person)-[:KNOWS]->(b:Person) WHERE id(b) = 42 AND a.name = 'Alice' RETURN a, b",
+      );
+
+      const seeks = p.steps.filter((s) => s.kind === 'NodeSeekStep') as any[];
+      expect(seeks.length).toBe(1);
+      expect(seeks[0].index).toBe('id');
+      expect(seeks[0].value).toBe(42);
+
+      // Must have a FilterStep for a.name = 'Alice' from perVar
+      const filters = p.steps.filter((s) => s.kind === 'FilterStep') as any[];
+      const nameFilter = filters.find(
+        (s) =>
+          s.predicate?.kind === 'Binary' &&
+          s.predicate?.left?.kind === 'PropertyAccess' &&
+          s.predicate?.left?.property === 'name',
+      );
+      expect(nameFilter).toBeDefined();
+    });
+
+    it('correctly splits id(a)=42 AND a.name=Alice on the same variable', async () => {
+      // Before the _classify AND-split fix, _classify would pass the
+      // entire AND to _toPropertyFilter, which dropped the id() side.
+      // Now id(a)=42 → crossVar → idLookups → consumed as
+      // NodeSeekStep, and a.name='Alice' → perVar['a'] → FilterStep.
+      const p = await plan(
+        "MATCH (a:Person)-[:KNOWS]->(b:Person) WHERE id(a) = 42 AND a.name = 'Alice' RETURN a, b",
+      );
+
+      // NodeSeekStep for id(a) = 42
+      const seeks = p.steps.filter((s) => s.kind === 'NodeSeekStep') as any[];
+      expect(seeks.length).toBe(1);
+      expect(seeks[0].index).toBe('id');
+      expect(seeks[0].value).toBe(42);
+
+      // FilterStep for a.name = 'Alice' from perVar
+      const filters = p.steps.filter((s) => s.kind === 'FilterStep') as any[];
+      const nameFilter = filters.find(
+        (s) =>
+          s.predicate?.kind === 'Binary' &&
+          s.predicate?.left?.kind === 'PropertyAccess' &&
+          s.predicate?.left?.property === 'name',
+      );
+      expect(nameFilter).toBeDefined();
+    });
+
+    it('emits FilterStep for root perVar predicates alongside NodeSeekStep', async () => {
+      // Root id(a)=42 consumed as NodeSeekStep.
+      // a.name='Alice' decomposed to perVar['a'] → emitted as
+      // FilterStep after _planTrailingSegments (no NodeScanStep for root).
+      const p = await plan(
+        "MATCH (a:Person)-[:KNOWS]->(b:Person) WHERE id(a) = 42 AND a.name = 'Alice' RETURN a, b",
+      );
+
+      const seeks = p.steps.filter((s) => s.kind === 'NodeSeekStep') as any[];
+      expect(seeks.length).toBe(1);
+      expect(seeks[0].index).toBe('id');
+      expect(seeks[0].value).toBe(42);
+
+      // Must have a FilterStep for a.name = 'Alice' from perVar
+      const filters = p.steps.filter((s) => s.kind === 'FilterStep') as any[];
+      const nameFilter = filters.find(
+        (s) =>
+          s.predicate?.kind === 'Binary' &&
+          s.predicate?.left?.kind === 'PropertyAccess' &&
+          s.predicate?.left?.property === 'name',
+      );
+      expect(nameFilter).toBeDefined();
+    });
+
 // ── Projection ─────────────────────────────────────────────────
   describe('ProjectStep', () => {
     it('produces ProjectStep with columns', async () => {

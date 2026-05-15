@@ -108,6 +108,16 @@ export class WhereDecomposer {
     perVar: Map<string, PropertyFilter[]>,
     crossVar: Expression[],
   ): void {
+    // ── AND: always split — each operand is classified independently.
+    //     This must come first so that id(a)=42 AND a.name='Alice'
+    //     (single variable, but mixed translatable/non-translatable
+    //     operands) is decomposed correctly.
+    if (expr.kind === 'Binary' && expr.op === 'AND') {
+      this._classify(expr.left, vars, perVar, crossVar);
+      this._classify(expr.right, vars, perVar, crossVar);
+      return;
+    }
+
     const refs = this._collectVars(expr);
 
     // ── No variable reference → keep as crossVar filter ───────────
@@ -134,17 +144,7 @@ export class WhereDecomposer {
       return;
     }
 
-    // ── Multiple variables ────────────────────────────────────────
-
-    // AND: split left and right, classify independently.
-    if (expr.kind === 'Binary' && expr.op === 'AND') {
-      this._classify(expr.left, vars, perVar, crossVar);
-      this._classify(expr.right, vars, perVar, crossVar);
-      return;
-    }
-
-    // OR with multiple variables, cross-variable comparisons,
-    // or other multi-var expressions → keep as crossVar.
+    // ── Multiple variables, OR, cross-variable comparisons ────────
     crossVar.push(expr);
   }
 
