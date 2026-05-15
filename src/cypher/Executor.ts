@@ -203,6 +203,30 @@ export class Executor {
   // ── NodeSeekStep ────────────────────────────────────────────────
 
   /**
+   * Resolve a value that may be a {@code { kind: 'Parameter', name: 'x' }}
+   * AST node stored by the Planner.  If the value is a Parameter object,
+   * look it up in {@code params} (throwing {@link UnboundParameterError}
+   * if missing).  Otherwise return the value as-is.
+   */
+  private _resolveParam(
+    value: unknown,
+    params: Record<string, unknown>,
+  ): unknown {
+    if (
+      typeof value === 'object' &&
+      value !== null &&
+      (value as Record<string, unknown>).kind === 'Parameter'
+    ) {
+      const name = (value as Record<string, unknown>).name as string;
+      if (!(name in params)) {
+        throw new UnboundParameterError(name);
+      }
+      return params[name];
+    }
+    return value;
+  }
+
+  /**
    * Direct node lookup — O(1) via {@code graph.getNode(id)} for id-indexed
    * seeks or {@code graph.getNodes({filter})} for property-indexed seeks.
    * Delegates entirely to the Graph API; no Executor-level indexes needed.
@@ -216,19 +240,18 @@ export class Executor {
 
     switch (step.index) {
       case 'id': {
-        const id = typeof step.value === 'string' && step.value.startsWith('$')
-          ? String(params[step.value.slice(1)] ?? step.value)
-          : String(step.value);
-        const node = await this._graph.getNode(id);
+        const id = this._resolveParam(step.value, params);
+        const node = await this._graph.getNode(String(id ?? ''));
         nodes = node ? [node] : [];
         break;
       }
       case 'property': {
+        const resolvedValue = this._resolveParam(step.value, params);
         const filter: {
           types?: string[];
           properties: Array<{ key: string; value: unknown; op?: '=' }>;
         } = {
-          properties: [{ key: step.key!, value: step.value, op: '=' }],
+          properties: [{ key: step.key!, value: resolvedValue, op: '=' }],
         };
         if (step.types?.length) filter.types = step.types;
         nodes = await this._graph.getNodes({ filter }) as unknown as Node[];
