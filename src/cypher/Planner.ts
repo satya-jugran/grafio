@@ -68,11 +68,6 @@ export class Planner {
 
     // ── 2. Detect id(n)=value for NodeSeekStep ────────────────────
     const idLookups = this._reorderer.detectIdLookups(crossVar, varRegistry);
-    if (idLookups.size > 0) {
-      const lookupExprs = new Set<Expression>();
-      this._reorderer.collectIdLookupExprs(crossVar, lookupExprs);
-      this._reorderer.removeIdLookups(crossVar, lookupExprs);
-    }
 
     // ── 3. Reorder root patterns by selectivity ───────────────────
     const orderedPatterns = await this._reorderer.reorder(
@@ -82,12 +77,24 @@ export class Planner {
       idLookups,
     );
 
-    // ── 4. Emit pattern steps with per-variable predicates ────────
+    // ── 4. Emit pattern steps ──────────────────────────────────────
+    // Track which id-lookups were consumed as NodeSeekStep so that
+    // only those are removed from crossVar.  Unconsumed id-lookups
+    // (e.g. for a deeper node in a multi-hop path) remain in
+    // crossVar and become a FilterStep.
+    const consumed = new Set<string>();
     for (const pattern of orderedPatterns) {
-      this._patternPlanner.planPath(pattern, steps, ast, perVar, idLookups);
+      this._patternPlanner.planPath(pattern, steps, ast, perVar, idLookups, consumed);
     }
 
-    // ── 5. Emit remaining cross-variable filter ───────────────────
+    // ── 5. Remove consumed id-lookups from crossVar ────────────────
+    if (consumed.size > 0) {
+      const lookupExprs = new Set<Expression>();
+      this._reorderer.collectIdLookupExprs(crossVar, lookupExprs, consumed);
+      this._reorderer.removeIdLookups(crossVar, lookupExprs);
+    }
+
+    // ── 6. Emit remaining cross-variable filter ───────────────────
     if (crossVar.length > 0) {
       steps.push({
         kind: 'FilterStep',

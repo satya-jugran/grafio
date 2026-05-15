@@ -117,7 +117,51 @@ describe('Planner', () => {
     });
   });
 
-  // ── Projection ─────────────────────────────────────────────────
+  it('retains id() FilterStep for deep node in multi-hop path', async () => {
+    // For MATCH (a)-[]->(b)-[]->(c) WHERE id(c) = 5, 'c' is at
+    // segments[4] — beyond the first-edge-target (segments[2]).
+    // planPath cannot consume this id-lookup as NodeSeekStep
+    // (only root and first-edge-target are consumable), so the
+    // predicate MUST remain in crossVar as a FilterStep.
+    const p = await plan('MATCH (a)-[:KNOWS]->(b)-[:KNOWS]->(c) WHERE id(c) = 5 RETURN a, b, c');
+
+    // No NodeSeekStep for c
+    const seeks = p.steps.filter((s) => s.kind === 'NodeSeekStep');
+    expect(seeks.length).toBe(0);
+
+    // A FilterStep must exist for id(c) = 5
+    const filters = p.steps.filter((s) => s.kind === 'FilterStep');
+    expect(filters.length).toBeGreaterThanOrEqual(1);
+
+    // Verify the filter predicate looks like id(c) = 5
+    const idFilter = filters.find((s) => {
+      const pred = (s as any).predicate;
+      return pred?.kind === 'Binary' && pred?.op === '=';
+    });
+    expect(idFilter).toBeDefined();
+  });
+
+  it('emits NodeSeekStep for root id-lookup and does NOT leave stray FilterStep', async () => {
+    // id(a) consumed → NodeSeekStep, removed from crossVar.
+    const p = await plan('MATCH (a:Person)-[:KNOWS]->(b:Person) WHERE id(a) = 42 RETURN a, b');
+
+    const seeks = p.steps.filter((s) => s.kind === 'NodeSeekStep') as any[];
+    expect(seeks.length).toBe(1);
+    expect(seeks[0].index).toBe('id');
+    expect(seeks[0].value).toBe(42);
+
+    // No FilterStep for id(a) = 42 — it was consumed and removed.
+    const filters = p.steps.filter((s) => s.kind === 'FilterStep');
+    // May have edge/target inline-property filters, but NOT an id() filter.
+    const idFilters = filters.filter((s) => {
+      const pred = (s as any).predicate;
+      return pred?.kind === 'FunctionCall' ||
+        (pred?.kind === 'Binary' && pred?.left?.kind === 'FunctionCall');
+    });
+    expect(idFilters.length).toBe(0);
+  });
+
+// ── Projection ─────────────────────────────────────────────────
   describe('ProjectStep', () => {
     it('produces ProjectStep with columns', async () => {
       const p = await plan('MATCH (n) RETURN n.name AS name');

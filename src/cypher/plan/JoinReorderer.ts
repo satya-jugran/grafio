@@ -106,18 +106,27 @@ export class JoinReorderer {
 
   /**
    * Collect id-lookup expressions from crossVar for removal.
+   *
+   * When {@code onlyVars} is provided, only expressions whose variable
+   * name is in the set are collected.  This prevents silently dropping
+   * id-lookups for variables that the pattern planner cannot consume
+   * (e.g. deeper nodes in a multi-hop path).
    */
   collectIdLookupExprs(
     crossVar: Expression[],
     out: Set<Expression>,
+    onlyVars?: Set<string>,
   ): void {
     for (const expr of crossVar) {
       if (
         expr.kind === 'Binary' &&
         expr.op === '=' &&
         expr.left.kind === 'FunctionCall' &&
-        expr.left.name.toUpperCase() === 'ID'
+        expr.left.name.toUpperCase() === 'ID' &&
+        expr.left.args.length >= 1 &&
+        expr.left.args[0].kind === 'Identifier'
       ) {
+        if (onlyVars && !onlyVars.has(expr.left.args[0].name)) continue;
         out.add(expr);
       }
     }

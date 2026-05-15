@@ -44,6 +44,7 @@ export class PatternPlanner {
     ast: QueryAst,
     perVar: Map<string, PropertyFilter[]>,
     idLookups?: Map<string, unknown>,
+    consumed?: Set<string>,
   ): void {
     const segments = getPatternSegments(pattern);
     if (segments.length === 0) return;
@@ -63,6 +64,7 @@ export class PatternPlanner {
         value: idValue,
         variable: firstVar,
       });
+      consumed?.add(firstNode.variable);
       this._planTrailingSegments(segments, steps, ast, pattern);
       return;
     }
@@ -83,6 +85,7 @@ export class PatternPlanner {
           value: idValue,
           variable: targetVar,
         });
+        consumed?.add(targetNode.variable);
 
         // Expand in the reversed direction
         const revDirection: 'out' | 'in' =
