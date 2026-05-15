@@ -5,7 +5,7 @@ import { Semantic } from '../../src/cypher/Semantic';
 import { Planner } from '../../src/cypher/Planner';
 
 /** Helper: lex + parse + semantic + plan. */
-function plan(query: string) {
+async function plan(query: string) {
   const tokens = new Lexer(query).tokenise();
   const ast = new Parser(tokens).parse();
   new Semantic().analyse(ast);
@@ -15,16 +15,16 @@ function plan(query: string) {
 describe('Planner', () => {
   // ── Node scan ──────────────────────────────────────────────────
   describe('NodeScanStep', () => {
-    it('produces NodeScanStep for typed node', () => {
-      const p = plan('MATCH (n:Person) RETURN n');
+    it('produces NodeScanStep for typed node', async () => {
+      const p = await plan('MATCH (n:Person) RETURN n');
       expect(p.steps).toHaveLength(2); // scan + project
       expect(p.steps[0].kind).toBe('NodeScanStep');
       expect((p.steps[0] as any).label).toBe('Person');
       expect((p.steps[0] as any).variable).toBe('n');
     });
 
-    it('produces NodeScanStep with empty label for untyped node', () => {
-      const p = plan('MATCH (n) RETURN n');
+    it('produces NodeScanStep with empty label for untyped node', async () => {
+      const p = await plan('MATCH (n) RETURN n');
       expect(p.steps[0].kind).toBe('NodeScanStep');
       expect((p.steps[0] as any).label).toBe('');
     });
@@ -32,8 +32,8 @@ describe('Planner', () => {
 
   // ── Edge expansion ─────────────────────────────────────────────
   describe('EdgeExpandStep', () => {
-    it('produces EdgeExpandStep for single-hop edge', () => {
-      const p = plan('MATCH (a)-[:KNOWS]->(b) RETURN b');
+    it('produces EdgeExpandStep for single-hop edge', async () => {
+      const p = await plan('MATCH (a)-[:KNOWS]->(b) RETURN b');
       expect(p.steps[0].kind).toBe('NodeScanStep');
       expect(p.steps[1].kind).toBe('EdgeExpandStep');
 
@@ -43,14 +43,14 @@ describe('Planner', () => {
       expect(expand.strategy).toBe('single-hop');
     });
 
-    it('produces multi-hop-bfs for variable-length edge without LIMIT', () => {
-      const p = plan('MATCH (a)-[*1..3]->(b) RETURN b');
+    it('produces multi-hop-bfs for variable-length edge without LIMIT', async () => {
+      const p = await plan('MATCH (a)-[*1..3]->(b) RETURN b');
       const expand = p.steps[1] as any;
       expect(expand.strategy).toBe('multi-hop-bfs');
     });
 
-    it('produces multi-hop-dfs when LIMIT is present', () => {
-      const p = plan('MATCH (a)-[*1..3]->(b) RETURN b LIMIT 5');
+    it('produces multi-hop-dfs when LIMIT is present', async () => {
+      const p = await plan('MATCH (a)-[*1..3]->(b) RETURN b LIMIT 5');
       const expand = p.steps[1] as any;
       expect(expand.strategy).toBe('multi-hop-dfs');
       expect(expand.minHops).toBe(1);
@@ -59,96 +59,225 @@ describe('Planner', () => {
   });
 
   // ── Filter ─────────────────────────────────────────────────────
-  describe('FilterStep', () => {
-    it('produces FilterStep when WHERE present', () => {
-      const p = plan("MATCH (p:Person) WHERE p.name = 'Alice' RETURN p");
-      const hasFilter = p.steps.some((s) => s.kind === 'FilterStep');
-      expect(hasFilter).toBe(true);
-    });
-
-    it('filter appears before projection', () => {
-      const p = plan("MATCH (p:Person) WHERE p.name = 'Alice' RETURN p");
-      const filterIdx = p.steps.findIndex((s) => s.kind === 'FilterStep');
-      const projectIdx = p.steps.findIndex((s) => s.kind === 'ProjectStep');
-      expect(filterIdx).toBeLessThan(projectIdx);
-    });
-
-    it('generates FilterStep from node inline properties', () => {
-      const p = plan('MATCH (s:Student {year: 2024}) RETURN s');
-      // Should have: NodeScanStep, FilterStep (for year=2024), ProjectStep
+    it('pushes single-variable WHERE predicates into NodeScanStep propertyFilters', async () => {
+      const p = await plan("MATCH (p:Person) WHERE p.name = 'Alice' RETURN p");
+      // Phase 2: single-variable WHERE predicate is pushed into
+      // NodeScanStep.propertyFilters — no separate FilterStep.
+      const scan = p.steps.find((s) => s.kind === 'NodeScanStep') as any;
+      expect(scan).toBeDefined();
+      expect(scan.propertyFilters).toBeDefined();
+      expect(scan.propertyFilters).toHaveLength(1);
+      expect(scan.propertyFilters[0].key).toBe('name');
+      expect(scan.propertyFilters[0].value).toBe('Alice');
+      expect(scan.propertyFilters[0].op).toBe('=');
+      // No FilterStep remains
       const filters = p.steps.filter((s) => s.kind === 'FilterStep');
-      expect(filters.length).toBeGreaterThanOrEqual(1);
+      expect(filters.length).toBe(0);
+    });
+
+    it('keeps cross-variable WHERE predicates as FilterStep', async () => {
+      const p = await plan("MATCH (a:Person), (b:Person) WHERE a.city = b.city RETURN a, b");
+      // Cross-variable comparison cannot be pushed → remains as FilterStep.
+      const filters = p.steps.filter((s) => s.kind === 'FilterStep');
+      expect(filters.length).toBe(1);
       const filter = filters[0] as any;
       expect(filter.predicate.kind).toBe('Binary');
       expect(filter.predicate.op).toBe('=');
     });
 
-    it('generates FilterStep from edge inline properties', () => {
-      const p = plan('MATCH (a:Person)-[:KNOWS {since: 2020}]->(b:Person) RETURN b');
+    it('pushes node inline properties into NodeScanStep propertyFilters', async () => {
+      const p = await plan('MATCH (s:Student {year: 2024}) RETURN s');
+      // Phase 1: inline properties are pushed into NodeScanStep.propertyFilters,
+      // not emitted as separate FilterSteps.
+      const scan = p.steps.find((s) => s.kind === 'NodeScanStep') as any;
+      expect(scan).toBeDefined();
+      expect(scan.propertyFilters).toBeDefined();
+      expect(scan.propertyFilters).toHaveLength(1);
+      expect(scan.propertyFilters[0].key).toBe('year');
+      expect(scan.propertyFilters[0].value).toBe(2024);
+      expect(scan.propertyFilters[0].op).toBe('=');
+      // types should be set from node labels
+      expect(scan.types).toEqual(['Student']);
+      // No separate FilterStep for inline properties
+      const filters = p.steps.filter((s) => s.kind === 'FilterStep');
+      expect(filters.length).toBe(0);
+    });
+
+    it('generates FilterStep from edge inline properties', async () => {
+      const p = await plan('MATCH (a:Person)-[:KNOWS {since: 2020}]->(b:Person) RETURN b');
       const filters = p.steps.filter((s) => s.kind === 'FilterStep');
       // At least one filter for the edge property
       expect(filters.length).toBeGreaterThanOrEqual(1);
     });
 
-    it('generates FilterStep from target node inline properties', () => {
-      const p = plan('MATCH (a:Person)-[:KNOWS]->(b:Person {active: true}) RETURN b');
+    it('generates FilterStep from target node inline properties', async () => {
+      const p = await plan('MATCH (a:Person)-[:KNOWS]->(b:Person {active: true}) RETURN b');
       const filters = p.steps.filter((s) => s.kind === 'FilterStep');
       expect(filters.length).toBeGreaterThanOrEqual(1);
     });
   });
 
-  // ── Projection ─────────────────────────────────────────────────
+  it('retains id() FilterStep for deep node in multi-hop path', async () => {
+    // For MATCH (a)-[]->(b)-[]->(c) WHERE id(c) = 5, 'c' is at
+    // segments[4] — beyond the first-edge-target (segments[2]).
+    // planPath cannot consume this id-lookup as NodeSeekStep
+    // (only root and first-edge-target are consumable), so the
+    // predicate MUST remain in crossVar as a FilterStep.
+    const p = await plan('MATCH (a)-[:KNOWS]->(b)-[:KNOWS]->(c) WHERE id(c) = 5 RETURN a, b, c');
+
+    // No NodeSeekStep for c
+    const seeks = p.steps.filter((s) => s.kind === 'NodeSeekStep');
+    expect(seeks.length).toBe(0);
+
+    // A FilterStep must exist for id(c) = 5
+    const filters = p.steps.filter((s) => s.kind === 'FilterStep');
+    expect(filters.length).toBeGreaterThanOrEqual(1);
+
+    // Verify the filter predicate looks like id(c) = 5
+    const idFilter = filters.find((s) => {
+      const pred = (s as any).predicate;
+      return pred?.kind === 'Binary' && pred?.op === '=';
+    });
+    expect(idFilter).toBeDefined();
+  });
+
+  it('emits NodeSeekStep for root id-lookup and does NOT leave stray FilterStep', async () => {
+    // id(a) consumed → NodeSeekStep, removed from crossVar.
+    const p = await plan('MATCH (a:Person)-[:KNOWS]->(b:Person) WHERE id(a) = 42 RETURN a, b');
+
+    const seeks = p.steps.filter((s) => s.kind === 'NodeSeekStep') as any[];
+    expect(seeks.length).toBe(1);
+    expect(seeks[0].index).toBe('id');
+    expect(seeks[0].value).toBe(42);
+
+    // No FilterStep for id(a) = 42 — it was consumed and removed.
+    const filters = p.steps.filter((s) => s.kind === 'FilterStep');
+    // May have edge/target inline-property filters, but NOT an id() filter.
+    const idFilters = filters.filter((s) => {
+      const pred = (s as any).predicate;
+      return pred?.kind === 'FunctionCall' ||
+        (pred?.kind === 'Binary' && pred?.left?.kind === 'FunctionCall');
+    });
+    expect(idFilters.length).toBe(0);
+  });
+
+    it('emits FilterStep for root perVar predicates in reversal branch', async () => {
+      // id(b) triggers reversal (seek b, expand backwards to a).
+      // a.name = 'Alice' is in perVar['a'] and must be emitted as
+      // FilterStep after the reversed expand.
+      // NOTE: Uses two different variables (a and b) so that
+      // _classify splits the AND correctly into multi-var path.
+      const p = await plan(
+        "MATCH (a:Person)-[:KNOWS]->(b:Person) WHERE id(b) = 42 AND a.name = 'Alice' RETURN a, b",
+      );
+
+      const seeks = p.steps.filter((s) => s.kind === 'NodeSeekStep') as any[];
+      expect(seeks.length).toBe(1);
+      expect(seeks[0].index).toBe('id');
+      expect(seeks[0].value).toBe(42);
+
+      // Must have a FilterStep for a.name = 'Alice' from perVar
+      const filters = p.steps.filter((s) => s.kind === 'FilterStep') as any[];
+      const nameFilter = filters.find(
+        (s) =>
+          s.predicate?.kind === 'Binary' &&
+          s.predicate?.left?.kind === 'PropertyAccess' &&
+          s.predicate?.left?.property === 'name',
+      );
+      expect(nameFilter).toBeDefined();
+    });
+
+    it('correctly splits id(a)=42 AND a.name=Alice on the same variable', async () => {
+      // Before the _classify AND-split fix, _classify would pass the
+      // entire AND to _toPropertyFilter, which dropped the id() side.
+      // Now id(a)=42 → crossVar → idLookups → consumed as
+      // NodeSeekStep, and a.name='Alice' → perVar['a'] → FilterStep.
+      const p = await plan(
+        "MATCH (a:Person)-[:KNOWS]->(b:Person) WHERE id(a) = 42 AND a.name = 'Alice' RETURN a, b",
+      );
+
+      // NodeSeekStep for id(a) = 42
+      const seeks = p.steps.filter((s) => s.kind === 'NodeSeekStep') as any[];
+      expect(seeks.length).toBe(1);
+      expect(seeks[0].index).toBe('id');
+      expect(seeks[0].value).toBe(42);
+
+      // FilterStep for a.name = 'Alice' from perVar
+      const filters = p.steps.filter((s) => s.kind === 'FilterStep') as any[];
+      const nameFilter = filters.find(
+        (s) =>
+          s.predicate?.kind === 'Binary' &&
+          s.predicate?.left?.kind === 'PropertyAccess' &&
+          s.predicate?.left?.property === 'name',
+      );
+      expect(nameFilter).toBeDefined();
+    });
+
+    it('emits FilterStep for root perVar predicates alongside NodeSeekStep', async () => {
+      // Root id(a)=42 consumed as NodeSeekStep.
+      // a.name='Alice' decomposed to perVar['a'] → emitted as
+      // FilterStep after _planTrailingSegments (no NodeScanStep for root).
+      const p = await plan(
+        "MATCH (a:Person)-[:KNOWS]->(b:Person) WHERE id(a) = 42 AND a.name = 'Alice' RETURN a, b",
+      );
+
+      const seeks = p.steps.filter((s) => s.kind === 'NodeSeekStep') as any[];
+      expect(seeks.length).toBe(1);
+      expect(seeks[0].index).toBe('id');
+      expect(seeks[0].value).toBe(42);
+
+      // Must have a FilterStep for a.name = 'Alice' from perVar
+      const filters = p.steps.filter((s) => s.kind === 'FilterStep') as any[];
+      const nameFilter = filters.find(
+        (s) =>
+          s.predicate?.kind === 'Binary' &&
+          s.predicate?.left?.kind === 'PropertyAccess' &&
+          s.predicate?.left?.property === 'name',
+      );
+      expect(nameFilter).toBeDefined();
+    });
+
+// ── Projection ─────────────────────────────────────────────────
   describe('ProjectStep', () => {
-    it('produces ProjectStep with columns', () => {
-      const p = plan('MATCH (n) RETURN n.name AS name');
+    it('produces ProjectStep with columns', async () => {
+      const p = await plan('MATCH (n) RETURN n.name AS name');
       const proj = p.steps.find((s) => s.kind === 'ProjectStep') as any;
       expect(proj.columns).toHaveLength(1);
       expect(proj.columns[0].alias).toBe('name');
     });
 
-    it('derives alias from PropertyAccess (no AS)', () => {
-      const p = plan('MATCH (n) RETURN n.name');
+    it('derives alias from PropertyAccess (no AS)', async () => {
+      const p = await plan('MATCH (n) RETURN n.name');
       const proj = p.steps.find((s) => s.kind === 'ProjectStep') as any;
       expect(proj.columns[0].alias).toBe('n_name');
     });
 
-    it('derives alias from Literal (no AS)', () => {
-      const p = plan('MATCH (n) RETURN 42');
+    it('derives alias from Literal (no AS)', async () => {
+      const p = await plan('MATCH (n) RETURN 42');
       const proj = p.steps.find((s) => s.kind === 'ProjectStep') as any;
       expect(proj.columns[0].alias).toBe('42');
     });
 
-    it('derives alias from Parameter (no AS)', () => {
-      const p = plan('MATCH (n) RETURN $name');
+    it('derives alias from Parameter (no AS)', async () => {
+      const p = await plan('MATCH (n) RETURN $name');
       const proj = p.steps.find((s) => s.kind === 'ProjectStep') as any;
       expect(proj.columns[0].alias).toBe('name');
     });
 
-    it('derives alias from FunctionCall (no AS)', () => {
-      const planner = new Planner();
-      const fnExpr = { kind: 'FunctionCall' as const, name: 'COUNT', args: [] };
-      expect((planner as any)._deriveAlias(fnExpr)).toBe('count');
-    });
-
-    it('derives alias from unknown expression (default)', () => {
-      const planner = new Planner();
-      const unknownExpr = { kind: 'Binary' as const, op: '+' as const, left: {} as any, right: {} as any };
-      expect((planner as any)._deriveAlias(unknownExpr)).toBe('expr');
-    });
   });
 
   // ── Sort ───────────────────────────────────────────────────────
   describe('SortStep', () => {
-    it('produces SortStep for ORDER BY', () => {
-      const p = plan('MATCH (n) RETURN n ORDER BY n.name ASC');
+    it('produces SortStep for ORDER BY', async () => {
+      const p = await plan('MATCH (n) RETURN n ORDER BY n.name ASC');
       expect(p.steps.some((s) => s.kind === 'SortStep')).toBe(true);
     });
   });
 
   // ── Limit ──────────────────────────────────────────────────────
   describe('LimitStep', () => {
-    it('produces LimitStep for SKIP and LIMIT', () => {
-      const p = plan('MATCH (n) RETURN n SKIP 5 LIMIT 10');
+    it('produces LimitStep for SKIP and LIMIT', async () => {
+      const p = await plan('MATCH (n) RETURN n SKIP 5 LIMIT 10');
       expect(p.steps.some((s) => s.kind === 'LimitStep')).toBe(true);
     });
   });
@@ -157,8 +286,8 @@ describe('Planner', () => {
   describe('Aggregate Planning', () => {
     // -- Simple plan shapes (storage-level aggregation) --
 
-    it('produces AggregateStep + ProjectStep for COUNT(p)', () => {
-      const p = plan('MATCH (p:Person) RETURN COUNT(p)');
+    it('produces AggregateStep + ProjectStep for COUNT(p)', async () => {
+      const p = await plan('MATCH (p:Person) RETURN COUNT(p)');
       expect(p.steps).toHaveLength(2);
       expect(p.steps[0].kind).toBe('AggregateStep');
       expect(p.steps[1].kind).toBe('ProjectStep');
@@ -175,8 +304,8 @@ describe('Planner', () => {
       expect(p.steps.some((s) => s.kind === 'NodeScanStep')).toBe(false);
     });
 
-    it('produces AggregateStep + ProjectStep for AVG(p.age) AS avg_age', () => {
-      const p = plan('MATCH (p:Person) RETURN AVG(p.age) AS avg_age');
+    it('produces AggregateStep + ProjectStep for AVG(p.age) AS avg_age', async () => {
+      const p = await plan('MATCH (p:Person) RETURN AVG(p.age) AS avg_age');
       expect(p.steps).toHaveLength(2);
       expect(p.steps[0].kind).toBe('AggregateStep');
       expect(p.steps[1].kind).toBe('ProjectStep');
@@ -189,8 +318,8 @@ describe('Planner', () => {
       expect(agg.sourceType).toBe('Person');
     });
 
-    it('produces multiple AggregateSpecs for MIN, MAX, AVG', () => {
-      const p = plan('MATCH (p:Person) RETURN MIN(p.age), MAX(p.age), AVG(p.age)');
+    it('produces multiple AggregateSpecs for MIN, MAX, AVG', async () => {
+      const p = await plan('MATCH (p:Person) RETURN MIN(p.age), MAX(p.age), AVG(p.age)');
       expect(p.steps).toHaveLength(2);
       expect(p.steps[0].kind).toBe('AggregateStep');
       expect(p.steps[1].kind).toBe('ProjectStep');
@@ -204,8 +333,8 @@ describe('Planner', () => {
       expect(agg.sourceType).toBe('Person');
     });
 
-    it('handles COUNT(*) with undefined sourceVariable', () => {
-      const p = plan('MATCH (p:Person) RETURN COUNT(*)');
+    it('handles COUNT(*) with undefined sourceVariable', async () => {
+      const p = await plan('MATCH (p:Person) RETURN COUNT(*)');
 
       // COUNT(*) has no variable → sourceVariable is undefined → complex plan
       const aggStep = p.steps.find((s) => s.kind === 'AggregateStep') as any;
@@ -219,8 +348,8 @@ describe('Planner', () => {
 
     // -- Group-by plan shapes --
 
-    it('produces groupBy for non-aggregate RETURN items', () => {
-      const p = plan('MATCH (p:Person) RETURN p.city, COUNT(p)');
+    it('produces groupBy for non-aggregate RETURN items', async () => {
+      const p = await plan('MATCH (p:Person) RETURN p.city, COUNT(p)');
       // Group-by uses complex plan: NodeScanStep + AggregateStep + ProjectStep
       expect(p.steps).toHaveLength(3);
       expect(p.steps[0].kind).toBe('NodeScanStep');
@@ -235,8 +364,8 @@ describe('Planner', () => {
       expect(agg.aggregates[0].function).toBe('COUNT');
     });
 
-    it('produces multiple groupBy entries', () => {
-      const p = plan('MATCH (p:Person) RETURN p.city, p.state, COUNT(p)');
+    it('produces multiple groupBy entries', async () => {
+      const p = await plan('MATCH (p:Person) RETURN p.city, p.state, COUNT(p)');
       // Group-by uses complex plan: NodeScanStep + AggregateStep + ProjectStep
       expect(p.steps).toHaveLength(3);
       expect(p.steps[0].kind).toBe('NodeScanStep');
@@ -251,8 +380,8 @@ describe('Planner', () => {
 
     // -- Complex plan shapes (joins — in-process) --
 
-    it('keeps full pipeline for complex aggregate with edge expansion', () => {
-      const p = plan('MATCH (p:Person)-[:KNOWS]->(f:Person) RETURN COUNT(f)');
+    it('keeps full pipeline for complex aggregate with edge expansion', async () => {
+      const p = await plan('MATCH (p:Person)-[:KNOWS]->(f:Person) RETURN COUNT(f)');
 
       // Complex plan: NodeScanStep and EdgeExpandStep remain
       expect(p.steps.some((s) => s.kind === 'NodeScanStep')).toBe(true);
@@ -268,15 +397,15 @@ describe('Planner', () => {
 
     // -- Non-aggregate queries (no regression) --
 
-    it('produces no AggregateStep for MATCH (n) RETURN n', () => {
-      const p = plan('MATCH (n) RETURN n');
+    it('produces no AggregateStep for MATCH (n) RETURN n', async () => {
+      const p = await plan('MATCH (n) RETURN n');
       expect(p.steps[0].kind).toBe('NodeScanStep');
       expect(p.steps[1].kind).toBe('ProjectStep');
       expect(p.steps.some((s) => s.kind === 'AggregateStep')).toBe(false);
     });
 
-    it('produces no AggregateStep for MATCH (n) RETURN n.name, n.age', () => {
-      const p = plan('MATCH (n) RETURN n.name, n.age');
+    it('produces no AggregateStep for MATCH (n) RETURN n.name, n.age', async () => {
+      const p = await plan('MATCH (n) RETURN n.name, n.age');
       expect(p.steps[0].kind).toBe('NodeScanStep');
       expect(p.steps[1].kind).toBe('ProjectStep');
       expect(p.steps.some((s) => s.kind === 'AggregateStep')).toBe(false);
@@ -285,16 +414,16 @@ describe('Planner', () => {
 
   // ── HAVING plan shape ────────────────────────────────────────────
   describe('HAVING plan shape', () => {
-    it('places FilterStep after AggregateStep when HAVING exists', () => {
-      const p = plan('MATCH (p:Person) RETURN p.city, COUNT(*) AS cnt HAVING cnt > 5');
+    it('places FilterStep after AggregateStep when HAVING exists', async () => {
+      const p = await plan('MATCH (p:Person) RETURN p.city, COUNT(*) AS cnt HAVING cnt > 5');
       const aggIdx = p.steps.findIndex((s) => s.kind === 'AggregateStep');
       const filterIdx = p.steps.findIndex((s) => s.kind === 'FilterStep');
       expect(aggIdx).toBeGreaterThanOrEqual(0);
       expect(filterIdx).toBeGreaterThan(aggIdx);
     });
 
-    it('places FilterStep before ProjectStep for HAVING without aggregates', () => {
-      const p = plan("MATCH (p:Person) RETURN p.name HAVING p.name = 'Alice'");
+    it('places FilterStep before ProjectStep for HAVING without aggregates', async () => {
+      const p = await plan("MATCH (p:Person) RETURN p.name HAVING p.name = 'Alice'");
       const filterIdx = p.steps.findIndex((s) => s.kind === 'FilterStep');
       const projectIdx = p.steps.findIndex((s) => s.kind === 'ProjectStep');
       expect(filterIdx).toBeGreaterThanOrEqual(0);
@@ -304,16 +433,16 @@ describe('Planner', () => {
 
   // ── ORDER BY with aggregates plan shape ──────────────────────────
   describe('ORDER BY with aggregates plan shape', () => {
-    it('places SortStep after AggregateStep when aggregates present', () => {
-      const p = plan('MATCH (p:Person) RETURN p.city, COUNT(*) AS cnt ORDER BY cnt DESC');
+    it('places SortStep after AggregateStep when aggregates present', async () => {
+      const p = await plan('MATCH (p:Person) RETURN p.city, COUNT(*) AS cnt ORDER BY cnt DESC');
       const aggIdx = p.steps.findIndex((s) => s.kind === 'AggregateStep');
       const sortIdx = p.steps.findIndex((s) => s.kind === 'SortStep');
       expect(aggIdx).toBeGreaterThanOrEqual(0);
       expect(sortIdx).toBeGreaterThan(aggIdx);
     });
 
-    it('places SortStep before ProjectStep when no aggregates', () => {
-      const p = plan('MATCH (n) RETURN n ORDER BY n.name ASC');
+    it('places SortStep before ProjectStep when no aggregates', async () => {
+      const p = await plan('MATCH (n) RETURN n ORDER BY n.name ASC');
       const sortIdx = p.steps.findIndex((s) => s.kind === 'SortStep');
       const projectIdx = p.steps.findIndex((s) => s.kind === 'ProjectStep');
       expect(sortIdx).toBeGreaterThanOrEqual(0);
@@ -323,8 +452,8 @@ describe('Planner', () => {
 
   // ── Aggregate expression plan shape ──────────────────────────────
   describe('Aggregate expression plan shape', () => {
-    it('extracts internal alias for COUNT(*) + 1', () => {
-      const p = plan('MATCH (p:Person) RETURN COUNT(*) + 1 AS result');
+    it('extracts internal alias for COUNT(*) + 1', async () => {
+      const p = await plan('MATCH (p:Person) RETURN COUNT(*) + 1 AS result');
       const agg = p.steps.find((s) => s.kind === 'AggregateStep') as any;
       expect(agg).toBeDefined();
       expect(agg.aggregates).toHaveLength(1);
@@ -336,8 +465,8 @@ describe('Planner', () => {
       expect(proj.columns[0].expression.kind).toBe('Binary');
     });
 
-    it('extracts two internal aliases for SUM(x) / COUNT(*)', () => {
-      const p = plan('MATCH (p:Person) RETURN SUM(p.age) / COUNT(*) AS average');
+    it('extracts two internal aliases for SUM(x) / COUNT(*)', async () => {
+      const p = await plan('MATCH (p:Person) RETURN SUM(p.age) / COUNT(*) AS average');
       const agg = p.steps.find((s) => s.kind === 'AggregateStep') as any;
       expect(agg).toBeDefined();
       expect(agg.aggregates).toHaveLength(2);
@@ -351,12 +480,11 @@ describe('Planner', () => {
       expect(proj.columns[0].expression.kind).toBe('Binary');
     });
 
-    it('preserves simple aggregate COUNT(*) AS cnt without rewriting', () => {
-      const p = plan('MATCH (p:Person) RETURN COUNT(*) AS cnt');
+    it('preserves simple aggregate COUNT(*) AS cnt without rewriting', async () => {
+      const p = await plan('MATCH (p:Person) RETURN COUNT(*) AS cnt');
       const agg = p.steps.find((s) => s.kind === 'AggregateStep') as any;
       expect(agg.aggregates).toHaveLength(1);
       expect(agg.aggregates[0].alias).toBe('cnt');
       expect(agg.aggregates[0].function).toBe('COUNT');
     });
   });
-});

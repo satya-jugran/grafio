@@ -111,8 +111,8 @@ export class CypherEngine {
     semantic.analyse(rawAst);
 
     // ── 5. Plan ───────────────────────────────────────────────────
-    const planner = new Planner();
-    const plan = planner.plan(rawAst);
+    const planner = new Planner(this._graph);
+    const plan = await planner.plan(rawAst);
 
     // ── 6. Execute ────────────────────────────────────────────────
     const executor = new Executor(this._graph);

@@ -503,6 +503,26 @@ describe('CypherEngine Integration', () => {
       expect(result.rows[0].name).toBe('Alice');
     });
 
+    it('filters by id(p) = $param (NodeSeekStep with parameter)', async () => {
+      const graph = new Graph();
+      await buildSocialGraph(graph);
+      const engine = new CypherEngine(graph);
+
+      // Get Alice's id first
+      const aliceResult = await engine.execute(
+        'MATCH (p:Person {name: "Alice"}) RETURN id(p) AS nodeId',
+      );
+      const aliceId = aliceResult.rows[0].nodeId as string;
+
+      // Use id() with a $param — this should trigger NodeSeekStep
+      const result = await engine.execute(
+        'MATCH (p:Person) WHERE id(p) = $nodeId RETURN p.name AS name',
+        { nodeId: aliceId },
+      );
+      expect(result.rows).toHaveLength(1);
+      expect(result.rows[0].name).toBe('Alice');
+    });
+
     it('returns different ids for different nodes', async () => {
       const graph = new Graph();
       await buildSocialGraph(graph);

@@ -18,7 +18,7 @@ async function executeQuery(
   const tokens = new Lexer(query).tokenise();
   const ast = new Parser(tokens).parse();
   new Semantic().analyse(ast);
-  const plan = new Planner().plan(ast);
+  const plan = await new Planner().plan(ast);
   return new Executor(g).execute(plan, params);
 }
 

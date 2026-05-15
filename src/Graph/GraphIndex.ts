@@ -472,6 +472,10 @@ export class GraphIndex {
     await this._store.createIndex(target, propertyKey, type);
   }
 
+  async hasIndex(target: 'node' | 'edge', propertyKey: string): Promise<boolean> {
+    return true;
+  }
+
   // ---------------------------------------------------------------------------
   // Aggregation
   // ---------------------------------------------------------------------------
