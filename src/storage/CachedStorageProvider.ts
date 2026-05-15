@@ -4,6 +4,7 @@ import type {
   GraphData,
   AggregateOp,
   AggregateResult,
+  QueryOptionsFilterProperty,
 } from '../types';
 import type {
   IStorageProvider,
@@ -247,7 +248,7 @@ export class CachedStorageProvider implements IStorageProvider {
           // Check if edge matches the property filters
           const properties = options?.filter?.properties;
           const propertyMatch = !properties || properties.length === 0 || properties.every(
-            (prop) => this._matchesPropertyFilter(edge.properties?.[prop.key], prop)
+            (prop) => this._matchesPropertyFilter(edge.properties ?? {}, prop)
           );
           if (!propertyMatch) continue;
 
@@ -292,7 +293,7 @@ export class CachedStorageProvider implements IStorageProvider {
           // Check if edge matches the property filters
           const properties = options?.filter?.properties;
           const propertyMatch = !properties || properties.length === 0 || properties.every(
-            (prop) => this._matchesPropertyFilter(edge.properties?.[prop.key], prop)
+            (prop) => this._matchesPropertyFilter(edge.properties ?? {}, prop)
           );
           if (!propertyMatch) continue;
 
@@ -494,9 +495,39 @@ export class CachedStorageProvider implements IStorageProvider {
   }
 
   /**
-   * Checks if a property value matches a filter specification with operator support.
+   * Checks if properties match a filter specification with operator AND/OR chaining support.
+   * Recursively evaluates AND (all must match) and OR (any must match) sub-filters.
    */
-  private _matchesPropertyFilter(actualValue: unknown, filter: { key: string; value: unknown; op?: string }): boolean {
+  private _matchesPropertyFilter(properties: Record<string, unknown>, filter: QueryOptionsFilterProperty): boolean {
+    // Handle AND - ALL conditions must be true
+    if (filter.AND && filter.AND.length > 0) {
+      for (const subFilter of filter.AND) {
+        if (!this._matchesPropertyFilter(properties, subFilter)) {
+          return false;
+        }
+      }
+    }
+
+    // Handle OR - ANY condition must be true
+    if (filter.OR && filter.OR.length > 0) {
+      let orMatched = false;
+      for (const subFilter of filter.OR) {
+        if (this._matchesPropertyFilter(properties, subFilter)) {
+          orMatched = true;
+          break;
+        }
+      }
+      if (!orMatched) {
+        return false;
+      }
+    }
+
+    // Handle base case - single property filter with operator
+    // If key is not provided, this is a structural filter (AND/OR only) - always matches for base comparison
+    if (filter.key === undefined) {
+      return true;
+    }
+    const actualValue = properties[filter.key];
     const filterValue = filter.value;
     const op = filter.op ?? '=';
 
