@@ -270,6 +270,15 @@ export interface IStorageProvider {
    */
   createIndex(target: 'node' | 'edge', propertyKey: string, type?: string): Promise<void>;
 
+  /**
+   * Checks if an index exists on a node or edge property.
+   *
+   * @param target - Either 'node' or 'edge'
+   * @param propertyKey - The property name to check for an index
+   * @returns true if an index exists for the given property, false otherwise
+   */
+  hasIndex(target: 'node' | 'edge', propertyKey: string): Promise<boolean>;
+
   // ---------------------------------------------------------------------------
   // Data portability
   // ---------------------------------------------------------------------------

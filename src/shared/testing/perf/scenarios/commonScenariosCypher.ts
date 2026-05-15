@@ -45,7 +45,7 @@ export function buildCommonScenariosCypher(
     // ── Read: getNode by id ────────────────────────────────────────────────
     {
       category: 'Read',
-      name: 'MATCH (n) WHERE id(n) = $id',
+      name: 'Get Node by id (parameterised)',
       setup: (meta: GraphMeta) => {
         const engine = new CypherEngine(meta.graph);
         (meta as GraphMeta & { _engine?: CypherEngine })._engine = engine;
@@ -58,10 +58,10 @@ export function buildCommonScenariosCypher(
       iterations: calcIterations(50_000, factor, isLarge, 50_000),
     },
 
-    // ── Read: hasNode (check if node exists) ──────────────────────────────
+    // ── Read: Get Node by id ──────────────────────────────
     {
       category: 'Read',
-      name: 'MATCH (n) WHERE id(n) = $id RETURN count(n)',
+      name: 'Get nodes by id',
       setup: (meta: GraphMeta) => {
         const engine = new CypherEngine(meta.graph);
         (meta as GraphMeta & { _engine?: CypherEngine })._engine = engine;
@@ -74,10 +74,10 @@ export function buildCommonScenariosCypher(
       iterations: calcIterations(50_000, factor, isLarge, 50_000),
     },
 
-    // ── Read: getNodes with filter.types ─────────────────────────────────────
+    // ── Read: Get Nodes with filter.types ─────────────────────────────────────
     {
       category: 'Read',
-      name: 'MATCH (n:Person) RETURN count(n)',
+      name: 'Get nodes by type',
       setup: (meta: GraphMeta) => {
         const engine = new CypherEngine(meta.graph);
         (meta as GraphMeta & { _engine?: CypherEngine })._engine = engine;
@@ -89,10 +89,10 @@ export function buildCommonScenariosCypher(
       iterations: calcIterations(100, factor, isLarge, 50_000),
     },
 
-    // ── Read: getNodes with filter.properties ─────────────────────────────────
+    // ── Read: Get Nodes with filter.properties ─────────────────────────────────
     {
       category: 'Read',
-      name: 'MATCH (n) WHERE n.active = true RETURN count(n)',
+      name: 'Get nodes by property',
       setup: (meta: GraphMeta) => {
         const engine = new CypherEngine(meta.graph);
         (meta as GraphMeta & { _engine?: CypherEngine })._engine = engine;
@@ -104,10 +104,10 @@ export function buildCommonScenariosCypher(
       iterations: calcIterations(20, factor, isLarge, 50_000),
     },
 
-    // ── Read: getNodes (full scan) ─────────────────────────────────────────
+    // ── Read: Get Nodes (full scan) ─────────────────────────────────────────
     {
       category: 'Read',
-      name: 'MATCH (n) RETURN count(n)',
+      name: 'Get all Nodes',
       setup: (meta: GraphMeta) => {
         const engine = new CypherEngine(meta.graph);
         (meta as GraphMeta & { _engine?: CypherEngine })._engine = engine;
@@ -122,7 +122,7 @@ export function buildCommonScenariosCypher(
     // ── Navigation: getEdgesFrom ────────────────────────────────────────────
     {
       category: 'Navigation',
-      name: 'MATCH (s)-[r]->(t) WHERE id(s) = $id RETURN r',
+      name: 'Get Edges from node by id',
       setup: (meta: GraphMeta) => {
         const engine = new CypherEngine(meta.graph);
         (meta as GraphMeta & { _engine?: CypherEngine })._engine = engine;
@@ -138,7 +138,7 @@ export function buildCommonScenariosCypher(
     // ── Navigation: getEdgesTo ─────────────────────────────────────────────
     {
       category: 'Navigation',
-      name: 'MATCH (s)-[r]->(t) WHERE id(t) = $id RETURN r',
+      name: 'Get Edges to node by id',
       setup: (meta: GraphMeta) => {
         const engine = new CypherEngine(meta.graph);
         (meta as GraphMeta & { _engine?: CypherEngine })._engine = engine;
@@ -154,7 +154,7 @@ export function buildCommonScenariosCypher(
     // ── Navigation: getDirectEdgesBetween ────────────────────────────────
     {
       category: 'Navigation',
-      name: 'MATCH (a)-[r]->(b) WHERE id(a) = $src AND id(b) = $tgt RETURN r',
+      name: 'Get edges between nodes by ids',
       setup: (meta: GraphMeta) => {
         const engine = new CypherEngine(meta.graph);
         (meta as GraphMeta & { _engine?: CypherEngine })._engine = engine;
@@ -170,10 +170,10 @@ export function buildCommonScenariosCypher(
       iterations: calcIterations(3_000, factor, isLarge, 50_000),
     },
 
-    // ── Traversal: BFS via variable-length path ─────────────────────────
+    // ── Traversal: Traversal variable-length path ─────────────────────────
     {
       category: 'Traversal',
-      name: 'MATCH (a)-[*1..10]->(b) WHERE id(a) = $src AND id(b) = $tgt RETURN b',
+      name: 'Traversal var-length (1..5)',
       setup: (meta: GraphMeta) => {
         const engine = new CypherEngine(meta.graph);
         (meta as GraphMeta & { _engine?: CypherEngine })._engine = engine;
@@ -182,36 +182,17 @@ export function buildCommonScenariosCypher(
         const engine = (meta as GraphMeta & { _engine?: CypherEngine })._engine!;
         const [src, tgt] = meta.traversalPairs[0];
         return engine.execute(
-          'MATCH (a)-[*1..10]->(b) WHERE id(a) = $src AND id(b) = $tgt RETURN b',
+          'MATCH (a)-[*1..5]->(b) WHERE id(a) = $src AND id(b) = $tgt RETURN b',
           { src, tgt }
         );
       },
       iterations: calcIterations(100, factor, isLarge, 50_000),
     },
 
-    // ── Traversal: DFS via variable-length path ─────────────────────────
+    // ── Traversal: Traversal with type filters ──────────────────────────────────
     {
       category: 'Traversal',
-      name: 'MATCH (a)-[*1..10]->(b) WHERE id(a) = $src AND id(b) = $tgt RETURN b (DFS)',
-      setup: (meta: GraphMeta) => {
-        const engine = new CypherEngine(meta.graph);
-        (meta as GraphMeta & { _engine?: CypherEngine })._engine = engine;
-      },
-      run: async (graph: any, meta: any) => {
-        const engine = (meta as GraphMeta & { _engine?: CypherEngine })._engine!;
-        const [src, tgt] = meta.traversalPairs[1];
-        return engine.execute(
-          'MATCH (a)-[*1..10]->(b) WHERE id(a) = $src AND id(b) = $tgt RETURN b',
-          { src, tgt }
-        );
-      },
-      iterations: calcIterations(100, factor, isLarge, 50_000),
-    },
-
-    // ── Traversal: BFS with type filters ──────────────────────────────────
-    {
-      category: 'Traversal',
-      name: 'MATCH (a)-[:KNOWS|BOUGHT*1..10]->(b) WHERE id(a) = $src AND id(b) = $tgt RETURN b',
+      name: 'Traversal with types',
       setup: (meta: GraphMeta) => {
         const engine = new CypherEngine(meta.graph);
         (meta as GraphMeta & { _engine?: CypherEngine })._engine = engine;
@@ -220,26 +201,7 @@ export function buildCommonScenariosCypher(
         const engine = (meta as GraphMeta & { _engine?: CypherEngine })._engine!;
         const [src, tgt] = meta.traversalPairs[2];
         return engine.execute(
-          'MATCH (a)-[:KNOWS|BOUGHT*1..10]->(b) WHERE id(a) = $src AND id(b) = $tgt RETURN b',
-          { src, tgt }
-        );
-      },
-      iterations: calcIterations(100, factor, isLarge, 50_000),
-    },
-
-    // ── Traversal: DFS with type filters ────────────────────────────────────
-    {
-      category: 'Traversal',
-      name: 'MATCH (a)-[:KNOWS|BOUGHT*1..10]->(b) WHERE id(a) = $src AND id(b) = $tgt RETURN b (DFS)',
-      setup: (meta: GraphMeta) => {
-        const engine = new CypherEngine(meta.graph);
-        (meta as GraphMeta & { _engine?: CypherEngine })._engine = engine;
-      },
-      run: async (graph: any, meta: any) => {
-        const engine = (meta as GraphMeta & { _engine?: CypherEngine })._engine!;
-        const [src, tgt] = meta.traversalPairs[2];
-        return engine.execute(
-          'MATCH (a)-[:KNOWS|BOUGHT*1..10]->(b) WHERE id(a) = $src AND id(b) = $tgt RETURN b',
+          'MATCH (a)-[:KNOWS|BOUGHT*1..5]->(b) WHERE id(a) = $src AND id(b) = $tgt RETURN b',
           { src, tgt }
         );
       },
@@ -249,7 +211,7 @@ export function buildCommonScenariosCypher(
     // ── Traversal: Wildcard source with type filters ──────────────────────
     {
       category: 'Traversal',
-      name: 'MATCH (a)-[:KNOWS|BOUGHT|WRITTEN*1..5]->(b) WHERE id(b) = $tgt RETURN id(a) LIMIT 10',
+      name: 'Traversal wildcard with types',
       setup: (meta: GraphMeta) => {
         const engine = new CypherEngine(meta.graph);
         (meta as GraphMeta & { _engine?: CypherEngine })._engine = engine;

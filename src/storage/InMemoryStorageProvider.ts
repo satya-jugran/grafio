@@ -756,6 +756,17 @@ export class InMemoryStorageProvider implements IStorageProvider {
     }
   }
 
+  /**
+   * Checks if an index exists on a node or edge property.
+   */
+  async hasIndex(target: 'node' | 'edge', propertyKey: string): Promise<boolean> {
+    if (target === 'node') {
+      return this._nodesByProperty.has(propertyKey);
+    } else {
+      return this._edgesByProperty.has(propertyKey);
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Property mutations
   // ---------------------------------------------------------------------------

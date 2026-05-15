@@ -473,7 +473,7 @@ export class GraphIndex {
   }
 
   async hasIndex(target: 'node' | 'edge', propertyKey: string): Promise<boolean> {
-    return true;
+    return this._store.hasIndex(target, propertyKey);
   }
 
   // ---------------------------------------------------------------------------
