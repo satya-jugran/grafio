@@ -322,6 +322,256 @@ export function runGraphFilterScenarios(
     });
   });
 
+  describe('AND/OR chaining', () => {
+    let graph: Graph;
+
+    beforeEach(async () => {
+      graph = new Graph(provider);
+    });
+
+    beforeEach(async () => {
+      // Create nodes for AND/OR testing
+      await graph.addNode('Person', { name: 'Alice', age: 30, city: 'NYC' });
+      await graph.addNode('Person', { name: 'Bob', age: 25, city: 'LA' });
+      await graph.addNode('Person', { name: 'Charlie', age: 35, city: 'NYC' });
+      await graph.addNode('Person', { name: 'Diana', age: 28, city: 'LA' });
+    });
+
+    describe('AND chaining', () => {
+      it('should match when ALL conditions in AND are true', async () => {
+        // name = 'Alice' AND age > 25 should match Alice
+        const nodes = await graph.getNodes({
+          filter: {
+            properties: [{
+              AND: [
+                { key: 'name', value: 'Alice' },
+                { key: 'age', value: 25, op: '>' }
+              ]
+            }]
+          }
+        });
+        expect(nodes).toHaveLength(1);
+        expect(nodes[0].properties.name).toBe('Alice');
+      });
+
+      it('should NOT match when ANY condition in AND is false', async () => {
+        // name = 'Alice' AND age > 30 should NOT match anyone (Alice is 30, not > 30)
+        const nodes = await graph.getNodes({
+          filter: {
+            properties: [{
+              AND: [
+                { key: 'name', value: 'Alice' },
+                { key: 'age', value: 30, op: '>' }
+              ]
+            }]
+          }
+        });
+        expect(nodes).toHaveLength(0);
+      });
+
+      it('should support multiple AND conditions', async () => {
+        // name = 'Bob' AND age = 25 AND city = 'LA' should match Bob
+        const nodes = await graph.getNodes({
+          filter: {
+            properties: [{
+              AND: [
+                { key: 'name', value: 'Bob' },
+                { key: 'age', value: 25 },
+                { key: 'city', value: 'LA' }
+              ]
+            }]
+          }
+        });
+        expect(nodes).toHaveLength(1);
+        expect(nodes[0].properties.name).toBe('Bob');
+      });
+    });
+
+    describe('OR chaining', () => {
+      it('should match when ANY condition in OR is true', async () => {
+        // name = 'Alice' OR name = 'Bob' should match both Alice and Bob
+        const nodes = await graph.getNodes({
+          filter: {
+            properties: [{
+              OR: [
+                { key: 'name', value: 'Alice' },
+                { key: 'name', value: 'Bob' }
+              ]
+            }]
+          }
+        });
+        expect(nodes).toHaveLength(2);
+        expect(nodes.map(n => String(n.properties.name)).sort()).toEqual(['Alice', 'Bob']);
+      });
+
+      it('should NOT match when ALL conditions in OR are false', async () => {
+        // name = 'Alice' OR name = 'Zelda' should match only Alice
+        const nodes = await graph.getNodes({
+          filter: {
+            properties: [{
+              OR: [
+                { key: 'name', value: 'Alice' },
+                { key: 'name', value: 'Zelda' }
+              ]
+            }]
+          }
+        });
+        expect(nodes).toHaveLength(1);
+        expect(nodes[0].properties.name).toBe('Alice');
+      });
+    });
+
+    describe('AND within OR', () => {
+      it('should support nested AND within OR', async () => {
+        // (name = 'Alice' AND city = 'NYC') OR (name = 'Bob' AND city = 'LA') should match Alice and Bob
+        const nodes = await graph.getNodes({
+          filter: {
+            properties: [{
+              OR: [
+                { AND: [{ key: 'name', value: 'Alice' }, { key: 'city', value: 'NYC' }] },
+                { AND: [{ key: 'name', value: 'Bob' }, { key: 'city', value: 'LA' }] }
+              ]
+            }]
+          }
+        });
+        expect(nodes).toHaveLength(2);
+        expect(nodes.map(n => String(n.properties.name)).sort()).toEqual(['Alice', 'Bob']);
+      });
+
+      it('should NOT match when AND subcondition fails within OR', async () => {
+        // (name = 'Alice' AND city = 'LA') OR (name = 'Bob' AND city = 'LA') should only match Bob
+        const nodes = await graph.getNodes({
+          filter: {
+            properties: [{
+              OR: [
+                { AND: [{ key: 'name', value: 'Alice' }, { key: 'city', value: 'LA' }] },
+                { AND: [{ key: 'name', value: 'Bob' }, { key: 'city', value: 'LA' }] }
+              ]
+            }]
+          }
+        });
+        expect(nodes).toHaveLength(1);
+        expect(nodes[0].properties.name).toBe('Bob');
+      });
+    });
+
+    describe('OR within AND', () => {
+      it('should support nested OR within AND', async () => {
+        // (name = 'Alice' OR name = 'Charlie') AND age > 28 should match Alice and Charlie
+        const nodes = await graph.getNodes({
+          filter: {
+            properties: [{
+              AND: [
+                { OR: [{ key: 'name', value: 'Alice' }, { key: 'name', value: 'Charlie' }] },
+                { key: 'age', value: 28, op: '>' }
+              ]
+            }]
+          }
+        });
+        expect(nodes).toHaveLength(2);
+        expect(nodes.map(n => String(n.properties.name)).sort()).toEqual(['Alice', 'Charlie']);
+      });
+
+      it('should NOT match when OR subcondition fails within AND', async () => {
+        // (name = 'Alice' OR name = 'Charlie') AND age < 30 should match only Diana (age 28)
+        // But Diana's name is not Alice or Charlie, so the AND fails
+        // Actually - Alice (30) is not < 30, Charlie (35) is not < 30 - so 0 results
+        const nodes = await graph.getNodes({
+          filter: {
+            properties: [{
+              AND: [
+                { OR: [{ key: 'name', value: 'Alice' }, { key: 'name', value: 'Charlie' }] },
+                { key: 'age', value: 30, op: '<' }
+              ]
+            }]
+          }
+        });
+        expect(nodes).toHaveLength(0);
+      });
+    });
+
+    describe('getNodeCount with AND/OR', () => {
+      it('should return correct count with AND chaining', async () => {
+        const count = await graph.getNodeCount({
+          filter: {
+            properties: [{
+              AND: [
+                { key: 'city', value: 'NYC' },
+                { key: 'age', value: 25, op: '>' }
+              ]
+            }]
+          }
+        });
+        expect(count).toBe(2); // Alice (30) and Charlie (35)
+      });
+
+      it('should return correct count with OR chaining', async () => {
+        const count = await graph.getNodeCount({
+          filter: {
+            properties: [{
+              OR: [
+                { key: 'city', value: 'NYC' },
+                { key: 'city', value: 'LA' }
+              ]
+            }]
+          }
+        });
+        expect(count).toBe(4); // All 4 nodes
+      });
+    });
+
+    describe('edge filtering with AND/OR', () => {
+      beforeEach(async () => {
+        // Create edges between nodes - get nodes first to get their IDs
+        const nodes = await graph.getNodes();
+        const alice = nodes.find(n => String(n.properties.name) === 'Alice')!;
+        const bob = nodes.find(n => String(n.properties.name) === 'Bob')!;
+        const charlie = nodes.find(n => String(n.properties.name) === 'Charlie')!;
+        const diana = nodes.find(n => String(n.properties.name) === 'Diana')!;
+
+        await graph.addEdge(alice.id, bob.id, 'KNOWS', { since: 2020, active: true });
+        await graph.addEdge(bob.id, charlie.id, 'KNOWS', { since: 2021, active: false });
+        await graph.addEdge(charlie.id, diana.id, 'KNOWS', { since: 2022, active: true });
+        await graph.addEdge(alice.id, charlie.id, 'KNOWS', { since: 2023, active: false });
+      });
+
+      it('should filter edges with AND chaining', async () => {
+        // since > 2020 AND active = true:
+        // e2 (2021, false), e3 (2022, true), e4 (2023, false) all have since > 2020
+        // Only e3 has active = true, so only 1 edge matches
+        const edges = await graph.getEdges({
+          filter: {
+            properties: [{
+              AND: [
+                { key: 'since', value: 2020, op: '>' },
+                { key: 'active', value: true }
+              ]
+            }]
+          }
+        });
+        expect(edges).toHaveLength(1);
+        expect(Number(edges[0].properties.since)).toBe(2022);
+      });
+
+      it('should filter edges with OR chaining', async () => {
+        // since = 2020 OR since = 2022:
+        // e1 has since 2020, e3 has since 2022
+        const edges = await graph.getEdges({
+          filter: {
+            properties: [{
+              OR: [
+                { key: 'since', value: 2020 },
+                { key: 'since', value: 2022 }
+              ]
+            }]
+          }
+        });
+        expect(edges).toHaveLength(2);
+        expect(edges.map(e => Number(e.properties.since)).sort()).toEqual([2020, 2022]);
+      });
+    });
+  });
+
   describe('Graph getNodeCount with property filter operators', () => {
     let graph: Graph;
 

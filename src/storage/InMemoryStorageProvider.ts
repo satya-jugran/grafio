@@ -1,4 +1,4 @@
-import type { NodeData, EdgeData, GraphData, AggregateOp, AggregateResult } from '../types';
+import type { NodeData, EdgeData, GraphData, AggregateOp, AggregateResult, QueryOptionsFilterProperty } from '../types';
 import type { IStorageProvider, IOrderBy, ITransactionHandle, StorageQueryOptions } from './IStorageProvider';
 import {
   NodeAlreadyExistsError,
@@ -1186,9 +1186,39 @@ export class InMemoryStorageProvider implements IStorageProvider {
   }
 
   /**
-   * Checks if a property value matches a filter specification with operator support.
+   * Checks if properties match a filter specification with operator AND/OR chaining support.
+   * Recursively evaluates AND (all must match) and OR (any must match) sub-filters.
    */
-  private _matchesPropertyFilter(actualValue: unknown, filter: { key: string; value: unknown; op?: string }): boolean {
+  private _matchesPropertyFilter(properties: Record<string, unknown>, filter: QueryOptionsFilterProperty): boolean {
+    // Handle AND - ALL conditions must be true
+    if (filter.AND && filter.AND.length > 0) {
+      for (const subFilter of filter.AND) {
+        if (!this._matchesPropertyFilter(properties, subFilter)) {
+          return false;
+        }
+      }
+    }
+
+    // Handle OR - ANY condition must be true
+    if (filter.OR && filter.OR.length > 0) {
+      let orMatched = false;
+      for (const subFilter of filter.OR) {
+        if (this._matchesPropertyFilter(properties, subFilter)) {
+          orMatched = true;
+          break;
+        }
+      }
+      if (!orMatched) {
+        return false;
+      }
+    }
+
+    // Handle base case - single property filter with operator
+    // If key is not provided, this is a structural filter (AND/OR only) - always matches for base comparison
+    if (filter.key === undefined) {
+      return true;
+    }
+    const actualValue = properties[filter.key];
     const filterValue = filter.value;
     const op = filter.op ?? '=';
 
@@ -1239,7 +1269,7 @@ export class InMemoryStorageProvider implements IStorageProvider {
     // Check property filters (AND - all must match)
     if (filter.properties && filter.properties.length > 0) {
       for (const propFilter of filter.properties) {
-        if (!this._matchesPropertyFilter(node.properties[propFilter.key], propFilter)) {
+        if (!this._matchesPropertyFilter(node.properties, propFilter)) {
           return false;
         }
       }
@@ -1263,7 +1293,7 @@ export class InMemoryStorageProvider implements IStorageProvider {
     // Check property filters (AND - all must match)
     if (filter.properties && filter.properties.length > 0) {
       for (const propFilter of filter.properties) {
-        if (!this._matchesPropertyFilter(edge.properties[propFilter.key], propFilter)) {
+        if (!this._matchesPropertyFilter(edge.properties, propFilter)) {
           return false;
         }
       }

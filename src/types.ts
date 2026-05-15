@@ -40,6 +40,14 @@ export interface AggregateResult {
   max?: number;
 }
 
+export interface QueryOptionsFilterProperty {
+  key?: string;
+  value?: unknown;
+  op?: '=' | '<>' | '>' | '<' | '>=' | '<=' | 'CONTAINS' | 'STARTS_WITH' | 'ENDS_WITH' | 'IN' | 'NOT_IN' | 'IS_NULL' | 'IS_NOT_NULL';
+  AND?: QueryOptionsFilterProperty[];
+  OR?: QueryOptionsFilterProperty[];
+}
+
 /**
  * Unified query options for storage layer node and edge queries.
  * For Graph-level queries, use GraphQueryOptions.
@@ -60,11 +68,7 @@ export interface QueryOptions {
      * Example: properties: [{ key: 'active', value: true }] matches nodes
      * where node.properties.active === true.
      */
-    properties?: Array<{
-      key: string;
-      value: unknown;
-      op?: '=' | '<>' | '>' | '<' | '>=' | '<=' | 'CONTAINS' | 'STARTS_WITH' | 'ENDS_WITH' | 'IN' | 'NOT_IN' | 'IS_NULL' | 'IS_NOT_NULL';
-    }>;
+    properties?: QueryOptionsFilterProperty[];
   };
   /** Order results by the specified field */
   orderBy?: IOrderBy;
