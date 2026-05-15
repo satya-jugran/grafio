@@ -378,6 +378,10 @@ export class Graph {
     return this._index.createIndex(target, propertyKey, type);
   }
 
+  async hasIndex(target: 'node' | 'edge', propertyKey: string): Promise<boolean> {
+    return this._index.hasIndex(target, propertyKey);
+  }
+
   // ---------------------------------------------------------------------------
   // Aggregation
   // ---------------------------------------------------------------------------
