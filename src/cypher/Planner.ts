@@ -24,6 +24,7 @@ import { WhereDecomposer, VarInfo } from './plan/WhereDecomposer';
 import { JoinReorderer } from './plan/JoinReorderer';
 import { PatternPlanner } from './plan/PatternPlanner';
 import { ProjectionPlanner } from './plan/ProjectionPlanner';
+import type { Graph } from '../Graph';
 
 // ── Planner ────────────────────────────────────────────────────────
 
@@ -36,15 +37,24 @@ import { ProjectionPlanner } from './plan/ProjectionPlanner';
  * ```
  */
 export class Planner {
-  private readonly _whereDecomposer = new WhereDecomposer();
-  private readonly _reorderer = new JoinReorderer();
+  private readonly _whereDecomposer: WhereDecomposer;
+  private readonly _reorderer: JoinReorderer;
   private readonly _patternPlanner = new PatternPlanner();
   private readonly _projPlanner = new ProjectionPlanner();
 
   /**
+   * @param graph — Optional {@link Graph} for index-aware selectivity.
+   *   When absent, indexed properties score the same as non-indexed (10).
+   */
+  constructor(graph?: Graph) {
+    this._whereDecomposer = new WhereDecomposer();
+    this._reorderer = new JoinReorderer(graph);
+  }
+
+  /**
    * Translate a typed AST into a {@link QueryPlan}.
    */
-  public plan(ast: QueryAst): QueryPlan {
+  public async plan(ast: QueryAst): Promise<QueryPlan> {
     const steps: PlanStep[] = [];
 
     // ── 1. Collect variables + decompose WHERE ────────────────────
@@ -65,7 +75,7 @@ export class Planner {
     }
 
     // ── 3. Reorder root patterns by selectivity ───────────────────
-    const orderedPatterns = this._reorderer.reorder(
+    const orderedPatterns = await this._reorderer.reorder(
       ast.match.patterns,
       varRegistry,
       perVar,

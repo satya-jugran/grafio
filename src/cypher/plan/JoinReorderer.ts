@@ -1,6 +1,9 @@
 /**
  * Join reordering and seek detection for the Cypher query planner.
  *
+ * Requires a {@link Graph} instance for index-aware selectivity;
+ * falls back to non-indexed estimates when no Graph is provided.
+ *
  * Orders root patterns by estimated selectivity and detects id-lookup
  * predicates that qualify for {@link NodeSeekStep} emission.
  *
@@ -17,30 +20,45 @@ import {
 } from '../ast/AstNode';
 import { PropertyFilter, NodeSeekStep, PlanStep } from './QueryPlan';
 import { VarInfo } from './WhereDecomposer';
+import type { Graph } from '../../Graph';
 
 // ── JoinReorderer ──────────────────────────────────────────────────
 
 export class JoinReorderer {
+  private readonly _graph?: Graph;
+
+  constructor(graph?: Graph) {
+    this._graph = graph;
+  }
+
   /**
-   * Order root patterns (first node in each comma-separated MATCH path)
-   * by estimated selectivity so the most restrictive scan runs first.
+   * Order root patterns by estimated selectivity.
+   * When a {@link Graph} is available, uses {@code graph.hasIndex} to
+   * score indexed property equalities as 5 instead of 10.
    */
-  reorder(
+  async reorder(
     patterns: MatchPattern[],
     varRegistry: Map<string, VarInfo>,
     perVar: Map<string, PropertyFilter[]>,
-  ): MatchPattern[] {
+  ): Promise<MatchPattern[]> {
     const ordered = [...patterns];
+
+    // Compute selectivities in parallel for all root variables
+    const selectivity = new Map<string, number>();
+    for (const [name, info] of varRegistry) {
+      if (info.isRoot) {
+        selectivity.set(
+          name,
+          await this._estimateSelectivity(info, perVar.get(name) ?? []),
+        );
+      }
+    }
 
     ordered.sort((a, b) => {
       const rootA = this._getRootVar(a, varRegistry);
       const rootB = this._getRootVar(b, varRegistry);
-      const selA = rootA
-        ? this._estimateSelectivity(rootA, perVar.get(rootA.name) ?? [])
-        : 10000;
-      const selB = rootB
-        ? this._estimateSelectivity(rootB, perVar.get(rootB.name) ?? [])
-        : 10000;
+      const selA = rootA ? (selectivity.get(rootA.name) ?? 10000) : 10000;
+      const selB = rootB ? (selectivity.get(rootB.name) ?? 10000) : 10000;
       return selA - selB;
     });
 
@@ -130,14 +148,25 @@ export class JoinReorderer {
    * | type scan only        |   100 |
    * | full scan             | 10000 |
    */
-  private _estimateSelectivity(
-    _v: VarInfo,
+  private async _estimateSelectivity(
+    v: VarInfo,
     predicates: PropertyFilter[],
-  ): number {
+  ): Promise<number> {
     if (predicates.some((p) => this._isIdLookup(p))) return 1;
-    // Indexed equality — deferred; requires Graph.hasIndex access.
-    if (predicates.some((p) => this._isEquality(p))) return 10;
-    if (_v.labels.length > 0) return 100;
+
+    // Indexed equality — score 5 when the property has a storage-level
+    // index; score 10 for non-indexed equality.
+    for (const p of predicates) {
+      if (this._isEquality(p) && p.key) {
+        if (this._graph) {
+          const indexed = await this._graph.hasIndex('node', p.key);
+          if (indexed) return 5;
+        }
+        return 10;
+      }
+    }
+
+    if (v.labels.length > 0) return 100;
     return 10000;
   }
 
