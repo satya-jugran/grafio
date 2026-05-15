@@ -40,6 +40,7 @@ export class JoinReorderer {
     patterns: MatchPattern[],
     varRegistry: Map<string, VarInfo>,
     perVar: Map<string, PropertyFilter[]>,
+    idLookups: Map<string, unknown>,
   ): Promise<MatchPattern[]> {
     const ordered = [...patterns];
 
@@ -49,7 +50,7 @@ export class JoinReorderer {
       if (info.isRoot) {
         selectivity.set(
           name,
-          await this._estimateSelectivity(info, perVar.get(name) ?? []),
+          await this._estimateSelectivity(info, perVar.get(name) ?? [], idLookups),
         );
       }
     }
@@ -151,8 +152,9 @@ export class JoinReorderer {
   private async _estimateSelectivity(
     v: VarInfo,
     predicates: PropertyFilter[],
+    idLookups: Map<string, unknown>,
   ): Promise<number> {
-    if (predicates.some((p) => this._isIdLookup(p))) return 1;
+    if (idLookups.has(v.name)) return 1;
 
     // Indexed equality — score 5 when the property has a storage-level
     // index; score 10 for non-indexed equality.
@@ -168,10 +170,6 @@ export class JoinReorderer {
 
     if (v.labels.length > 0) return 100;
     return 10000;
-  }
-
-  private _isIdLookup(_filter: PropertyFilter): boolean {
-    return false; // Deferred — id-lookups detected via _detectIdLookups
   }
 
   private _isEquality(f: PropertyFilter): boolean {

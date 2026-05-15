@@ -79,6 +79,7 @@ export class Planner {
       ast.match.patterns,
       varRegistry,
       perVar,
+      idLookups,
     );
 
     // ── 4. Emit pattern steps with per-variable predicates ────────
