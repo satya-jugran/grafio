@@ -8,6 +8,8 @@
  * @module cypher/Result
  */
 
+import { PlanExecutionStats } from './plan/QueryPlan';
+
 /**
  * A single row in a Cypher query result.
  *
@@ -40,14 +42,16 @@ export interface CypherResult {
 export interface CypherSummary {
   /** Total execution time in milliseconds. */
   queryTimeMs: number;
-  /** Number of nodes created (always 0 in v1). */
+  /** Number of nodes created */
   nodesCreated: number;
-  /** Number of nodes deleted (always 0 in v1). */
+  /** Number of nodes deleted */
   nodesDeleted: number;
-  /** Number of edges created (always 0 in v1). */
+  /** Number of edges created */
   edgesCreated: number;
-  /** Number of edges deleted (always 0 in v1). */
+  /** Number of edges deleted */
   edgesDeleted: number;
-  /** Number of properties set (always 0 in v1). */
+  /** Number of properties set */
   propertiesSet: number;
+  /** Execution statistics for each plan step (optional). */
+  planExecutionStats?: PlanExecutionStats;
 }

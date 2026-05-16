@@ -34,6 +34,8 @@ import {
   LimitStep,
   AggregateStep,
   AggregateSpec,
+  PlanStepExecutionStats,
+  PlanExecutionStats,
 } from './plan/QueryPlan';
 import { CypherResult, CypherRow, CypherSummary } from './Result';
 import { Expression } from './ast/AstNode';
@@ -68,17 +70,39 @@ export class Executor {
     params: Record<string, unknown> = {},
   ): Promise<CypherResult> {
     const startTime = Date.now();
+    const stepStats: PlanStepExecutionStats[] = [];
 
     // Initial row buffer: a single empty row as the starting point.
     let rows: Row[] = [new Map()];
 
     // Walk each plan step, transforming the row buffer.
     for (const step of plan.steps) {
+      const stepStart = Date.now();
       rows = await this._executeStep(step, rows, params);
+      const stepTime = Date.now() - stepStart;
+      stepStats.push({
+        stepKind: step.kind,
+        timeMs: stepTime,
+        percentageOfTotal: 0, // calculated after all steps
+        rowsOut: rows.length,
+      });
     }
 
-    const queryTimeMs = Date.now() - startTime;
-    return this._buildResult(plan, rows, queryTimeMs);
+    // Use sum of step times as total for percentage calculation
+    // This ensures percentages always sum to 100% regardless of overhead
+    const stepTotalTime = stepStats.reduce((sum, s) => sum + s.timeMs, 0);
+    const totalTime = stepTotalTime > 0 ? stepTotalTime : (Date.now() - startTime);
+
+    // Calculate percentages
+    const stats: PlanExecutionStats = {
+      totalTimeMs: totalTime,
+      steps: stepStats.map((s) => ({
+        ...s,
+        percentageOfTotal: totalTime > 0 ? (s.timeMs / totalTime) * 100 : 0,
+      })),
+    };
+
+    return this._buildResult(plan, rows, stats);
   }
 
   // ── Step dispatch ───────────────────────────────────────────────
@@ -946,23 +970,6 @@ export class Executor {
       .join('\x00');
   }
 
-  /**
-   * Derive an output alias from a group-by expression.
-   *
-   * For simple identifiers, use the variable name.  For everything
-   * else, produce a synthetic name.
-   */
-  private _deriveGroupByAlias(expr: Expression): string {
-    if (expr.kind === 'Identifier') return expr.name;
-    if (
-      expr.kind === 'PropertyAccess' &&
-      expr.object.kind === 'Identifier'
-    ) {
-      return `${expr.object.name}_${expr.property}`;
-    }
-    return `group_${expr.kind}`;
-  }
-
   // ── Expression evaluator ────────────────────────────────────────
 
   /**
@@ -1159,7 +1166,7 @@ export class Executor {
   private _buildResult(
     plan: QueryPlan,
     rows: Row[],
-    queryTimeMs: number,
+    stats: PlanExecutionStats,
   ): CypherResult {
     const projectStep = plan.steps.find(
       (s): s is ProjectStep => s.kind === 'ProjectStep',
@@ -1178,12 +1185,13 @@ export class Executor {
     });
 
     const summary: CypherSummary = {
-      queryTimeMs,
+      queryTimeMs: stats.totalTimeMs,
       nodesCreated: 0,
       nodesDeleted: 0,
       edgesCreated: 0,
       edgesDeleted: 0,
       propertiesSet: 0,
+      planExecutionStats: stats,
     };
 
     return { columns, rows: resultRows, summary };

@@ -12,7 +12,7 @@
  */
 import { describe, expect, it, beforeAll, beforeEach, afterEach, jest } from '@jest/globals';
 import { Graph } from '../../src/Graph';
-import { CypherEngine, CypherNotSupportedError } from '../../src/cypher';
+import { CypherEngine, CypherNotSupportedError, PlanFormat } from '../../src/cypher';
 
 /** Build a social graph with people, posts, and relationships. */
 async function buildSocialGraph(graph: Graph): Promise<void> {
@@ -36,6 +36,12 @@ async function buildSocialGraph(graph: Graph): Promise<void> {
   await graph.addEdge(eve.id, grace.id, 'KNOWS', { since: 2022 });
   await graph.addEdge(henry.id, alice.id, 'KNOWS', { since: 2023 });
   await graph.addEdge(alice.id, david.id, 'KNOWS', { since: 2019 });
+
+  await graph.createIndex('node', 'name');
+  await graph.createIndex('node', 'age');
+  await graph.createIndex('node', 'city');
+  await graph.createIndex('node', 'occupation');
+  await graph.createIndex('edge', 'since');
 }
 
 /** Build an education graph with courses, students, and teachers. */
@@ -538,6 +544,83 @@ describe('CypherEngine Integration', () => {
     });
   });
 
+  describe('getQueryPlan', () => {
+    let graph: Graph;
+    let engine: CypherEngine;
+
+    beforeEach(() => {
+      graph = new Graph();
+      engine = new CypherEngine(graph);
+    });
+
+    it('returns json format by default', async () => {
+      await buildSocialGraph(graph);
+      const plan = await engine.getQueryPlan('MATCH (p:Person) RETURN p.name');
+      expect(plan).toContain('"kind"');
+      expect(plan).toContain('"steps"');
+      expect(JSON.parse(plan)).toHaveProperty('plan.steps');
+    });
+
+    it('returns json format explicitly', async () => {
+      await buildSocialGraph(graph);
+      const plan = await engine.getQueryPlan('MATCH (p:Person) RETURN p', {}, 'json');
+      expect(plan).toContain('"NodeScanStep"');
+    });
+
+    it('returns ascii format', async () => {
+      await buildSocialGraph(graph);
+      const plan = await engine.getQueryPlan('MATCH (p:Person) RETURN p', {}, 'text');
+      expect(plan).toContain('NodeScanStep');
+      expect(plan).toContain('ProjectStep');
+    });
+
+    it('returns mermaid format', async () => {
+      await buildSocialGraph(graph);
+      const plan = await engine.getQueryPlan('MATCH (p:Person) RETURN p', {}, 'mermaid');
+      expect(plan).toContain('flowchart TD');
+      expect(plan).toContain('-->');
+    });
+
+    it('includes all steps for a multi-hop query', async () => {
+      await buildSocialGraph(graph);
+      const plan = await engine.getQueryPlan(
+        "MATCH (p:Person)-[:KNOWS]->(f:Person) WHERE p.name = 'Alice' RETURN f.name AS name",
+        {},
+        'json',
+      );
+      const parsed = JSON.parse(plan);
+      expect(parsed.plan.steps.length).toBeGreaterThanOrEqual(3);
+      const kinds = parsed.plan.steps.map((s: { kind: string }) => s.kind);
+      expect(kinds).toContain('NodeScanStep');
+      expect(kinds).toContain('EdgeExpandStep');
+      expect(kinds).toContain('ProjectStep');
+    });
+
+    it('throws on invalid query syntax', async () => {
+      const engine = new CypherEngine(new Graph());
+      await expect(
+        engine.getQueryPlan('MATCH (p PERSON) RETURN p'),
+      ).rejects.toThrow();
+    });
+
+    it('throws on unsupported clause', async () => {
+      const engine = new CypherEngine(new Graph());
+      await expect(
+        engine.getQueryPlan('CREATE (n:Person) RETURN n'),
+      ).rejects.toThrow(CypherNotSupportedError);
+    });
+
+    it('accepts query parameters', async () => {
+      await buildSocialGraph(graph);
+      const plan = await engine.getQueryPlan(
+        'MATCH (p:Person) WHERE p.name = $name RETURN p',
+        { name: 'Alice' },
+        'json',
+      );
+      expect(JSON.parse(plan)).toHaveProperty('plan.steps');
+    });
+  });
+
   describe('Validation Gate', () => {
     it('rejects CREATE clause', async () => {
       const graph = new Graph();
@@ -552,6 +635,96 @@ describe('CypherEngine Integration', () => {
       await expect(
         engine.execute('MATCH (n) DELETE n'),
       ).rejects.toThrow(CypherNotSupportedError);
+    });
+  });
+
+  describe('execute with plan format', () => {
+    let graph: Graph;
+    let engine: CypherEngine;
+
+    beforeEach(async () => {
+      graph = new Graph();
+      await buildSocialGraph(graph);
+      engine = new CypherEngine(graph);
+    });
+
+    it('returns execution plan in result when format is provided', async () => {
+      const result = await engine.execute(
+        'MATCH (p:Person) RETURN p.name AS name',
+        {},
+        { executionPlan: { format: 'json' } },
+      );
+      expect(result.executionPlan).toBeDefined();
+      expect(result.executionPlan).toContain('"plan"');
+      expect(result.executionPlan).toContain('NodeScanStep');
+    });
+
+    it('returns execution plan in ascii format', async () => {
+      const result = await engine.execute(
+        'MATCH (p:Person) RETURN p.name AS name',
+        {},
+        { executionPlan: { format: 'text' } },
+      );
+      expect(result.executionPlan).toBeDefined();
+      expect(result.executionPlan).toContain('NodeScanStep');
+      expect(result.executionPlan).toContain('\u2514\u2014'); // └─
+    });
+
+    it('returns execution plan in mermaid format', async () => {
+      const result = await engine.execute(
+        'MATCH (p:Person) RETURN p.name AS name',
+        {},
+        { executionPlan: { format: 'mermaid' } },
+      );
+      expect(result.executionPlan).toBeDefined();
+      expect(result.executionPlan).toContain('flowchart TD');
+      expect(result.executionPlan).toContain('Step1');
+      expect(result.executionPlan).toContain('-->');
+    });
+
+    it('includes planExecutionStats in summary', async () => {
+      const result = await engine.execute(
+        'MATCH (p:Person) RETURN p.name AS name',
+        {},
+        { executionPlan: { format: 'json' } },
+      );
+      expect(result.summary.planExecutionStats).toBeDefined();
+      expect(result.summary.planExecutionStats!.totalTimeMs).toBeGreaterThanOrEqual(0);
+      expect(result.summary.planExecutionStats!.steps.length).toBeGreaterThan(0);
+    });
+
+    it('step stats include timeMs and percentageOfTotal', async () => {
+      const result = await engine.execute(
+        'MATCH (p:Person) RETURN p.name AS name',
+        {},
+        { executionPlan: { format: 'json' } },
+      );
+      const stats = result.summary.planExecutionStats!;
+      for (const step of stats.steps) {
+        expect(step.timeMs).toBeGreaterThanOrEqual(0);
+        expect(step.percentageOfTotal).toBeGreaterThanOrEqual(0);
+        expect(step.percentageOfTotal).toBeLessThanOrEqual(100);
+        expect(step.stepKind).toBeDefined();
+        expect(step.rowsOut).toBeGreaterThanOrEqual(0);
+      }
+    });
+
+    it('does not include executionPlan when format is not provided', async () => {
+      const result = await engine.execute(
+        'MATCH (p:Person) RETURN p.name AS name',
+        {},
+      );
+      expect(result.executionPlan).toBeUndefined();
+    });
+
+    it('execution plan includes timing for multi-hop query', async () => {
+      const result = await engine.execute(
+        "MATCH (p:Person)-[:KNOWS]->(f:Person)-[:KNOWS]->(g:Person) WHERE p.name = 'Alice' AND f.name IN ['Bob', 'Charlie'] OR (g.name = 'David' AND g.city = 'Seattle') RETURN f.name AS name",
+        {},
+        { executionPlan: { format: 'text' } },
+      );
+      expect(result.executionPlan).toContain('ms');
+      expect(result.executionPlan).toContain('%');
     });
   });
 });

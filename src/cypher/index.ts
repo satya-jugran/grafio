@@ -12,6 +12,7 @@
  */
 
 export { CypherEngine } from './CypherEngine';
+export type { CypherEngineOptions } from './CypherEngine';
 export type { CypherResult, CypherRow, CypherSummary } from './Result';
 export {
   CypherError,
@@ -22,3 +23,5 @@ export {
   UnboundParameterError,
   TypeMismatchError,
 } from './errors';
+export { PlanFormatter } from './plan/PlanFormatter';
+export type { PlanFormat } from './plan/PlanFormatter';
