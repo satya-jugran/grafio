@@ -36,6 +36,12 @@ async function buildSocialGraph(graph: Graph): Promise<void> {
   await graph.addEdge(eve.id, grace.id, 'KNOWS', { since: 2022 });
   await graph.addEdge(henry.id, alice.id, 'KNOWS', { since: 2023 });
   await graph.addEdge(alice.id, david.id, 'KNOWS', { since: 2019 });
+
+  await graph.createIndex('node', 'name');
+  await graph.createIndex('node', 'age');
+  await graph.createIndex('node', 'city');
+  await graph.createIndex('node', 'occupation');
+  await graph.createIndex('edge', 'since');
 }
 
 /** Build an education graph with courses, students, and teachers. */
@@ -563,7 +569,7 @@ describe('CypherEngine Integration', () => {
 
     it('returns ascii format', async () => {
       await buildSocialGraph(graph);
-      const plan = await engine.getQueryPlan('MATCH (p:Person) RETURN p', {}, 'ascii');
+      const plan = await engine.getQueryPlan('MATCH (p:Person) RETURN p', {}, 'text');
       expect(plan).toContain('NodeScanStep');
       expect(plan).toContain('ProjectStep');
     });
@@ -657,7 +663,7 @@ describe('CypherEngine Integration', () => {
       const result = await engine.execute(
         'MATCH (p:Person) RETURN p.name AS name',
         {},
-        { executionPlan: { format: 'ascii' } },
+        { executionPlan: { format: 'text' } },
       );
       expect(result.executionPlan).toBeDefined();
       expect(result.executionPlan).toContain('NodeScanStep');
@@ -734,7 +740,7 @@ describe('CypherEngine Integration', () => {
       const result = await engine.execute(
         "MATCH (p:Person)-[:KNOWS]->(f:Person)-[:KNOWS]->(g:Person) WHERE p.name = 'Alice' AND f.name IN ['Bob', 'Charlie'] OR (g.name = 'David' AND g.city = 'Seattle') RETURN f.name AS name",
         {},
-        { executionPlan: { format: 'ascii' } },
+        { executionPlan: { format: 'text' } },
       );
       expect(result.executionPlan).toContain('ms');
       expect(result.executionPlan).toContain('%');

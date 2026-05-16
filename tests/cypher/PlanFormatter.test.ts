@@ -47,7 +47,7 @@ describe('PlanFormatter', () => {
         ],
       };
 
-      const result = formatter.format(plan, 'ascii');
+      const result = formatter.format(plan, 'text');
       expect(result).toContain('NodeScanStep');
       expect(result).toContain('ProjectStep');
     });
@@ -144,7 +144,7 @@ describe('PlanFormatter', () => {
         ],
       };
 
-      const result = formatter.format(plan, 'ascii');
+      const result = formatter.format(plan, 'text');
       expect(result).toContain('NodeScanStep (p:Person)');
     });
 
@@ -164,7 +164,7 @@ describe('PlanFormatter', () => {
         ],
       };
 
-      const result = formatter.format(plan, 'ascii');
+      const result = formatter.format(plan, 'text');
       expect(result).toContain('EdgeExpandStep');
       expect(result).toContain('\u2192');
     });
@@ -183,7 +183,7 @@ describe('PlanFormatter', () => {
         ],
       };
 
-      const result = formatter.format(plan, 'ascii');
+      const result = formatter.format(plan, 'text');
       expect(result).toContain('ProjectStep [node, rel]');
     });
 
@@ -202,7 +202,7 @@ describe('PlanFormatter', () => {
         ],
       };
 
-      const result = formatter.format(plan, 'ascii');
+      const result = formatter.format(plan, 'text');
       expect(result).toContain('AggregateStep');
       expect(result).toContain('COUNT(cnt)');
       expect(result).toContain('SUM(total)');

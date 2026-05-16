@@ -3,7 +3,7 @@
  *
  * Converts a {@link QueryPlan} into different output formats:
  * - 'json'    → JSON string representation
- * - 'ascii'   → ASCII tree diagram
+ * - 'text'   → ASCII tree diagram
  * - 'mermaid' → Mermaid flowchart syntax
  *
  * @module cypher/plan/PlanFormatter
@@ -15,7 +15,7 @@ import { QueryPlan, PlanStep, PropertyFilter, PlanExecutionStats } from './Query
 /**
  * Supported output formats for execution plan visualization.
  */
-export type PlanFormat = 'json' | 'ascii' | 'mermaid';
+export type PlanFormat = 'json' | 'text' | 'mermaid';
 
 /**
  * Formats a {@link QueryPlan} into various output formats for visualization
@@ -26,7 +26,7 @@ export class PlanFormatter {
    * Format a query plan into the specified output format.
    *
    * @param plan   - The query plan to format.
-   * @param format - The output format: 'json' | 'ascii' | 'mermaid'.
+   * @param format - The output format: 'json' | 'text' | 'mermaid'.
    * @param executionStats - Optional execution statistics to include in output.
    * @returns A formatted string representation of the plan.
    */
@@ -34,8 +34,8 @@ export class PlanFormatter {
     switch (format) {
       case 'json':
         return this.toJson(plan, executionStats);
-      case 'ascii':
-        return this.toAscii(plan, executionStats);
+      case 'text':
+        return this.toText(plan, executionStats);
       case 'mermaid':
         return this.toMermaid(plan, executionStats);
       default:
@@ -68,7 +68,7 @@ export class PlanFormatter {
   /**
    * Convert plan to ASCII tree diagram.
    */
-  private toAscii(plan: QueryPlan, executionStats?: PlanExecutionStats): string {
+  private toText(plan: QueryPlan, executionStats?: PlanExecutionStats): string {
     const lines: string[] = [];
     const steps = plan.steps;
 
