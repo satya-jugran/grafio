@@ -268,7 +268,7 @@ export interface IStorageProvider {
    * - If type is undefined or '*': creates a simple index on propertyKey only
    * - If type is specified (e.g., 'User'): creates a compound index on (type, propertyKey)
    */
-  createIndex(target: 'node' | 'edge', propertyKey: string, type?: string): Promise<void>;
+  createIndex(target: 'node' | 'edge', propertyKey: string): Promise<void>;
 
   /**
    * Checks if an index exists on a node or edge property.

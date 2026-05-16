@@ -1,12 +1,11 @@
 # grafio
 
-A graph database with **pluggable storage architecture**. Supports **multiple isolated graphs** via `graphId` partitioning. Ships with a zero-dependency in-memory provider. Includes BFS/DFS traversal, type/property filtering, topological sort, DAG detection, transaction support, cache management and Mermaid export.
+A graph database with **pluggable storage architecture**. Supports **multiple isolated graphs** via `graphId` partitioning. Ships with a zero-dependency in-memory provider. Includes high performance read-only Cypher query engine, multi hop traversals, type/property filtering, topological sort, DAG detection, transaction support, cache management, query plan and execution inspection and Mermaid export.
 
 > **MongoDB Storage**: For MongoDB-backed persistence, see the separate [`grafio-mongo`](https://www.npmjs.com/package/grafio-mongo) package.
 
 ## Features:
 ### Core
-- **Async-first API** — every method returns `Promise<T>`
 - **Directed graphs** with typed nodes and relationship-labeled edges
 - **Multiple graph support** via `graphId` partitioning (isolated graphs in one instance)
 - **Pluggable storage** — swap backends without changing application code
@@ -23,18 +22,20 @@ A graph database with **pluggable storage architecture**. Supports **multiple is
 - **`RedisCache`** — distributed cache using Redis (via ioredis, optional)
 
 ### Traversal & Querying
-- **Cypher Query Language** — read-only openCypher-compatible query interface (`MATCH`, `WHERE`, `RETURN`, `ORDER BY`, `SKIP`, `LIMIT`)
+- **Cypher Query Language** — read-only openCypher-compatible query interface (`MATCH`, `WHERE`, `RETURN`, `ORDER BY`, `SKIP`, `LIMIT`, `DISTINCT`)
+- **Aggregation** — `COUNT`, `AVG`, `SUM`, `MIN`, `MAX`, `COLLECT` with `GROUP BY`, `HAVING`, and `ORDER BY` support
+- **Named paths** — capture traversal paths as variables: `MATCH p = (a)->(b)->(c) RETURN p`
 - **BFS / DFS traversal** — find paths between nodes
 - **Wildcard traversal** — `traverse('*', target)`, `traverse(source, '*')`, or `traverse(['a','b'], ['x','y'])`
 - **Type filtering** — filter by node types (`['Person', 'Company']`) and edge types (`['KNOWS', 'WORKS_AT']`)
-- **Property filtering** — O(1) lookup with property value index
+- **Property filtering** — O(1) lookup with property value index; supports operators: `=`, `<>`, `>`, `<`, `>=`, `<=`, `CONTAINS`, `STARTS_WITH`, `ENDS_WITH`, `IN`, `NOT_IN`, `IS_NULL`, `IS_NOT_NULL`; AND/OR chaining for complex logical filters
 - **Topological sort** — Kahn's algorithm, returns dependency order
 - **DAG detection** — cycle detection for acyclic graph validation
 
 ### Property Management
 - **Flat property structure** — properties must be supported primitive types only (string, number, boolean, null, undefined)
 - **Property CRUD** — add, update, delete, and clear properties on nodes and edges
-- **Custom indexes** — `createIndex()` for property-specific indexes including compound indexes with type
+- **Custom indexes** — `createIndex()` for property-specific indexes
 
 ### Visualization
 - **Mermaid export** — generate flowchart diagrams from graph data
@@ -140,7 +141,7 @@ Omit `storageProvider` to use the built-in `InMemoryStorageProvider`.
 | `updateNodeProperty(nodeId, key, value, transaction?)` | `Promise<void>` | Update an existing property on a node |
 | `deleteNodeProperty(nodeId, key, transaction?)` | `Promise<void>` | Delete a property from a node |
 | `clearNodeProperties(nodeId, transaction?)` | `Promise<void>` | Remove all properties from a node |
-| `createIndex('node', propertyKey, type?)` | `Promise<void>` | Create index on node property, optionally compound with type |
+| `createIndex('node', propertyKey)` | `Promise<void>` | Create index on node property |
 
 #### Edge Operations
 
@@ -162,7 +163,7 @@ Omit `storageProvider` to use the built-in `InMemoryStorageProvider`.
 | `updateEdgeProperty(edgeId, key, value, transaction?)` | `Promise<void>` | Update an existing property on an edge |
 | `deleteEdgeProperty(edgeId, key, transaction?)` | `Promise<void>` | Delete a property from an edge |
 | `clearEdgeProperties(edgeId, transaction?)` | `Promise<void>` | Remove all properties from an edge |
-| `createIndex('edge', propertyKey, type?)` | `Promise<void>` | Create index on edge property, optionally compound with type |
+| `createIndex('edge', propertyKey)` | `Promise<void>` | Create index on edge property |
 
 #### Navigation
 
@@ -271,6 +272,118 @@ const page = await engine.query(
 | `SKIP` | ✅ Literal + `$param` | Evaluated at runtime |
 | `LIMIT` | ✅ Literal + `$param` | Evaluated at runtime |
 | `CREATE` / `DELETE` / `SET` / `REMOVE` / `MERGE` | ❌ Rejected | Validation gate prevents execution |
+| `WITH` / `UNWIND` | ❌ Rejected | Validation gate prevents execution |
+
+#### Aggregation Functions
+
+| Function | Syntax | Description |
+|----------|--------|-------------|
+| `COUNT` | `COUNT(*)`, `COUNT(expr)`, `COUNT(DISTINCT expr)` | Count rows/values |
+| `AVG` | `AVG(expr)`, `AVG(DISTINCT expr)` | Average of numeric values |
+| `SUM` | `SUM(expr)` | Sum of numeric values |
+| `MIN` | `MIN(expr)` | Minimum value |
+| `MAX` | `MAX(expr)` | Maximum value |
+| `COLLECT` | `COLLECT(expr)` | Collect values into array |
+
+#### Aggregation Examples
+
+```typescript
+// Basic count
+const total = await engine.query('MATCH (p:Person) RETURN COUNT(p) AS total');
+
+// Group by with aggregation
+const byCity = await engine.query(
+  'MATCH (p:Person) RETURN p.city, COUNT(*) AS cnt ORDER BY cnt DESC'
+);
+
+// HAVING clause
+const popular = await engine.query(
+  'MATCH (p:Person) RETURN p.city, COUNT(*) AS cnt HAVING cnt > 1'
+);
+
+// Multiple aggregates
+const stats = await engine.query(
+  'MATCH (p:Person) RETURN MIN(p.age), MAX(p.age), AVG(p.age)'
+);
+
+// Named path variable
+const paths = await engine.query(
+  'MATCH p = (a:Person)-[:KNOWS]->(b:Person)-[:KNOWS]->(c:Person) RETURN p'
+);
+```
+
+#### Query Plan — Inspect Execution Steps
+
+Use `getQueryPlan()` to inspect the logical execution plan for a query. This shows the sequence of steps the query planner would execute without running the query:
+
+```typescript
+// Get query plan in JSON format (default)
+const planJson = await engine.getQueryPlan('MATCH (p:Person) RETURN p.name');
+// Returns: { plan: { steps: [...] } }
+
+// Get in Text tree format
+const planText = await engine.getQueryPlan('MATCH (p:Person)-[:KNOWS]->(b) RETURN p.name, b.name', undefined, 'text');
+/*
+NodeScanStep (Person)
+  EdgeExpandStep (KNOWS, outgoing)
+    ProjectStep [p.name, b.name]
+*/
+
+// Get in Mermaid flowchart format
+const planMermaid = await engine.getQueryPlan('MATCH (p:Person)-[:KNOWS*1..2]->(b) RETURN p.name', undefined, 'mermaid');
+/*
+flowchart TD
+    Step1[NodeScanStep Person]
+    Step2[EdgeExpandStep KNOWS, 1..2 hops, outgoing]
+    Step3[ProjectStep [p.name]]
+    Step1 --> Step2
+    Step2 --> Step3
+*/
+```
+
+#### Execution Plan — Query Plan with Runtime Statistics
+
+Use `execute()` with the `executionPlan` option to get the query plan enriched with per-step timing and row counts:
+
+```typescript
+const result = await engine.execute(
+  'MATCH (p:Person)-[:KNOWS]->(b:Person) RETURN p.name, b.name',
+  {},
+  { executionPlan: { format: 'json' } }
+);
+
+// result.executionPlan contains the formatted plan with stats
+// result.summary contains timing metadata
+// result.summary.planExecutionStats contains per-step timing data
+
+// Get execution plan in Text format
+const execText = await engine.execute(
+  'MATCH (a:Person)-[:KNOWS]->(b:Person)-[:KNOWS]->(c:Person) RETURN a.name',
+  {},
+  { executionPlan: { format: 'text' } }
+);
+console.log(execText.executionPlan);
+/*
+NodeScanStep Person (1ms, 33.3%, 2 rows)
+  EdgeExpandStep KNOWS, outgoing (1ms, 33.3%, 5 rows)
+    EdgeExpandStep KNOWS, outgoing (1ms, 33.3%, 3 rows)
+      ProjectStep [a.name]
+*/
+
+// Get execution plan in Mermaid format with timing
+const execMermaid = await engine.execute(
+  'MATCH (a:Person)-[:KNOWS]->(b:Person) RETURN a.name',
+  {},
+  { executionPlan: { format: 'mermaid' } }
+);
+```
+
+The execution plan includes:
+- **timeMs**: Time spent in each step
+- **percentageOfTotal**: Percentage of total query time
+- **rowsOut**: Number of rows output by each step
+
+Supported formats: `'json'`, `'text'`, `'mermaid'`
 
 #### Variable-length Edge Syntax
 
@@ -305,7 +418,7 @@ interface CypherSummary {
 ```
 CypherError (base)
 ├── CypherSyntaxError      — Lexer/Parser errors with line:column
-├── CypherNotSupportedError — Unsupported syntax (CREATE, aggregations, etc.)
+├── CypherNotSupportedError — Unsupported syntax (CREATE, WITH, UNWIND, etc.)
 ├── CypherSemanticError     — Unresolved variables, duplicate bindings
 └── CypherRuntimeError
     ├── UnboundParameterError — $param not provided in params map
@@ -629,41 +742,57 @@ await graph.hasEdge(edge.id); // false
 
 ## Pluggable Storage Architecture
 
-All storage backends implement the `IStorageProvider` interface:
+All storage backends implement the `IStorageProvider` interface with a unified query API:
 
 ```typescript
-import type { IStorageProvider } from 'grafio';
+import type { IStorageProvider, StorageQueryOptions } from 'grafio';
 
 class MyCustomProvider implements IStorageProvider {
-  async insertNode(node: NodeData): Promise<void> { /* ... */ }
-  async deleteNode(id: string): Promise<void> { /* ... */ }
-  async hasNode(id: string): Promise<boolean> { /* ... */ }
-  async getNode(id: string): Promise<NodeData | undefined> { /* ... */ }
-  async getAllNodes(limit?: number, orderBy?: IOrderBy): Promise<NodeData[]> { /* ... */ }
-  async getNodesByType(type: string): Promise<NodeData[]> { /* ... */ }
-  async getNodesByProperty(key: string, value: unknown, nodeType?: string): Promise<NodeData[]> { /* ... */ }
-  async insertEdge(edge: EdgeData): Promise<void> { /* ... */ }
-  async deleteEdge(id: string): Promise<void> { /* ... */ }
-  async hasEdge(id: string): Promise<boolean> { /* ... */ }
-  async getEdge(id: string): Promise<EdgeData | undefined> { /* ... */ }
-  async getAllEdges(limit?: number, orderBy?: IOrderBy): Promise<EdgeData[]> { /* ... */ }
-  async getEdgesByType(type: string): Promise<EdgeData[]> { /* ... */ }
-  async getEdgesBySource(nodeId: string, type?: string): Promise<EdgeData[]> { /* ... */ }
-  async getEdgesByTarget(nodeId: string, type?: string): Promise<EdgeData[]> { /* ... */ }
-  async createIndex(target: 'node' | 'edge', propertyKey: string, type?: string): Promise<void> { /* ... */ }
-  async addProperty(target: 'node' | 'edge', id: string, key: string, value: unknown): Promise<void> { /* ... */ }
-  async updateProperty(target: 'node' | 'edge', id: string, key: string, value: unknown): Promise<void> { /* ... */ }
-  async deleteProperty(target: 'node' | 'edge', id: string, key: string): Promise<void> { /* ... */ }
-  async clearProperties(target: 'node' | 'edge', id: string): Promise<void> { /* ... */ }
+  // Lifecycle
+  async clear(): Promise<void> { /* ... */ }
+
+  // Node mutations
+  async insertNode(node: NodeData, transaction?: ITransactionHandle): Promise<void> { /* ... */ }
+  async deleteNode(id: string, transaction?: ITransactionHandle): Promise<void> { /* ... */ }
+
+  // Node queries
+  async hasNode(id: string, transaction?: ITransactionHandle): Promise<boolean> { /* ... */ }
+  async getNode(id: string, transaction?: ITransactionHandle): Promise<NodeData | undefined> { /* ... */ }
+  async getNodeCount(options?: StorageQueryOptions): Promise<number> { /* ... */ }
+  async aggregateNodeProperty(key: string, options?: StorageQueryOptions): Promise<AggregateResult> { /* ... */ }
+  async getNodes(options?: StorageQueryOptions): Promise<NodeData[]> { /* ... */ }
+
+  // Edge mutations
+  async insertEdge(edge: EdgeData, transaction?: ITransactionHandle): Promise<void> { /* ... */ }
+  async deleteEdge(id: string, transaction?: ITransactionHandle): Promise<void> { /* ... */ }
+
+  // Edge queries
+  async hasEdge(id: string, transaction?: ITransactionHandle): Promise<boolean> { /* ... */ }
+  async getEdge(id: string, transaction?: ITransactionHandle): Promise<EdgeData | undefined> { /* ... */ }
+  async getEdgeCount(options?: StorageQueryOptions): Promise<number> { /* ... */ }
+  async aggregateEdgeProperty(key: string, options?: StorageQueryOptions): Promise<AggregateResult> { /* ... */ }
+  async getEdges(options?: StorageQueryOptions): Promise<EdgeData[]> { /* ... */ }
+  async getEdgesBySource(nodeId: string, options?: StorageQueryOptions): Promise<EdgeData[]> { /* ... */ }
+  async getEdgesByTarget(nodeId: string, options?: StorageQueryOptions): Promise<EdgeData[]> { /* ... */ }
+
+  // Property mutations
+  async addProperty(target: 'node' | 'edge', id: string, key: string, value: unknown, transaction?: ITransactionHandle): Promise<void> { /* ... */ }
+  async updateProperty(target: 'node' | 'edge', id: string, key: string, value: unknown, transaction?: ITransactionHandle): Promise<void> { /* ... */ }
+  async deleteProperty(target: 'node' | 'edge', id: string, key: string, transaction?: ITransactionHandle): Promise<void> { /* ... */ }
+  async clearProperties(target: 'node' | 'edge', id: string, transaction?: ITransactionHandle): Promise<void> { /* ... */ }
+
+  // Index management
+  async createIndex(target: 'node' | 'edge', propertyKey: string): Promise<void> { /* ... */ }
+
+  // Data portability
   async exportJSON(): Promise<GraphData> { /* ... */ }
   async importJSON(data: GraphData): Promise<void> { /* ... */ }
-  async clear(): Promise<void> { /* ... */ }
-}
 
-// IOrderBy interface for ordering collection queries
-interface IOrderBy {
-  field: 'createdOn' | 'updatedOn';
-  direction: 'asc' | 'desc';
+  // Transaction support
+  supportsTransactions(): boolean { /* ... */ }
+  async beginTransaction(): Promise<ITransactionHandle> { /* ... */ }
+  async commitTransaction(handle: ITransactionHandle): Promise<void> { /* ... */ }
+  async rollbackTransaction(handle: ITransactionHandle): Promise<void> { /* ... */ }
 }
 
 const graph = new Graph(new MyCustomProvider());
@@ -707,15 +836,23 @@ The test suite runs against the built-in `InMemoryStorageProvider` backend:
 ### Storage Provider Tests
 - `tests/storage/InMemoryGraphFactory.test.ts` — In-memory factory tests
 - `tests/storage/InMemoryStorageProvider.test.ts` — In-memory storage provider unit tests
-- `tests/storage/CachedStorageProvider.test.ts` — Cached storage provider tests (cache optimization, adjacency index, sorting)
+- `tests/storage/CachedStorageProvider.test.ts` — Cached storage provider tests
 
 ### Cache Tests
-- `tests/storage/cache/InMemoryCache.test.ts` — In-memory cache unit tests (getAll, count, adjacency index)
-- `tests/storage/cache/CacheManager.test.ts` — Cache manager tests (adjacency index, totalCount)
-- `tests/storage/cache/RedisCache.test.ts` — Redis cache tests (getAll, count, adjacency index)
+- `tests/storage/cache/InMemoryCache.test.ts` — In-memory cache unit tests
+- `tests/storage/cache/CacheManager.test.ts` — Cache manager tests
+- `tests/storage/cache/RedisCache.test.ts` — Redis cache tests
 
 ### Manager Tests
 - `tests/GraphManager.test.ts` — Graph manager singleton tests
+
+### Cypher Engine Tests
+- `tests/cypher/Lexer.test.ts` — Lexer tokenization tests
+- `tests/cypher/Parser.test.ts` — Parser tests
+- `tests/cypher/Semantic.test.ts` — Semantic analysis tests
+- `tests/cypher/Planner.test.ts` — Query planner tests
+- `tests/cypher/Executor.test.ts` — Executor tests
+- `tests/cypher/CypherEngine.integration.test.ts` — End-to-end Cypher integration tests
 
 ## Contributing
 

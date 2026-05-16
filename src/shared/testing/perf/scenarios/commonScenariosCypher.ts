@@ -86,7 +86,7 @@ export function buildCommonScenariosCypher(
         const engine = (meta as GraphMeta & { _engine?: CypherEngine })._engine!;
         return engine.execute('MATCH (n:Person) RETURN count(n) AS total');
       },
-      iterations: calcIterations(100, factor, isLarge, 50_000),
+      iterations: calcIterations(10_000, factor, isLarge, 50_000),
     },
 
     // ── Read: Get Nodes with filter.properties ─────────────────────────────────
@@ -101,7 +101,7 @@ export function buildCommonScenariosCypher(
         const engine = (meta as GraphMeta & { _engine?: CypherEngine })._engine!;
         return engine.execute('MATCH (n) WHERE n.active = true RETURN count(n) AS total');
       },
-      iterations: calcIterations(20, factor, isLarge, 50_000),
+      iterations: calcIterations(1_000, factor, isLarge, 50_000),
     },
 
     // ── Read: Get Nodes (full scan) ─────────────────────────────────────────
@@ -116,7 +116,7 @@ export function buildCommonScenariosCypher(
         const engine = (meta as GraphMeta & { _engine?: CypherEngine })._engine!;
         return engine.execute('MATCH (n) RETURN count(n) AS total');
       },
-      iterations: calcIterations(40, factor, isLarge, 50_000),
+      iterations: calcIterations(400, factor, isLarge, 50_000),
     },
 
     // ── Navigation: getEdgesFrom ────────────────────────────────────────────
@@ -186,7 +186,7 @@ export function buildCommonScenariosCypher(
           { src, tgt }
         );
       },
-      iterations: calcIterations(100, factor, isLarge, 50_000),
+      iterations: calcIterations(20, factor, isLarge, 50_000),
     },
 
     // ── Traversal: Traversal with type filters ──────────────────────────────────
@@ -224,7 +224,7 @@ export function buildCommonScenariosCypher(
           { tgt }
         );
       },
-      iterations: calcIterations(10, factor, isLarge, 50_000),
+      iterations: calcIterations(20, factor, isLarge, 50_000),
     },
   ];
 }

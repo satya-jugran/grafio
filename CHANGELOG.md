@@ -5,6 +5,104 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.0.0] - 2026-05-13
+
+### 🚨 Breaking Changes
+
+1. **`IStorageProvider` Interface Refactoring**
+   - Replaced discrete query methods (`getNodesByType`, `getNodesByProperty`, `getAllNodes`, etc.) with a unified `StorageQueryOptions`-based API
+   - **Node queries**: `getNodesByType(type)` → `getNodes({ filter: { types: [type] } })`
+   - **Node queries**: `getAllNodes(limit, orderBy)` → `getNodes({ limit, orderBy })`
+   - **Node queries**: `getNodesByProperty(key, value, type?)` → `getNodes({ filter: { properties: [...] } })`
+   - **Node count**: `getTotalNodeCount()` → `getNodeCount(options?)`
+   - **Edge queries**: `getEdgesByType(type)` → `getEdges({ filter: { types: [type] } })`
+   - **Edge queries**: `getAllEdges(limit, orderBy)` → `getEdges({ limit, orderBy })`
+   - **Edge queries**: `getEdgesByProperty(key, value, type?)` → `getEdges({ filter: { properties: [...] } })`
+   - **Edge count**: `getTotalEdgeCount()` → `getEdgeCount(options?)`
+   - **Adjacency**: `getEdgesBySource(nodeId, type?)` → `getEdgesBySource(nodeId, { filter: { types: [...] } })`
+   - **Adjacency**: `getEdgesByTarget(nodeId, type?)` → `getEdgesByTarget(nodeId, { filter: { types: [...] } })`
+   - **`ITransactionHandle` and `IOrderBy` interfaces** moved from `IStorageProvider.ts` to `types.ts` (re-exported from `IStorageProvider` for backward compatibility)
+   - **`createIndex` method removed the optional type argument and it will create both indexes with type and without type.
+
+### ✨ New Features
+
+1. **Cypher Aggregation Functions**
+   - `COUNT(*)` — count all matched rows
+   - `COUNT(expr)` — count non-null expression values
+   - `COUNT(DISTINCT expr)` — count distinct values
+   - `AVG(expr)` — average of numeric values
+   - `AVG(DISTINCT expr)` — average of distinct values
+   - `SUM(expr)` — sum of numeric values
+   - `MIN(expr)` — minimum value
+   - `MAX(expr)` — maximum value
+   - `COLLECT(expr)` — collect values into array
+
+2. **HAVING Clause**
+   - Post-aggregation filtering with `HAVING` clause
+   - Supports aggregate aliases: `HAVING cnt > 5`
+   - Supports raw aggregate expressions: `HAVING COUNT(*) > 1`
+
+3. **ORDER BY with Aggregate Aliases**
+   - Can now sort by aggregate aliases: `ORDER BY cnt DESC`
+   - Can sort by group-by key aliases: `ORDER BY p_city ASC`
+   - Can use raw aggregates in ORDER BY: `ORDER BY COUNT(*) DESC`
+
+4. **RETURN DISTINCT**
+   - Deduplicate result rows with `RETURN DISTINCT`
+
+5. **Aggregate Expressions**
+   - Arithmetic expressions with aggregates: `COUNT(*) + 1`, `SUM(age) / COUNT(*)`
+
+6. **Named Path Variables**
+   - Support for path variables in MATCH patterns: `MATCH p = (a)-[:KNOWS]->(b)-[:KNOWS]->(c) RETURN p`
+   - Path returned as array: `[Node, Edge, Node, Edge, Node]`
+
+7. **Storage-Level Aggregation**
+   - New methods `aggregateNodeProperty(key, options?)` and `aggregateEdgeProperty(key, options?)` on `IStorageProvider`
+   - Enables push-down aggregation to storage backends for better performance
+
+8. **New Types in `src/types.ts`**
+   - `StorageQueryOptions` — unified query options interface
+   - `AggregateOp` — aggregate operation types
+   - `AggregateResult` — result of aggregation queries
+
+9. **Property Filter Operators**
+   - `QueryOptions.filter.properties` now supports `op` field for comparison operators
+   - Supported operators: `=`, `<>`, `>`, `<`, `>=`, `<=`, `CONTAINS`, `STARTS_WITH`, `ENDS_WITH`, `IN`, `NOT_IN`, `IS_NULL`, `IS_NOT_NULL`
+   - **AND/OR Chaining**: `QueryOptionsFilterProperty` now supports recursive `AND` and `OR` arrays for complex logical filtering
+   - Example: `{ AND: [{ key: 'age', value: 25, op: '>' }, { key: 'city', value: 'NYC' }] }` matches nodes with age > 25 AND city = 'NYC'
+   - Supported operators: `=`, `<>`, `>`, `<`, `>=`, `<=`, `CONTAINS`, `STARTS_WITH`, `ENDS_WITH`, `IN`, `NOT_IN`, `IS_NULL`, `IS_NOT_NULL`
+   - Implemented in `InMemoryStorageProvider` and `CachedStorageProvider`
+   - Shared test scenarios in `src/shared/testing/graphFilterScenarios.ts`
+
+10. **Query Plan Inspection**
+    - `CypherEngine.getQueryPlan(query, params?, format?)` method to inspect the logical execution plan
+    - Returns the query plan showing all execution steps without running the query
+    - Supported formats: `'json'` (default), `'text'`, `'mermaid'`
+    - `PlanFormatter` class with `toJson()`, `toText()`, and `toMermaid()` methods
+
+11. **Execution Plan with Runtime Statistics**
+    - `CypherEngine.execute()` accepts optional `CypherEngineOptions` parameter with `executionPlan: { format: PlanFormat }`
+    - Returns execution plan enriched with per-step timing and row counts
+    - `PlanStepExecutionStats` interface: `stepKind`, `timeMs`, `percentageOfTotal`, `rowsOut`
+    - `PlanExecutionStats` interface: `totalTimeMs`, `steps[]`
+    - Extended `CypherSummary` with optional `planExecutionStats` field
+    - Executor tracks per-step timing during query execution
+
+### 📝 Documentation
+
+1. **Updated README with Cypher aggregation features**
+   - Documented `COUNT`, `AVG`, `SUM`, `MIN`, `MAX`, `COLLECT` functions
+   - Documented `HAVING` clause
+   - Documented `ORDER BY` with aggregates
+   - Documented `RETURN DISTINCT`
+
+2. **Updated README with Query Plan and Execution Plan features**
+   - Documented `CypherEngine.getQueryPlan()` for inspecting execution steps
+   - Documented `CypherEngineOptions` and `executionPlan` option for runtime statistics
+   - Documented supported formats: `json`, `text`, `mermaid`
+   - Documented `PlanStepExecutionStats` fields: `timeMs`, `percentageOfTotal`, `rowsOut`
+
 ## [6.3.0] - 2026-05-11
 
 ### ✨ New Features

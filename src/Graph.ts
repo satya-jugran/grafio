@@ -372,10 +372,9 @@ export class Graph {
    *
    * @param target - Either 'node' or 'edge'
    * @param propertyKey - The property name to index
-   * @param type - Optional type filter. If provided (not '*' or undefined), creates a compound index on (type, propertyKey)
    */
-  async createIndex(target: 'node' | 'edge', propertyKey: string, type?: string): Promise<void> {
-    return this._index.createIndex(target, propertyKey, type);
+  async createIndex(target: 'node' | 'edge', propertyKey: string): Promise<void> {
+    return this._index.createIndex(target, propertyKey);
   }
 
   async hasIndex(target: 'node' | 'edge', propertyKey: string): Promise<boolean> {

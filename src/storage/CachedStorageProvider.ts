@@ -366,10 +366,9 @@ export class CachedStorageProvider implements IStorageProvider {
 
   async createIndex(
     target: 'node' | 'edge',
-    propertyKey: string,
-    type?: string
+    propertyKey: string
   ): Promise<void> {
-    return this._underlying.createIndex(target, propertyKey, type);
+    return this._underlying.createIndex(target, propertyKey);
   }
 
   async hasIndex(target: 'node' | 'edge', propertyKey: string): Promise<boolean> {

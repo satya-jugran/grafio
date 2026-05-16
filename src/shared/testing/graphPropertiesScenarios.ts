@@ -155,7 +155,7 @@ export function runGraphPropertiesScenarios(
         await graph.addNode('Course', { title: 'Math' });
 
         // Create compound index for Person nodes only
-        await expect(graph.createIndex('node', 'email', 'Person')).resolves.toBeUndefined();
+        await expect(graph.createIndex('node', 'email')).resolves.toBeUndefined();
 
         const results = await graph.getNodes({ filter: { types: ['Person'], properties: [{ key: 'email', value: 'alice@example.com' }] } });
         expect(results).toHaveLength(1);
@@ -167,7 +167,7 @@ export function runGraphPropertiesScenarios(
         await graph.addNode('Course', { title: 'Math', email: 'math@example.com' });
 
         // type='*' should create simple index across all types
-        await expect(graph.createIndex('node', 'email', '*')).resolves.toBeUndefined();
+        await expect(graph.createIndex('node', 'email')).resolves.toBeUndefined();
 
         const results = await graph.getNodes({ filter: { properties: [{ key: 'email', value: 'math@example.com' }] } });
         expect(results).toHaveLength(1);

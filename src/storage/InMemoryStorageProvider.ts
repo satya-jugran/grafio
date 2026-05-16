@@ -712,25 +712,21 @@ export class InMemoryStorageProvider implements IStorageProvider {
    *
    * @param target - Either 'node' or 'edge'
    * @param propertyKey - The property name to index
-   * @param type - Optional type filter. If provided (not '*' or undefined), creates a compound index on (type, propertyKey)
    */
-  async createIndex(target: 'node' | 'edge', propertyKey: string, type?: string): Promise<void> {
+  async createIndex(target: 'node' | 'edge', propertyKey: string): Promise<void> {
     if (target === 'node') {
       if (!this._nodesByProperty.has(propertyKey)) {
         this._nodesByProperty.set(propertyKey, new Map());
       }
 
-      // If type is specified, build compound index for existing nodes of that type
-      if (type && type !== '*') {
-        const valueMap = this._nodesByProperty.get(propertyKey)!;
-        for (const node of this._nodes.values()) {
-          if (node.type === type && propertyKey in node.properties) {
-            const serialized = this._propKey(node.properties[propertyKey]);
-            if (!valueMap.has(serialized)) {
-              valueMap.set(serialized, new Set());
-            }
-            valueMap.get(serialized)!.add(node.id);
+      const valueMap = this._nodesByProperty.get(propertyKey)!;
+      for (const node of this._nodes.values()) {
+        if (propertyKey in node.properties) {
+          const serialized = this._propKey(node.properties[propertyKey]);
+          if (!valueMap.has(serialized)) {
+            valueMap.set(serialized, new Set());
           }
+          valueMap.get(serialized)!.add(node.id);
         }
       }
     } else {
@@ -740,17 +736,14 @@ export class InMemoryStorageProvider implements IStorageProvider {
         this._edgesByProperty.set(propertyKey, new Map());
       }
 
-      // If type is specified, build compound index for existing edges of that type
-      if (type && type !== '*') {
-        const valueMap = this._edgesByProperty.get(propertyKey)!;
-        for (const edge of this._edges.values()) {
-          if (edge.type === type && propertyKey in edge.properties) {
-            const serialized = this._propKey(edge.properties[propertyKey]);
-            if (!valueMap.has(serialized)) {
-              valueMap.set(serialized, new Set());
-            }
-            valueMap.get(serialized)!.add(edge.id);
+      const valueMap = this._edgesByProperty.get(propertyKey)!;
+      for (const edge of this._edges.values()) {
+        if (propertyKey in edge.properties) {
+          const serialized = this._propKey(edge.properties[propertyKey]);
+          if (!valueMap.has(serialized)) {
+            valueMap.set(serialized, new Set());
           }
+          valueMap.get(serialized)!.add(edge.id);
         }
       }
     }

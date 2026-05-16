@@ -468,8 +468,8 @@ export class GraphIndex {
   /**
    * Creates an index on a node or edge property.
    */
-  async createIndex(target: 'node' | 'edge', propertyKey: string, type?: string): Promise<void> {
-    await this._store.createIndex(target, propertyKey, type);
+  async createIndex(target: 'node' | 'edge', propertyKey: string): Promise<void> {
+    await this._store.createIndex(target, propertyKey);
   }
 
   async hasIndex(target: 'node' | 'edge', propertyKey: string): Promise<boolean> {
