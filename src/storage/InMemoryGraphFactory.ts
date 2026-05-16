@@ -18,12 +18,12 @@ import type { IGraphFactory } from './IGraphFactory';
  * - Scenarios where no persistence is desired
  */
 export class InMemoryGraphFactory implements IGraphFactory {
-  private readonly _opts: InMemoryStorageProviderOptions;
+  private readonly _opts: Omit<InMemoryStorageProviderOptions, 'graphId'>;
 
   /**
    * @param opts - Optional defaults applied to every `forGraph` call (e.g. no-op hooks).
    */
-  constructor(opts: InMemoryStorageProviderOptions = {}) {
+  constructor(opts: Omit<InMemoryStorageProviderOptions, 'graphId'> = {}) {
     this._opts = opts;
   }
 
