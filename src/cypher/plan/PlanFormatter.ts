@@ -30,7 +30,7 @@ export class PlanFormatter {
    * @param executionStats - Optional execution statistics to include in output.
    * @returns A formatted string representation of the plan.
    */
-  format(plan: QueryPlan, format: PlanFormat, executionStats?: PlanExecutionStats, params?: Record<string, unknown>): string {
+  format(plan: QueryPlan, format: PlanFormat = 'json', executionStats?: PlanExecutionStats, params?: Record<string, unknown>): string {
     switch (format) {
       case 'json':
         return this.toJson(plan, executionStats, params);
@@ -299,13 +299,6 @@ export class PlanFormatter {
       desc += (desc ? ' OR ' : '') + '(' + orDesc + ')';
     }
     return desc || '(no filters)';
-  }
-
-  /**
-   * Generate a Mermaid node ID for a given step index.
-   */
-  private mermaidNodeId(index: number): string {
-    return String.fromCharCode(65 + index); // A, B, C, ...
   }
 
   /**

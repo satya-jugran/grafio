@@ -970,23 +970,6 @@ export class Executor {
       .join('\x00');
   }
 
-  /**
-   * Derive an output alias from a group-by expression.
-   *
-   * For simple identifiers, use the variable name.  For everything
-   * else, produce a synthetic name.
-   */
-  private _deriveGroupByAlias(expr: Expression): string {
-    if (expr.kind === 'Identifier') return expr.name;
-    if (
-      expr.kind === 'PropertyAccess' &&
-      expr.object.kind === 'Identifier'
-    ) {
-      return `${expr.object.name}_${expr.property}`;
-    }
-    return `group_${expr.kind}`;
-  }
-
   // ── Expression evaluator ────────────────────────────────────────
 
   /**

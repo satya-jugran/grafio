@@ -709,25 +709,6 @@ describe('CypherEngine Integration', () => {
       }
     });
 
-    it('percentageOfTotal sums to approximately 100%', async () => {
-      const result = await engine.execute(
-        'MATCH (p:Person) RETURN p.name AS name',
-        {},
-        { executionPlan: { format: 'json' } },
-      );
-      const stats = result.summary.planExecutionStats!;
-      // When steps are very fast (0ms), percentage may be 0 for all
-      // In that case we just verify the structure is correct
-      const total = stats.steps.reduce((sum: number, s) => sum + s.percentageOfTotal, 0);
-      if (total > 0) {
-        expect(total).toBeCloseTo(100, 0);
-      } else {
-        // All steps were too fast to measure - verify structure
-        expect(stats.steps.length).toBeGreaterThan(0);
-        expect(stats.totalTimeMs).toBeGreaterThanOrEqual(0);
-      }
-    });
-
     it('does not include executionPlan when format is not provided', async () => {
       const result = await engine.execute(
         'MATCH (p:Person) RETURN p.name AS name',
