@@ -12,7 +12,7 @@
  */
 import { describe, expect, it, beforeAll, beforeEach, afterEach, jest } from '@jest/globals';
 import { Graph } from '../../src/Graph';
-import { CypherEngine, CypherNotSupportedError } from '../../src/cypher';
+import { CypherEngine, CypherNotSupportedError, PlanFormat } from '../../src/cypher';
 
 /** Build a social graph with people, posts, and relationships. */
 async function buildSocialGraph(graph: Graph): Promise<void> {
@@ -535,6 +535,83 @@ describe('CypherEngine Integration', () => {
       const ids = result.rows.map((r) => r.nodeId as string);
       const uniqueIds = new Set(ids);
       expect(uniqueIds.size).toBe(8); // all distinct
+    });
+  });
+
+  describe('getQueryPlan', () => {
+    let graph: Graph;
+    let engine: CypherEngine;
+
+    beforeEach(() => {
+      graph = new Graph();
+      engine = new CypherEngine(graph);
+    });
+
+    it('returns json format by default', async () => {
+      await buildSocialGraph(graph);
+      const plan = await engine.getQueryPlan('MATCH (p:Person) RETURN p.name');
+      expect(plan).toContain('"kind"');
+      expect(plan).toContain('"steps"');
+      expect(JSON.parse(plan)).toHaveProperty('steps');
+    });
+
+    it('returns json format explicitly', async () => {
+      await buildSocialGraph(graph);
+      const plan = await engine.getQueryPlan('MATCH (p:Person) RETURN p', {}, 'json');
+      expect(plan).toContain('"NodeScanStep"');
+    });
+
+    it('returns ascii format', async () => {
+      await buildSocialGraph(graph);
+      const plan = await engine.getQueryPlan('MATCH (p:Person) RETURN p', {}, 'ascii');
+      expect(plan).toContain('NodeScanStep');
+      expect(plan).toContain('ProjectStep');
+    });
+
+    it('returns mermaid format', async () => {
+      await buildSocialGraph(graph);
+      const plan = await engine.getQueryPlan('MATCH (p:Person) RETURN p', {}, 'mermaid');
+      expect(plan).toContain('flowchart TD');
+      expect(plan).toContain('-->');
+    });
+
+    it('includes all steps for a multi-hop query', async () => {
+      await buildSocialGraph(graph);
+      const plan = await engine.getQueryPlan(
+        "MATCH (p:Person)-[:KNOWS]->(f:Person) WHERE p.name = 'Alice' RETURN f.name AS name",
+        {},
+        'json',
+      );
+      const parsed = JSON.parse(plan);
+      expect(parsed.steps.length).toBeGreaterThanOrEqual(3);
+      const kinds = parsed.steps.map((s: { kind: string }) => s.kind);
+      expect(kinds).toContain('NodeScanStep');
+      expect(kinds).toContain('EdgeExpandStep');
+      expect(kinds).toContain('ProjectStep');
+    });
+
+    it('throws on invalid query syntax', async () => {
+      const engine = new CypherEngine(new Graph());
+      await expect(
+        engine.getQueryPlan('MATCH (p PERSON) RETURN p'),
+      ).rejects.toThrow();
+    });
+
+    it('throws on unsupported clause', async () => {
+      const engine = new CypherEngine(new Graph());
+      await expect(
+        engine.getQueryPlan('CREATE (n:Person) RETURN n'),
+      ).rejects.toThrow(CypherNotSupportedError);
+    });
+
+    it('accepts query parameters', async () => {
+      await buildSocialGraph(graph);
+      const plan = await engine.getQueryPlan(
+        'MATCH (p:Person) WHERE p.name = $name RETURN p',
+        { name: 'Alice' },
+        'json',
+      );
+      expect(JSON.parse(plan)).toHaveProperty('steps');
     });
   });
 

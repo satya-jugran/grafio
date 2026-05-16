@@ -28,6 +28,7 @@ import { Planner } from './Planner';
 import { Executor } from './Executor';
 import { CypherResult } from './Result';
 import { CypherNotSupportedError } from './errors';
+import { PlanFormatter, PlanFormat } from './plan/PlanFormatter';
 
 // ── Gated token kinds (not yet supported in the public API) ───────
 
@@ -117,6 +118,50 @@ export class CypherEngine {
     // ── 6. Execute ────────────────────────────────────────────────
     const executor = new Executor(this._graph);
     return executor.execute(plan, params);
+  }
+
+  /**
+   * Returns the execution plan for a Cypher query without executing it.
+   *
+   * This method parses and plans the query (same steps 1-5 as {@link execute})
+   * but returns the formatted plan instead of executing it. Useful for
+   * debugging, optimization analysis, and query understanding.
+   *
+   * @param query  - Cypher query string.
+   * @param params - Named parameter map (`$key` → value).
+   * @param format - Output format: 'json' | 'ascii' | 'mermaid' (default: 'json').
+   * @returns A formatted string representation of the query execution plan.
+   * @throws {CypherSyntaxError}       on tokenisation / parse errors.
+   * @throws {CypherNotSupportedError} on unsupported clauses (write, aggregation, WITH, etc.).
+   * @throws {CypherSemanticError}     on variable scope violations.
+   */
+  public async getQueryPlan(
+    query: string,
+    params: Record<string, unknown> = {},
+    format: PlanFormat = 'json',
+  ): Promise<string> {
+    // ── 1. Tokenise ───────────────────────────────────────────────
+    const lexer = new Lexer(query);
+    const tokens = lexer.tokenise();
+
+    // ── 2. Validation gate: reject unsupported clauses ───────────
+    this._validateTokens(tokens);
+
+    // ── 3. Parse ──────────────────────────────────────────────────
+    const parser = new Parser(tokens);
+    const rawAst = parser.parse();
+
+    // ── 4. Semantic analysis ──────────────────────────────────────
+    const semantic = new Semantic();
+    semantic.analyse(rawAst);
+
+    // ── 5. Plan ───────────────────────────────────────────────────
+    const planner = new Planner(this._graph);
+    const plan = await planner.plan(rawAst);
+
+    // ── 6. Format ─────────────────────────────────────────────────
+    const formatter = new PlanFormatter();
+    return formatter.format(plan, format);
   }
 
   /**

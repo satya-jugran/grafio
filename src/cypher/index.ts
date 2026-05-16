@@ -22,3 +22,5 @@ export {
   UnboundParameterError,
   TypeMismatchError,
 } from './errors';
+export { PlanFormatter } from './plan/PlanFormatter';
+export type { PlanFormat } from './plan/PlanFormatter';
