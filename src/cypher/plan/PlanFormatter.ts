@@ -120,10 +120,11 @@ export class PlanFormatter {
         return 'NodeScanStep ' + step.variable + (step.label ? ':' + step.label : '') + (filters ? ' { ' + filters + ' }' : '');
 
       case 'NodeSeekStep':
+        const nodeSeekVal = this.formatValue(step.value);
         if (step.index === 'id') {
-          return 'NodeSeekStep id=' + step.value;
+          return 'NodeSeekStep id=' + nodeSeekVal;
         }
-        return 'NodeSeekStep ' + step.key + '=' + step.value;
+        return 'NodeSeekStep ' + step.key + '=' + nodeSeekVal;
 
       case 'EdgeExpandStep': {
         const dir = step.direction === 'out' ? '->' : '<-';
@@ -174,10 +175,11 @@ export class PlanFormatter {
         return 'NodeScanStep (' + step.variable + (step.label ? ':' + step.label : '') + (scanFilters ? ' { ' + scanFilters + ' }' : '') + ')';
 
       case 'NodeSeekStep':
+        const seekValue = this.formatValue(step.value);
         if (step.index === 'id') {
-          return 'NodeSeekStep [id=' + step.value + ']';
+          return 'NodeSeekStep [id=' + seekValue + ']';
         }
-        return 'NodeSeekStep [' + step.key + '=' + step.value + ']';
+        return 'NodeSeekStep [' + step.key + '=' + seekValue + ']';
 
       case 'EdgeExpandStep': {
         const dir = step.direction === 'out' ? '\u2192' : '\u2190';
@@ -281,6 +283,17 @@ export class PlanFormatter {
    */
   private mermaidNodeId(index: number): string {
     return String.fromCharCode(65 + index); // A, B, C, ...
+  }
+
+  /**
+   * Format a value for display in plan output.
+   * Handles Parameter expressions by returning $name, otherwise JSON stringifies.
+   */
+  private formatValue(value: unknown): string {
+    if (value && typeof value === 'object' && (value as Record<string, unknown>).kind === 'Parameter') {
+      return '$' + (value as { name: string }).name;
+    }
+    return JSON.stringify(value);
   }
 
   /**
