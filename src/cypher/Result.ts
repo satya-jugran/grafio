@@ -8,6 +8,8 @@
  * @module cypher/Result
  */
 
+import { PlanExecutionStats } from './plan/QueryPlan';
+
 /**
  * A single row in a Cypher query result.
  *
@@ -50,4 +52,6 @@ export interface CypherSummary {
   edgesDeleted: number;
   /** Number of properties set */
   propertiesSet: number;
+  /** Execution statistics for each plan step (optional). */
+  planExecutionStats?: PlanExecutionStats;
 }

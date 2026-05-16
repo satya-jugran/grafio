@@ -92,10 +92,10 @@ describe('PlanFormatter', () => {
       const result = formatter.format(plan, 'json');
       const parsed = JSON.parse(result);
 
-      expect(parsed.steps).toHaveLength(1);
-      expect(parsed.steps[0].kind).toBe('NodeScanStep');
-      expect(parsed.steps[0].variable).toBe('p');
-      expect(parsed.steps[0].label).toBe('Person');
+      expect(parsed.plan.steps).toHaveLength(1);
+      expect(parsed.plan.steps[0].kind).toBe('NodeScanStep');
+      expect(parsed.plan.steps[0].variable).toBe('p');
+      expect(parsed.plan.steps[0].label).toBe('Person');
     });
 
     it('serializes full plan with all step types', () => {
@@ -124,11 +124,11 @@ describe('PlanFormatter', () => {
       const result = formatter.format(plan, 'json');
       const parsed = JSON.parse(result);
 
-      expect(parsed.steps).toHaveLength(4);
-      expect(parsed.steps[0].kind).toBe('NodeScanStep');
-      expect(parsed.steps[1].kind).toBe('EdgeExpandStep');
-      expect(parsed.steps[2].kind).toBe('FilterStep');
-      expect(parsed.steps[3].kind).toBe('ProjectStep');
+      expect(parsed.plan.steps).toHaveLength(4);
+      expect(parsed.plan.steps[0].kind).toBe('NodeScanStep');
+      expect(parsed.plan.steps[1].kind).toBe('EdgeExpandStep');
+      expect(parsed.plan.steps[2].kind).toBe('FilterStep');
+      expect(parsed.plan.steps[3].kind).toBe('ProjectStep');
     });
   });
 

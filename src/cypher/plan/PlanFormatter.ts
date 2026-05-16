@@ -10,7 +10,7 @@
  */
 
 import { Expression } from '../ast/AstNode';
-import { QueryPlan, PlanStep, PropertyFilter } from './QueryPlan';
+import { QueryPlan, PlanStep, PropertyFilter, PlanExecutionStats } from './QueryPlan';
 
 /**
  * Supported output formats for execution plan visualization.
@@ -27,30 +27,35 @@ export class PlanFormatter {
    *
    * @param plan   - The query plan to format.
    * @param format - The output format: 'json' | 'ascii' | 'mermaid'.
+   * @param executionStats - Optional execution statistics to include in output.
    * @returns A formatted string representation of the plan.
    */
-  format(plan: QueryPlan, format: PlanFormat): string {
+  format(plan: QueryPlan, format: PlanFormat, executionStats?: PlanExecutionStats): string {
     switch (format) {
       case 'json':
-        return this.toJson(plan);
+        return this.toJson(plan, executionStats);
       case 'ascii':
-        return this.toAscii(plan);
+        return this.toAscii(plan, executionStats);
       case 'mermaid':
-        return this.toMermaid(plan);
+        return this.toMermaid(plan, executionStats);
     }
   }
 
   /**
    * Convert plan to JSON string.
    */
-  private toJson(plan: QueryPlan): string {
-    return JSON.stringify(plan, null, 2);
+  private toJson(plan: QueryPlan, executionStats?: PlanExecutionStats): string {
+    const output: { plan: QueryPlan; executionStats?: PlanExecutionStats } = { plan };
+    if (executionStats) {
+      output.executionStats = executionStats;
+    }
+    return JSON.stringify(output, null, 2);
   }
 
   /**
    * Convert plan to ASCII tree diagram.
    */
-  private toAscii(plan: QueryPlan): string {
+  private toAscii(plan: QueryPlan, executionStats?: PlanExecutionStats): string {
     const lines: string[] = [];
     const steps = plan.steps;
 
@@ -59,7 +64,8 @@ export class PlanFormatter {
       const isLast = i === steps.length - 1;
       const prefix = isLast ? '\u2514\u2014 ' : '\u251c\u2014 ';
       const stepDescription = this.describeStep(step);
-      lines.push(prefix + stepDescription);
+      const statsSuffix = this.getStepStatsSuffix(executionStats, i);
+      lines.push(prefix + stepDescription + statsSuffix);
     }
 
     return lines.join('\n');
@@ -68,7 +74,7 @@ export class PlanFormatter {
   /**
    * Convert plan to Mermaid flowchart syntax.
    */
-  private toMermaid(plan: QueryPlan): string {
+  private toMermaid(plan: QueryPlan, executionStats?: PlanExecutionStats): string {
     const lines: string[] = ['flowchart TD'];
     const steps = plan.steps;
 
@@ -76,7 +82,9 @@ export class PlanFormatter {
       const step = steps[i];
       const currentNode = 'Step' + (i + 1);
       const currentLabel = this.escapeMermaid(this.describeStepForMermaid(step));
-      lines.push(' ' + currentNode + '[' + currentLabel + ']');
+      const statsSuffix = this.getStepStatsSuffix(executionStats, i);
+      const escapedStatsSuffix = this.escapeMermaid(statsSuffix);
+      lines.push(' ' + currentNode + '[' + currentLabel + escapedStatsSuffix + ']');
 
       if (i > 0) {
         const prevNode = 'Step' + i;
@@ -88,13 +96,27 @@ export class PlanFormatter {
   }
 
   /**
+   * Get the statistics suffix for a step (e.g., " (5ms, 50%, 10 rows)").
+   */
+  private getStepStatsSuffix(executionStats?: PlanExecutionStats, stepIndex?: number): string {
+    if (!executionStats || stepIndex === undefined) {
+      return '';
+    }
+    const stepStats = executionStats.steps[stepIndex];
+    if (!stepStats) {
+      return '';
+    }
+    return ` (${stepStats.timeMs}ms, ${stepStats.percentageOfTotal.toFixed(1)}%, ${stepStats.rowsOut} rows)`;
+  }
+
+  /**
    * Generate a description of a plan step suitable for Mermaid labels.
    * Uses angle brackets instead of parentheses for safety.
    */
   private describeStepForMermaid(step: PlanStep): string {
     switch (step.kind) {
       case 'NodeScanStep':
-        return 'NodeScanStep ' + step.variable + (step.label ? ':' + step.label : '') + ' &lcub; ' + this.getPropertyFilterDescription(step.propertyFilters?.[0] || {}) + ' &rcub;';
+        return 'NodeScanStep ' + step.variable + (step.label ? ':' + step.label : '') + ' { ' + this.getPropertyFilterDescription(step.propertyFilters?.[0] || {}) + ' }';
 
       case 'NodeSeekStep':
         if (step.index === 'id') {
@@ -147,7 +169,7 @@ export class PlanFormatter {
   private describeStep(step: PlanStep): string {
     switch (step.kind) {
       case 'NodeScanStep':
-        return 'NodeScanStep (' + step.variable + (step.label ? ':' + step.label : '') + (step.propertyFilters ? ' &lcub; ' + this.getPropertyFilterDescription(step.propertyFilters[0]) + ' &rcub;' : '') + ')';
+        return 'NodeScanStep (' + step.variable + (step.label ? ':' + step.label : '') + (step.propertyFilters ? ' { ' + this.getPropertyFilterDescription(step.propertyFilters[0]) + ' }' : '') + ')';
 
       case 'NodeSeekStep':
         if (step.index === 'id') {
@@ -262,11 +284,17 @@ export class PlanFormatter {
    */
   private escapeMermaid(text: string): string {
     return text
-      .replace(/&/g, String.fromCharCode(38, 97, 109, 112, 59))
-      .replace(/</g, String.fromCharCode(38, 108, 116, 59))
-      .replace(/>/g, String.fromCharCode(38, 103, 116, 59))
-      .replace(/"/g, String.fromCharCode(38, 113, 117, 111, 116, 59))
-      .replace(/\x27/g, String.fromCharCode(38, 97, 112, 111, 115, 59))
+      .replace(/&/g, String.fromCharCode(38, 97, 109, 112, 59)) // &amp;
+      .replace(/</g, String.fromCharCode(38, 108, 116, 59)) // &lt;
+      .replace(/>/g, String.fromCharCode(38, 103, 116, 59)) // &gt;
+      .replace(/{/g, String.fromCharCode(38, 108, 99, 117, 98, 59)) // &lcub;
+      .replace(/}/g, String.fromCharCode(38, 114, 99, 117, 98, 59)) // &rcub;
+      .replace(/\(/g, String.fromCharCode(38, 108, 112, 97, 114, 59)) // &lpar;
+      .replace(/\)/g, String.fromCharCode(38, 114, 112, 97, 114, 59)) // &rpar;
+      .replace(/\[/g, String.fromCharCode(38, 108, 98, 114, 97, 99, 107, 59)) // &lbrack;
+      .replace(/\]/g, String.fromCharCode(38, 114, 98, 114, 97, 99, 107, 59)) // &rbrack;
+      .replace(/"/g, String.fromCharCode(38, 113, 117, 111, 116, 59)) // &quot;
+      .replace(/\x27/g, String.fromCharCode(38, 97, 112, 111, 115, 59)) // &apos;
       .replace(/\n/g, '<br/>');
   }
 }

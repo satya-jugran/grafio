@@ -264,3 +264,31 @@ export interface AggregateStep {
    */
   useStorageLevel?: boolean;
 }
+
+// ── Execution statistics ─────────────────────────────────────────
+
+/**
+ * Execution statistics for a single plan step.
+ * Collected at runtime when the {@link Executor} walks the plan.
+ */
+export interface PlanStepExecutionStats {
+  /** The step kind (e.g., 'NodeScanStep', 'EdgeExpandStep'). */
+  stepKind: string;
+  /** Time spent in this step in milliseconds. */
+  timeMs: number;
+  /** Percentage of total query time spent in this step (0-100). */
+  percentageOfTotal: number;
+  /** Number of rows produced by this step. */
+  rowsOut: number;
+}
+
+/**
+ * Complete execution statistics for a query plan.
+ * Includes per-step timing and overall query timing.
+ */
+export interface PlanExecutionStats {
+  /** Total execution time in milliseconds. */
+  totalTimeMs: number;
+  /** Per-step execution statistics in plan order. */
+  steps: PlanStepExecutionStats[];
+}

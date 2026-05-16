@@ -12,6 +12,7 @@
  */
 
 export { CypherEngine } from './CypherEngine';
+export type { CypherEngineOptions } from './CypherEngine';
 export type { CypherResult, CypherRow, CypherSummary } from './Result';
 export {
   CypherError,

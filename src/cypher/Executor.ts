@@ -34,6 +34,8 @@ import {
   LimitStep,
   AggregateStep,
   AggregateSpec,
+  PlanStepExecutionStats,
+  PlanExecutionStats,
 } from './plan/QueryPlan';
 import { CypherResult, CypherRow, CypherSummary } from './Result';
 import { Expression } from './ast/AstNode';
@@ -68,17 +70,36 @@ export class Executor {
     params: Record<string, unknown> = {},
   ): Promise<CypherResult> {
     const startTime = Date.now();
+    const stepStats: PlanStepExecutionStats[] = [];
 
     // Initial row buffer: a single empty row as the starting point.
     let rows: Row[] = [new Map()];
 
     // Walk each plan step, transforming the row buffer.
     for (const step of plan.steps) {
+      const stepStart = Date.now();
       rows = await this._executeStep(step, rows, params);
+      const stepTime = Date.now() - stepStart;
+      stepStats.push({
+        stepKind: step.kind,
+        timeMs: stepTime,
+        percentageOfTotal: 0, // calculated after all steps
+        rowsOut: rows.length,
+      });
     }
 
-    const queryTimeMs = Date.now() - startTime;
-    return this._buildResult(plan, rows, queryTimeMs);
+    const totalTime = Date.now() - startTime;
+
+    // Calculate percentages
+    const stats: PlanExecutionStats = {
+      totalTimeMs: totalTime,
+      steps: stepStats.map((s) => ({
+        ...s,
+        percentageOfTotal: totalTime > 0 ? (s.timeMs / totalTime) * 100 : 0,
+      })),
+    };
+
+    return this._buildResult(plan, rows, stats);
   }
 
   // ── Step dispatch ───────────────────────────────────────────────
@@ -1159,7 +1180,7 @@ export class Executor {
   private _buildResult(
     plan: QueryPlan,
     rows: Row[],
-    queryTimeMs: number,
+    stats: PlanExecutionStats,
   ): CypherResult {
     const projectStep = plan.steps.find(
       (s): s is ProjectStep => s.kind === 'ProjectStep',
@@ -1178,12 +1199,13 @@ export class Executor {
     });
 
     const summary: CypherSummary = {
-      queryTimeMs,
+      queryTimeMs: stats.totalTimeMs,
       nodesCreated: 0,
       nodesDeleted: 0,
       edgesCreated: 0,
       edgesDeleted: 0,
       propertiesSet: 0,
+      planExecutionStats: stats,
     };
 
     return { columns, rows: resultRows, summary };

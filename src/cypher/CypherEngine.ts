@@ -30,6 +30,19 @@ import { CypherResult } from './Result';
 import { CypherNotSupportedError } from './errors';
 import { PlanFormatter, PlanFormat } from './plan/PlanFormatter';
 
+/**
+ * Options for controlling query execution behavior.
+ */
+export interface CypherEngineOptions {
+  /**
+   * If provided, the execution plan will be formatted and included in the result.
+   */
+  executionPlan?: {
+    /** The output format for the execution plan. */
+    format: PlanFormat;
+  };
+}
+
 // ── Gated token kinds (not yet supported in the public API) ───────
 
 /**
@@ -95,7 +108,8 @@ export class CypherEngine {
   public async execute(
     query: string,
     params: Record<string, unknown> = {},
-  ): Promise<CypherResult> {
+    options?: CypherEngineOptions,
+  ): Promise<CypherResult & { executionPlan?: string }> {
     // ── 1. Tokenise ───────────────────────────────────────────────
     const lexer = new Lexer(query);
     const tokens = lexer.tokenise();
@@ -117,7 +131,18 @@ export class CypherEngine {
 
     // ── 6. Execute ────────────────────────────────────────────────
     const executor = new Executor(this._graph);
-    return executor.execute(plan, params);
+    const result = await executor.execute(plan, params);
+
+    // ── 7. Format execution plan if requested ───────────────────
+    const planFormat = options?.executionPlan?.format;
+    if (planFormat && result.summary.planExecutionStats) {
+      const formatter = new PlanFormatter();
+      const resultWithPlan = result as CypherResult & { executionPlan?: string };
+      resultWithPlan.executionPlan = formatter.format(plan, planFormat, result.summary.planExecutionStats);
+      return resultWithPlan;
+    }
+
+    return result;
   }
 
   /**

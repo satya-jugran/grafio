@@ -552,7 +552,7 @@ describe('CypherEngine Integration', () => {
       const plan = await engine.getQueryPlan('MATCH (p:Person) RETURN p.name');
       expect(plan).toContain('"kind"');
       expect(plan).toContain('"steps"');
-      expect(JSON.parse(plan)).toHaveProperty('steps');
+      expect(JSON.parse(plan)).toHaveProperty('plan.steps');
     });
 
     it('returns json format explicitly', async () => {
@@ -583,8 +583,8 @@ describe('CypherEngine Integration', () => {
         'json',
       );
       const parsed = JSON.parse(plan);
-      expect(parsed.steps.length).toBeGreaterThanOrEqual(3);
-      const kinds = parsed.steps.map((s: { kind: string }) => s.kind);
+      expect(parsed.plan.steps.length).toBeGreaterThanOrEqual(3);
+      const kinds = parsed.plan.steps.map((s: { kind: string }) => s.kind);
       expect(kinds).toContain('NodeScanStep');
       expect(kinds).toContain('EdgeExpandStep');
       expect(kinds).toContain('ProjectStep');
@@ -611,7 +611,7 @@ describe('CypherEngine Integration', () => {
         { name: 'Alice' },
         'json',
       );
-      expect(JSON.parse(plan)).toHaveProperty('steps');
+      expect(JSON.parse(plan)).toHaveProperty('plan.steps');
     });
   });
 
@@ -629,6 +629,115 @@ describe('CypherEngine Integration', () => {
       await expect(
         engine.execute('MATCH (n) DELETE n'),
       ).rejects.toThrow(CypherNotSupportedError);
+    });
+  });
+
+  describe('execute with plan format', () => {
+    let graph: Graph;
+    let engine: CypherEngine;
+
+    beforeEach(async () => {
+      graph = new Graph();
+      await buildSocialGraph(graph);
+      engine = new CypherEngine(graph);
+    });
+
+    it('returns execution plan in result when format is provided', async () => {
+      const result = await engine.execute(
+        'MATCH (p:Person) RETURN p.name AS name',
+        {},
+        { executionPlan: { format: 'json' } },
+      );
+      expect(result.executionPlan).toBeDefined();
+      expect(result.executionPlan).toContain('"plan"');
+      expect(result.executionPlan).toContain('NodeScanStep');
+    });
+
+    it('returns execution plan in ascii format', async () => {
+      const result = await engine.execute(
+        'MATCH (p:Person) RETURN p.name AS name',
+        {},
+        { executionPlan: { format: 'ascii' } },
+      );
+      expect(result.executionPlan).toBeDefined();
+      expect(result.executionPlan).toContain('NodeScanStep');
+      expect(result.executionPlan).toContain('\u2514\u2014'); // └─
+    });
+
+    it('returns execution plan in mermaid format', async () => {
+      const result = await engine.execute(
+        'MATCH (p:Person) RETURN p.name AS name',
+        {},
+        { executionPlan: { format: 'mermaid' } },
+      );
+      expect(result.executionPlan).toBeDefined();
+      expect(result.executionPlan).toContain('flowchart TD');
+      expect(result.executionPlan).toContain('Step1');
+      expect(result.executionPlan).toContain('-->');
+    });
+
+    it('includes planExecutionStats in summary', async () => {
+      const result = await engine.execute(
+        'MATCH (p:Person) RETURN p.name AS name',
+        {},
+        { executionPlan: { format: 'json' } },
+      );
+      expect(result.summary.planExecutionStats).toBeDefined();
+      expect(result.summary.planExecutionStats!.totalTimeMs).toBeGreaterThanOrEqual(0);
+      expect(result.summary.planExecutionStats!.steps.length).toBeGreaterThan(0);
+    });
+
+    it('step stats include timeMs and percentageOfTotal', async () => {
+      const result = await engine.execute(
+        'MATCH (p:Person) RETURN p.name AS name',
+        {},
+        { executionPlan: { format: 'json' } },
+      );
+      const stats = result.summary.planExecutionStats!;
+      for (const step of stats.steps) {
+        expect(step.timeMs).toBeGreaterThanOrEqual(0);
+        expect(step.percentageOfTotal).toBeGreaterThanOrEqual(0);
+        expect(step.percentageOfTotal).toBeLessThanOrEqual(100);
+        expect(step.stepKind).toBeDefined();
+        expect(step.rowsOut).toBeGreaterThanOrEqual(0);
+      }
+    });
+
+    it('percentageOfTotal sums to approximately 100%', async () => {
+      const result = await engine.execute(
+        'MATCH (p:Person) RETURN p.name AS name',
+        {},
+        { executionPlan: { format: 'json' } },
+      );
+      const stats = result.summary.planExecutionStats!;
+      // When steps are very fast (0ms), percentage may be 0 for all
+      // In that case we just verify the structure is correct
+      const total = stats.steps.reduce((sum: number, s) => sum + s.percentageOfTotal, 0);
+      if (total > 0) {
+        expect(total).toBeCloseTo(100, 0);
+      } else {
+        // All steps were too fast to measure - verify structure
+        expect(stats.steps.length).toBeGreaterThan(0);
+        expect(stats.totalTimeMs).toBeGreaterThanOrEqual(0);
+      }
+    });
+
+    it('does not include executionPlan when format is not provided', async () => {
+      const result = await engine.execute(
+        'MATCH (p:Person) RETURN p.name AS name',
+        {},
+      );
+      expect(result.executionPlan).toBeUndefined();
+    });
+
+    it('execution plan includes timing for multi-hop query', async () => {
+      const result = await engine.execute(
+        "MATCH (p:Person)-[:KNOWS]->(f:Person)-[:KNOWS]->(g:Person) WHERE p.name = 'Alice' AND f.name IN ['Bob', 'Charlie'] AND g.name = 'David' RETURN f.name AS name",
+        {},
+        { executionPlan: { format: 'ascii' } },
+      );
+      expect(result.executionPlan).toContain('ms');
+      expect(result.executionPlan).toContain('%');
     });
   });
 });
