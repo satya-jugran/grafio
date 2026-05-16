@@ -130,7 +130,11 @@ export class PlanFormatter {
         const dir = step.direction === 'out' ? '->' : '<-';
         const edgeVar = step.edgeVar ? ' ' + step.edgeVar : '';
         const edgeTypes = step.types?.length ? ':' + step.types.join(',') : '';
-        return 'EdgeExpandStep' + edgeVar + ' ' + dir + ' ' + step.target + edgeTypes;
+        const hops = step.minHops === step.maxHops
+          ? (step.minHops === 1 ? '' : '[*' + step.minHops + ']')
+          : '[*' + step.minHops + '..' + (step.maxHops === Infinity ? '*' : step.maxHops) + ']';
+        const strategy = step.strategy !== 'single-hop' ? ' ' + step.strategy : '';
+        return 'EdgeExpandStep' + edgeVar + ' ' + dir + ' ' + step.target + edgeTypes + hops + strategy;
       }
 
       case 'FilterStep':
@@ -185,7 +189,11 @@ export class PlanFormatter {
         const dir = step.direction === 'out' ? '\u2192' : '\u2190';
         const edgeVar = step.edgeVar ? ' ' + step.edgeVar : '';
         const edgeTypes = step.types?.length ? ':' + step.types.join(',') : '';
-        return 'EdgeExpandStep (' + dir + ')' + edgeVar + ' \u2192 ' + step.target + edgeTypes;
+        const hops = step.minHops === step.maxHops
+          ? (step.minHops === 1 ? '' : '[*' + step.minHops + ']')
+          : '[*' + step.minHops + '..' + (step.maxHops === Infinity ? '*' : step.maxHops) + ']';
+        const strategy = step.strategy !== 'single-hop' ? ' ' + step.strategy : '';
+        return 'EdgeExpandStep (' + dir + ')' + edgeVar + ' \u2192 ' + step.target + edgeTypes + hops + strategy;
       }
 
       case 'FilterStep':
