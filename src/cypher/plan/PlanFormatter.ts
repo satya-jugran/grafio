@@ -248,11 +248,11 @@ export class PlanFormatter {
         return this.getExpressionDescription(expr.expression) + ' ' + nullOp;
       case 'List':
         return '[' + expr.elements.map(e => this.getExpressionDescription(e)).join(', ') + ']';
+      case 'Parameter':
+        return '$' + expr.name;
       case 'FunctionCall':
         const args = expr.args.map(a => this.getExpressionDescription(a)).join(', ');
         return expr.name + '(' + (expr.distinct ? 'DISTINCT ' : '') + args + ')';
-      default:
-        return expr.kind;
     }
   }
 
