@@ -129,8 +129,8 @@ export class PlanFormatter {
       case 'EdgeExpandStep': {
         const dir = step.direction === 'out' ? '->' : '<-';
         const edgeVar = step.edgeVar ? ' ' + step.edgeVar : '';
-        const targetTypes = step.targetTypes ? ':' + step.targetTypes.join(',') : '';
-        return 'EdgeExpandStep' + edgeVar + ' ' + dir + ' ' + step.target + targetTypes;
+        const edgeTypes = step.types?.length ? ':' + step.types.join(',') : '';
+        return 'EdgeExpandStep' + edgeVar + ' ' + dir + ' ' + step.target + edgeTypes;
       }
 
       case 'FilterStep':
@@ -184,8 +184,8 @@ export class PlanFormatter {
       case 'EdgeExpandStep': {
         const dir = step.direction === 'out' ? '\u2192' : '\u2190';
         const edgeVar = step.edgeVar ? ' ' + step.edgeVar : '';
-        const targetTypes = step.targetTypes ? ':' + step.targetTypes.join(',') : '';
-        return 'EdgeExpandStep (' + dir + ')' + edgeVar + ' \u2192 ' + step.target + targetTypes;
+        const edgeTypes = step.types?.length ? ':' + step.types.join(',') : '';
+        return 'EdgeExpandStep (' + dir + ')' + edgeVar + ' \u2192 ' + step.target + edgeTypes;
       }
 
       case 'FilterStep':
