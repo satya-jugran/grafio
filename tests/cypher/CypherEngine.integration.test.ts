@@ -732,7 +732,7 @@ describe('CypherEngine Integration', () => {
 
     it('execution plan includes timing for multi-hop query', async () => {
       const result = await engine.execute(
-        "MATCH (p:Person)-[:KNOWS]->(f:Person)-[:KNOWS]->(g:Person) WHERE p.name = 'Alice' AND f.name IN ['Bob', 'Charlie'] AND g.name = 'David' RETURN f.name AS name",
+        "MATCH (p:Person)-[:KNOWS]->(f:Person)-[:KNOWS]->(g:Person) WHERE p.name = 'Alice' AND f.name IN ['Bob', 'Charlie'] OR (g.name = 'David' AND g.city = 'Seattle') RETURN f.name AS name",
         {},
         { executionPlan: { format: 'ascii' } },
       );

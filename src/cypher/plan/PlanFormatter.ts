@@ -229,13 +229,13 @@ export class PlanFormatter {
       case 'PropertyAccess':
         return this.getExpressionDescription(expr.object) + '.' + expr.property;
       case 'Binary':
-        return (
-          this.getExpressionDescription(expr.left) +
-          ' ' +
-          expr.op +
-          ' ' +
-          this.getExpressionDescription(expr.right)
-        );
+        const binLeft = this.getExpressionDescription(expr.left);
+        const binRight = this.getExpressionDescription(expr.right);
+        const binOp = expr.op;
+        if (binOp === 'AND' || binOp === 'OR') {
+          return '(' + binLeft + ' ' + binOp + ' ' + binRight + ')';
+        }
+        return binLeft + ' ' + binOp + ' ' + binRight;
       case 'Unary':
         return expr.op + this.getExpressionDescription(expr.operand);
       case 'In':
@@ -270,10 +270,12 @@ export class PlanFormatter {
       desc += ' ' + JSON.stringify(filter.value);
     }
     if (filter.AND) {
-      desc += ' AND (' + filter.AND.map(f => this.getPropertyFilterDescription(f)).join(' AND ') + ')';
+      const andDesc = filter.AND.map(f => this.getPropertyFilterDescription(f)).join(' AND ');
+      desc += (desc ? ' AND ' : '') + '(' + andDesc + ')';
     }
     if (filter.OR) {
-      desc += ' OR (' + filter.OR.map(f => this.getPropertyFilterDescription(f)).join(' OR ') + ')';
+      const orDesc = filter.OR.map(f => this.getPropertyFilterDescription(f)).join(' OR ');
+      desc += (desc ? ' OR ' : '') + '(' + orDesc + ')';
     }
     return desc || '(no filters)';
   }
