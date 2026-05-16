@@ -38,6 +38,8 @@ export class PlanFormatter {
         return this.toAscii(plan, executionStats);
       case 'mermaid':
         return this.toMermaid(plan, executionStats);
+      default:
+         throw new Error(`Unsupported plan format: ${String(format)}`);
     }
   }
 
@@ -49,7 +51,18 @@ export class PlanFormatter {
     if (executionStats) {
       output.executionStats = executionStats;
     }
-    return JSON.stringify(output, null, 2);
+    return JSON.stringify(output, this._jsonReplacer, 2);
+  }
+
+  /**
+   * JSON replacer that converts Infinity to null so the output is valid JSON.
+   * When parsing back, null can be interpreted as unbounded/infinite.
+   */
+  private _jsonReplacer(_key: string, value: unknown): unknown {
+    if (typeof value === 'number' && !Number.isFinite(value)) {
+      return null;
+    }
+    return value;
   }
 
   /**
