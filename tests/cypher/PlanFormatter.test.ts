@@ -275,6 +275,7 @@ describe('PlanFormatter', () => {
             types: ['Person'],
             propertyFilters: [
               { key: 'age', op: '>', value: 30 },
+              { key: 'name', op: 'STARTS_WITH', value: 'A' },
             ],
           },
           {

@@ -116,7 +116,8 @@ export class PlanFormatter {
   private describeStepForMermaid(step: PlanStep): string {
     switch (step.kind) {
       case 'NodeScanStep':
-        return 'NodeScanStep ' + step.variable + (step.label ? ':' + step.label : '') + ' { ' + this.getPropertyFilterDescription(step.propertyFilters?.[0] || {}) + ' }';
+        const filters = step.propertyFilters?.map(f => this.getPropertyFilterDescription(f)).join(', ') || '';
+        return 'NodeScanStep ' + step.variable + (step.label ? ':' + step.label : '') + (filters ? ' { ' + filters + ' }' : '');
 
       case 'NodeSeekStep':
         if (step.index === 'id') {
@@ -169,7 +170,8 @@ export class PlanFormatter {
   private describeStep(step: PlanStep): string {
     switch (step.kind) {
       case 'NodeScanStep':
-        return 'NodeScanStep (' + step.variable + (step.label ? ':' + step.label : '') + (step.propertyFilters ? ' { ' + this.getPropertyFilterDescription(step.propertyFilters[0]) + ' }' : '') + ')';
+        const scanFilters = step.propertyFilters?.map(f => this.getPropertyFilterDescription(f)).join(', ') || '';
+        return 'NodeScanStep (' + step.variable + (step.label ? ':' + step.label : '') + (scanFilters ? ' { ' + scanFilters + ' }' : '') + ')';
 
       case 'NodeSeekStep':
         if (step.index === 'id') {
