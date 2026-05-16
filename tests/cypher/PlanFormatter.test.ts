@@ -336,11 +336,11 @@ describe('PlanFormatter', () => {
       const result = formatter.format(plan, 'mermaid');
       const lines = result.split('\n');
 
-      // Verify structure: 1 header + 8 nodes + 7 arrows = 16 lines
+      // Verify structure: 1 header + 7 nodes + 6 arrows = 14 lines
       expect(lines[0]).toBe('flowchart TD');
       expect(lines.length).toBe(14);
 
-      // Verify all 8 steps are present as node definitions
+      // Verify all 7 steps are present as node definitions
       const nodeLines = lines.filter(l => l.includes('[NodeScanStep') || l.includes('[EdgeExpandStep') || l.includes('[FilterStep') || l.includes('[SortStep') || l.includes('[LimitStep') || l.includes('[ProjectStep'));
       expect(nodeLines.length).toBe(7);
 

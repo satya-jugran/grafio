@@ -88,7 +88,10 @@ export class Executor {
       });
     }
 
-    const totalTime = Date.now() - startTime;
+    // Use sum of step times as total for percentage calculation
+    // This ensures percentages always sum to 100% regardless of overhead
+    const stepTotalTime = stepStats.reduce((sum, s) => sum + s.timeMs, 0);
+    const totalTime = stepTotalTime > 0 ? stepTotalTime : (Date.now() - startTime);
 
     // Calculate percentages
     const stats: PlanExecutionStats = {
