@@ -30,14 +30,14 @@ export class PlanFormatter {
    * @param executionStats - Optional execution statistics to include in output.
    * @returns A formatted string representation of the plan.
    */
-  format(plan: QueryPlan, format: PlanFormat, executionStats?: PlanExecutionStats): string {
+  format(plan: QueryPlan, format: PlanFormat, executionStats?: PlanExecutionStats, params?: Record<string, unknown>): string {
     switch (format) {
       case 'json':
-        return this.toJson(plan, executionStats);
+        return this.toJson(plan, executionStats, params);
       case 'text':
-        return this.toText(plan, executionStats);
+        return this.toText(plan, executionStats, params);
       case 'mermaid':
-        return this.toMermaid(plan, executionStats);
+        return this.toMermaid(plan, executionStats, params);
       default:
          throw new Error(`Unsupported plan format: ${String(format)}`);
     }
@@ -46,7 +46,7 @@ export class PlanFormatter {
   /**
    * Convert plan to JSON string.
    */
-  private toJson(plan: QueryPlan, executionStats?: PlanExecutionStats): string {
+  private toJson(plan: QueryPlan, executionStats?: PlanExecutionStats, _params?: Record<string, unknown>): string {
     const output: { plan: QueryPlan; executionStats?: PlanExecutionStats } = { plan };
     if (executionStats) {
       output.executionStats = executionStats;
@@ -68,7 +68,7 @@ export class PlanFormatter {
   /**
    * Convert plan to ASCII tree diagram.
    */
-  private toText(plan: QueryPlan, executionStats?: PlanExecutionStats): string {
+  private toText(plan: QueryPlan, executionStats?: PlanExecutionStats, params?: Record<string, unknown>): string {
     const lines: string[] = [];
     const steps = plan.steps;
 
@@ -76,7 +76,7 @@ export class PlanFormatter {
       const step = steps[i];
       const isLast = i === steps.length - 1;
       const prefix = isLast ? '\u2514\u2014 ' : '\u251c\u2014 ';
-      const stepDescription = this.describeStep(step);
+      const stepDescription = this.describeStep(step, params);
       const statsSuffix = this.getStepStatsSuffix(executionStats, i);
       lines.push(prefix + stepDescription + statsSuffix);
     }
@@ -87,14 +87,14 @@ export class PlanFormatter {
   /**
    * Convert plan to Mermaid flowchart syntax.
    */
-  private toMermaid(plan: QueryPlan, executionStats?: PlanExecutionStats): string {
+  private toMermaid(plan: QueryPlan, executionStats?: PlanExecutionStats, params?: Record<string, unknown>): string {
     const lines: string[] = ['flowchart TD'];
     const steps = plan.steps;
 
     for (let i = 0; i < steps.length; i++) {
       const step = steps[i];
       const currentNode = 'Step' + (i + 1);
-      const currentLabel = this.escapeMermaid(this.describeStepForMermaid(step));
+      const currentLabel = this.escapeMermaid(this.describeStepForMermaid(step, params));
       const statsSuffix = this.getStepStatsSuffix(executionStats, i);
       const escapedStatsSuffix = this.escapeMermaid(statsSuffix);
       lines.push(' ' + currentNode + '[' + currentLabel + escapedStatsSuffix + ']');
@@ -126,14 +126,14 @@ export class PlanFormatter {
    * Generate a description of a plan step suitable for Mermaid labels.
    * Uses angle brackets instead of parentheses for safety.
    */
-  private describeStepForMermaid(step: PlanStep): string {
+  private describeStepForMermaid(step: PlanStep, _params?: Record<string, unknown>): string {
     switch (step.kind) {
       case 'NodeScanStep':
         const filters = step.propertyFilters?.map(f => this.getPropertyFilterDescription(f)).join(', ') || '';
         return 'NodeScanStep ' + step.variable + (step.label ? ':' + step.label : '') + (filters ? ' { ' + filters + ' }' : '');
 
       case 'NodeSeekStep':
-        const nodeSeekVal = this.formatValue(step.value);
+        const nodeSeekVal = this.formatValue(step.value, _params);
         if (step.index === 'id') {
           return 'NodeSeekStep id=' + nodeSeekVal;
         }
@@ -185,14 +185,14 @@ export class PlanFormatter {
   /**
    * Generate a short human-readable description of a plan step.
    */
-  private describeStep(step: PlanStep): string {
+  private describeStep(step: PlanStep, params?: Record<string, unknown>): string {
     switch (step.kind) {
       case 'NodeScanStep':
         const scanFilters = step.propertyFilters?.map(f => this.getPropertyFilterDescription(f)).join(', ') || '';
         return 'NodeScanStep (' + step.variable + (step.label ? ':' + step.label : '') + (scanFilters ? ' { ' + scanFilters + ' }' : '') + ')';
 
       case 'NodeSeekStep':
-        const seekValue = this.formatValue(step.value);
+        const seekValue = this.formatValue(step.value, params);
         if (step.index === 'id') {
           return 'NodeSeekStep [id=' + seekValue + ']';
         }
@@ -310,11 +310,15 @@ export class PlanFormatter {
 
   /**
    * Format a value for display in plan output.
-   * Handles Parameter expressions by returning $name, otherwise JSON stringifies.
+   * Handles Parameter expressions by returning $name or $name=value if params provided.
    */
-  private formatValue(value: unknown): string {
+  private formatValue(value: unknown, params?: Record<string, unknown>): string {
     if (value && typeof value === 'object' && (value as Record<string, unknown>).kind === 'Parameter') {
-      return '$' + (value as { name: string }).name;
+      const name = (value as { name: string }).name;
+      if (params && name in params) {
+        return '$' + name + '=' + JSON.stringify(params[name]);
+      }
+      return '$' + name;
     }
     return JSON.stringify(value);
   }

@@ -27,8 +27,9 @@ import { Semantic } from './Semantic';
 import { Planner } from './Planner';
 import { Executor } from './Executor';
 import { CypherResult } from './Result';
-import { CypherNotSupportedError } from './errors';
+import { CypherNotSupportedError, UnboundParameterError } from './errors';
 import { PlanFormatter, PlanFormat } from './plan/PlanFormatter';
+import { QueryAst } from './ast/AstNode';
 
 /**
  * Options for controlling query execution behavior.
@@ -138,7 +139,7 @@ export class CypherEngine {
     if (planFormat && result.summary.planExecutionStats) {
       const formatter = new PlanFormatter();
       const resultWithPlan = result as CypherResult & { executionPlan?: string };
-      resultWithPlan.executionPlan = formatter.format(plan, planFormat, result.summary.planExecutionStats);
+      resultWithPlan.executionPlan = formatter.format(plan, planFormat, result.summary.planExecutionStats, params);
       return resultWithPlan;
     }
 
@@ -184,9 +185,12 @@ export class CypherEngine {
     const planner = new Planner(this._graph);
     const plan = await planner.plan(rawAst);
 
-    // ── 6. Format ─────────────────────────────────────────────────
+    // ── 6. Validate parameters ──────────────────────────────────────
+    this._validateParameters(rawAst, params);
+
+    // ── 7. Format ─────────────────────────────────────────────────
     const formatter = new PlanFormatter();
-    return formatter.format(plan, format);
+    return formatter.format(plan, format, undefined, params);
   }
 
   /**
@@ -205,5 +209,42 @@ export class CypherEngine {
         );
       }
     }
+  }
+
+  /**
+   * Walk the AST and validate that all Parameter references have corresponding
+   * entries in the params map. Throws UnboundParameterError if any are missing.
+   */
+  private _validateParameters(ast: QueryAst, params: Record<string, unknown>): void {
+    const paramNames = this._collectParameterNames(ast);
+    for (const name of paramNames) {
+      if (!(name in params)) {
+        throw new UnboundParameterError(name);
+      }
+    }
+  }
+
+  /**
+   * Recursively collect all parameter names referenced in an AST.
+   */
+  private _collectParameterNames(ast: QueryAst): string[] {
+    const names: string[] = [];
+    const walk = (node: unknown): void => {
+      if (!node || typeof node !== 'object') return;
+      const obj = node as Record<string, unknown>;
+      if (obj.kind === 'Parameter' && typeof obj.name === 'string') {
+        names.push(obj.name);
+        return;
+      }
+      for (const value of Object.values(obj)) {
+        if (Array.isArray(value)) {
+          for (const item of value) walk(item);
+        } else if (value && typeof value === 'object') {
+          walk(value);
+        }
+      }
+    };
+    walk(ast);
+    return names;
   }
 }
