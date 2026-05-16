@@ -237,13 +237,15 @@ export class PlanFormatter {
       case 'Unary':
         return expr.op + this.getExpressionDescription(expr.operand);
       case 'In':
+        const inOp = expr.not ? 'NOT IN' : 'IN';
         return (
           this.getExpressionDescription(expr.expression) +
-          ' IN ' +
+          ' ' + inOp + ' ' +
           this.getExpressionDescription(expr.list)
         );
       case 'IsNull':
-        return this.getExpressionDescription(expr.expression) + ' IS NULL';
+        const nullOp = expr.not ? 'IS NOT NULL' : 'IS NULL';
+        return this.getExpressionDescription(expr.expression) + ' ' + nullOp;
       case 'List':
         return '[' + expr.elements.map(e => this.getExpressionDescription(e)).join(', ') + ']';
       case 'FunctionCall':
