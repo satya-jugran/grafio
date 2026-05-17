@@ -62,6 +62,7 @@ export async function buildGraph(
         index: i,
         label: `${type}-${i}`,
         score: Math.round(rng() * 1000) / 10,
+        amount: Math.round(rng() * 10000) / 100,
         active: rng() > 0.2,
       },
     });

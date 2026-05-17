@@ -22,6 +22,7 @@
 import { Graph } from '../Graph';
 import { Node } from '../Node';
 import { Edge } from '../Edge';
+import { GraphTransaction } from '../Graph/GraphTransaction';
 import {
   QueryPlan,
   PlanStep,
@@ -63,11 +64,13 @@ export class Executor {
    *
    * @param plan   - The physical execution plan from the {@link Planner}.
    * @param params - Named parameter map (`$key` → value).
+   * @param transaction - Optional transaction for consistent reads within a transaction context.
    * @returns A {@link CypherResult} containing rows and execution summary.
    */
   public async execute(
     plan: QueryPlan,
     params: Record<string, unknown> = {},
+    transaction?: GraphTransaction,
   ): Promise<CypherResult> {
     const startTime = Date.now();
     const stepStats: PlanStepExecutionStats[] = [];
@@ -78,7 +81,7 @@ export class Executor {
     // Walk each plan step, transforming the row buffer.
     for (const step of plan.steps) {
       const stepStart = Date.now();
-      rows = await this._executeStep(step, rows, params);
+      rows = await this._executeStep(step, rows, params, transaction);
       const stepTime = Date.now() - stepStart;
       stepStats.push({
         stepKind: step.kind,
@@ -111,14 +114,15 @@ export class Executor {
     step: PlanStep,
     rows: Row[],
     params: Record<string, unknown>,
+    transaction?: GraphTransaction,
   ): Promise<Row[]> {
     switch (step.kind) {
       case 'NodeScanStep':
-        return this._executeNodeScan(step, rows, params);
+        return this._executeNodeScan(step, rows, params, transaction);
       case 'NodeSeekStep':
-        return this._executeNodeSeek(step, rows, params);
+        return this._executeNodeSeek(step, rows, params, transaction);
       case 'EdgeExpandStep':
-        return this._executeEdgeExpand(step, rows, params);
+        return this._executeEdgeExpand(step, rows, params, transaction);
       case 'FilterStep':
         return this._executeFilter(step, rows, params);
       case 'ProjectStep':
@@ -128,7 +132,7 @@ export class Executor {
       case 'LimitStep':
         return this._executeLimit(step, rows, params);
       case 'AggregateStep':
-        return this._executeAggregate(step, rows, params);
+        return this._executeAggregate(step, rows, params, transaction);
       default:
         throw new CypherRuntimeError(
           `Unknown plan step kind: ${(step as PlanStep).kind}`,
@@ -142,6 +146,7 @@ export class Executor {
     step: NodeScanStep,
     rows: Row[],
     params: Record<string, unknown>,
+    transaction?: GraphTransaction,
   ): Promise<Row[]> {
     // Build the storage-level filter from step.types and step.propertyFilters.
     const filter: Record<string, unknown> = {};
@@ -162,8 +167,8 @@ export class Executor {
     }
 
     const nodes = Object.keys(filter).length > 0
-      ? await this._graph.getNodes({ filter } as { filter: { types?: string[]; properties?: Array<Record<string, unknown>> } }) as unknown as Node[]
-      : await this._graph.getNodes();
+      ? await this._graph.getNodes({ filter: filter as any, transaction } as any) as unknown as Node[]
+      : await this._graph.getNodes({ transaction } as any);
 
     const result: Row[] = [];
     for (const row of rows) {
@@ -259,13 +264,14 @@ export class Executor {
     step: NodeSeekStep,
     rows: Row[],
     params: Record<string, unknown>,
+    transaction?: GraphTransaction,
   ): Promise<Row[]> {
     let nodes: Node[];
 
     switch (step.index) {
       case 'id': {
         const id = this._resolveParam(step.value, params);
-        const node = await this._graph.getNode(String(id ?? ''));
+        const node = await this._graph.getNode(String(id ?? ''), transaction);
         nodes = node ? [node] : [];
         break;
       }
@@ -278,7 +284,7 @@ export class Executor {
           properties: [{ key: step.key!, value: resolvedValue, op: '=' }],
         };
         if (step.types?.length) filter.types = step.types;
-        nodes = await this._graph.getNodes({ filter }) as unknown as Node[];
+        nodes = await this._graph.getNodes({ filter, transaction } as any) as unknown as Node[];
         break;
       }
       default:
@@ -302,12 +308,13 @@ export class Executor {
     step: EdgeExpandStep,
     rows: Row[],
     params: Record<string, unknown>,
+    transaction?: GraphTransaction,
   ): Promise<Row[]> {
     const result: Row[] = [];
     for (const row of rows) {
       const sourceNode = row.get(step.source) as Node | undefined;
       if (!sourceNode) continue;
-      const expanded = await this._expandFromNode(step, row, sourceNode, params);
+      const expanded = await this._expandFromNode(step, row, sourceNode, params, transaction);
       result.push(...expanded);
     }
     return result;
@@ -318,17 +325,19 @@ export class Executor {
     row: Row,
     sourceNode: Node,
     params: Record<string, unknown>,
+    transaction?: GraphTransaction,
   ): Promise<Row[]> {
     if (step.strategy === 'single-hop') {
-      return this._expandSingleHop(step, row, sourceNode);
+      return this._expandSingleHop(step, row, sourceNode, transaction);
     }
-    return this._expandMultiHop(step, row, sourceNode);
+    return this._expandMultiHop(step, row, sourceNode, transaction);
   }
 
   private async _expandSingleHop(
     step: EdgeExpandStep,
     row: Row,
     sourceNode: Node,
+    transaction?: GraphTransaction,
   ): Promise<Row[]> {
     const filterArg = step.types.length > 0
       ? { filter: { types: step.types } }
@@ -336,13 +345,13 @@ export class Executor {
 
     const edges =
       step.direction === 'out'
-        ? await this._graph.getEdgesFrom(sourceNode.id, filterArg)
-        : await this._graph.getEdgesTo(sourceNode.id, filterArg);
+        ? await this._graph.getEdgesFrom(sourceNode.id, { ...filterArg, transaction } as any)
+        : await this._graph.getEdgesTo(sourceNode.id, { ...filterArg, transaction } as any);
 
     const result: Row[] = [];
     for (const edge of edges) {
       const targetId = step.direction === 'out' ? edge.targetId : edge.sourceId;
-      const targetNode = await this._graph.getNode(targetId);
+      const targetNode = await this._graph.getNode(targetId, transaction);
       if (!targetNode) continue;
 
       // Filter by target node type if labels were specified in the pattern
@@ -385,6 +394,7 @@ export class Executor {
     step: EdgeExpandStep,
     row: Row,
     sourceNode: Node,
+    transaction?: GraphTransaction,
   ): Promise<Row[]> {
     const result: Row[] = [];
     // Track minimum hops at which each node was visited.
@@ -425,12 +435,12 @@ export class Executor {
 
       const edges =
         step.direction === 'out'
-          ? await this._graph.getEdgesFrom(node.id, filterArg)
-          : await this._graph.getEdgesTo(node.id, filterArg);
+          ? await this._graph.getEdgesFrom(node.id, { ...filterArg, transaction } as any)
+          : await this._graph.getEdgesTo(node.id, { ...filterArg, transaction } as any);
 
       for (const edge of edges) {
         const targetId = step.direction === 'out' ? edge.targetId : edge.sourceId;
-        const targetNode = await this._graph.getNode(targetId);
+        const targetNode = await this._graph.getNode(targetId, transaction);
         if (!targetNode) continue;
 
         // Filter by target node type if labels were specified in the pattern.
@@ -598,11 +608,12 @@ export class Executor {
     step: AggregateStep,
     rows: Row[],
     params: Record<string, unknown>,
+    transaction?: GraphTransaction,
   ): Promise<Row[]> {
     // Path A: Storage-level optimisation — only attempted when the
     // Planner cleared prior steps and set useStorageLevel.
     if (step.useStorageLevel && this._canUseStorageLevel(step)) {
-      return this._executeAggregateStorageLevel(step);
+      return this._executeAggregateStorageLevel(step, transaction);
     }
 
     // Path B: In-process aggregation over materialised rows.
@@ -694,6 +705,7 @@ export class Executor {
    */
   private async _executeAggregateStorageLevel(
     step: AggregateStep,
+    transaction?: GraphTransaction,
   ): Promise<Row[]> {
     const sourceType = step.sourceType;
     // When sourceType is undefined (unlabeled MATCH) the storage APIs
@@ -735,7 +747,7 @@ export class Executor {
     // ── Entity-level COUNT ─────────────────────────────────────────
     if (countAggs.length > 0) {
       const nodeCount = await this._graph.getNodeCount(
-        typeFilter ? { filter: typeFilter } : undefined,
+        typeFilter ? { filter: typeFilter, transaction } : { transaction },
       );
       for (const spec of countAggs) {
         resultRow.set(spec.alias, nodeCount);
@@ -750,6 +762,7 @@ export class Executor {
       const aggResult = await this._graph.aggregateNodeProperty(propKey, {
         filter: typeFilter as { types: string[] },
         distinct,
+        transaction,
       });
 
       for (const spec of specs) {
@@ -760,7 +773,7 @@ export class Executor {
     // ── COLLECT aggregates ─────────────────────────────────────────
     if (collectAggs.length > 0) {
       const nodes = await this._graph.getNodes(
-        typeFilter ? { filter: typeFilter } : undefined,
+        typeFilter ? { filter: typeFilter, transaction } : { transaction },
       );
 
       for (const spec of collectAggs) {

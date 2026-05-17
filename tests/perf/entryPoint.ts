@@ -56,7 +56,7 @@ async function main(): Promise<void> {
     // ── 2. Run all benchmark scenarios ────────────────────────────────────
     printSectionTitle('Running benchmark scenarios');
 
-    const scenarios = buildCommonScenariosCypher(scale.nodeCount, 1);
+    const scenarios = buildCommonScenariosCypher(scale.nodeCount, 0.1);
     const results = [];
 
     for (const scenario of scenarios) {

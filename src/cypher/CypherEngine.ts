@@ -10,16 +10,16 @@
  * {@link CypherNotSupportedError}. This keeps the public API read-only
  * while the internal pipeline remains permissive and extensible.
  *
- * ### Transaction lifecycle (future)
- * The engine does **not** create transactions in v1 (read-only only).
- * When `QueryPlan` will include write steps in a future version, the
- * engine will become the single orchestration point for the transaction
- * lifecycle (create → pass to Executor → commit/rollback).
+ * ### Transaction support
+ * Transactions can be passed via {@link CypherEngineOptions.transaction}.
+ * When provided, all graph operations within the query execution will use
+ * that transaction, enabling consistent reads within a transaction context.
  *
  * @module cypher/CypherEngine
  */
 
 import { Graph } from '../Graph';
+import { GraphTransaction } from '../Graph/GraphTransaction';
 import { Lexer } from './Lexer';
 import { Token, TokenKind } from './Token';
 import { Parser } from './Parser';
@@ -35,6 +35,12 @@ import { QueryAst } from './ast/AstNode';
  * Options for controlling query execution behavior.
  */
 export interface CypherEngineOptions {
+  /**
+   * If provided, the query will be executed within this transaction,
+   * enabling consistent reads within a transaction context.
+   */
+  transaction?: GraphTransaction;
+
   /**
    * If provided, the execution plan will be formatted and included in the result.
    */
@@ -93,6 +99,9 @@ export class CypherEngine {
     this._graph = graph;
   }
 
+  public async execute(query: string, options?: CypherEngineOptions): Promise<CypherResult & { executionPlan?: string }>;
+  public async execute(query: string, params: Record<string, unknown>, options?: CypherEngineOptions): Promise<CypherResult & { executionPlan?: string }>;
+
   /**
    * Parse, plan, and execute a read-only Cypher query string.
    *
@@ -108,9 +117,22 @@ export class CypherEngine {
    */
   public async execute(
     query: string,
-    params: Record<string, unknown> = {},
+    params: Record<string, unknown> | CypherEngineOptions,
     options?: CypherEngineOptions,
   ): Promise<CypherResult & { executionPlan?: string }> {
+
+    // Handle overloaded signature where options may be passed as the second argument
+    let _params: Record<string, unknown> = {};
+    let _options: CypherEngineOptions | undefined = options;
+    if (typeof params === 'object' && !Array.isArray(params) && !('executionPlan' in params)) {
+      _params = params as Record<string, unknown>;
+      _options = options;
+    } else if (typeof params === 'object' && !Array.isArray(params) && 'executionPlan' in params) {
+      _params = {};
+      _options = params as CypherEngineOptions;
+    }
+
+
     // ── 1. Tokenise ───────────────────────────────────────────────
     const lexer = new Lexer(query);
     const tokens = lexer.tokenise();
@@ -132,14 +154,14 @@ export class CypherEngine {
 
     // ── 6. Execute ────────────────────────────────────────────────
     const executor = new Executor(this._graph);
-    const result = await executor.execute(plan, params);
+    const result = await executor.execute(plan, _params, _options?.transaction);
 
     // ── 7. Format execution plan if requested ───────────────────
-    const planFormat = options?.executionPlan?.format;
+    const planFormat = _options?.executionPlan?.format;
     if (planFormat && result.summary.planExecutionStats) {
       const formatter = new PlanFormatter();
       const resultWithPlan = result as CypherResult & { executionPlan?: string };
-      resultWithPlan.executionPlan = formatter.format(plan, planFormat, result.summary.planExecutionStats, params);
+      resultWithPlan.executionPlan = formatter.format(plan, planFormat, result.summary.planExecutionStats, _params);
       return resultWithPlan;
     }
 

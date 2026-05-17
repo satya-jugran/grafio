@@ -651,7 +651,6 @@ describe('CypherEngine Integration', () => {
     it('returns execution plan in result when format is provided', async () => {
       const result = await engine.execute(
         'MATCH (p:Person) RETURN p.name AS name',
-        {},
         { executionPlan: { format: 'json' } },
       );
       expect(result.executionPlan).toBeDefined();
@@ -662,7 +661,6 @@ describe('CypherEngine Integration', () => {
     it('returns execution plan in ascii format', async () => {
       const result = await engine.execute(
         'MATCH (p:Person) RETURN p.name AS name',
-        {},
         { executionPlan: { format: 'text' } },
       );
       expect(result.executionPlan).toBeDefined();
@@ -673,7 +671,6 @@ describe('CypherEngine Integration', () => {
     it('returns execution plan in mermaid format', async () => {
       const result = await engine.execute(
         'MATCH (p:Person) RETURN p.name AS name',
-        {},
         { executionPlan: { format: 'mermaid' } },
       );
       expect(result.executionPlan).toBeDefined();
@@ -685,7 +682,6 @@ describe('CypherEngine Integration', () => {
     it('includes planExecutionStats in summary', async () => {
       const result = await engine.execute(
         'MATCH (p:Person) RETURN p.name AS name',
-        {},
         { executionPlan: { format: 'json' } },
       );
       expect(result.summary.planExecutionStats).toBeDefined();
@@ -696,7 +692,6 @@ describe('CypherEngine Integration', () => {
     it('step stats include timeMs and percentageOfTotal', async () => {
       const result = await engine.execute(
         'MATCH (p:Person) RETURN p.name AS name',
-        {},
         { executionPlan: { format: 'json' } },
       );
       const stats = result.summary.planExecutionStats!;
@@ -711,8 +706,7 @@ describe('CypherEngine Integration', () => {
 
     it('does not include executionPlan when format is not provided', async () => {
       const result = await engine.execute(
-        'MATCH (p:Person) RETURN p.name AS name',
-        {},
+        'MATCH (p:Person) RETURN p.name AS name'
       );
       expect(result.executionPlan).toBeUndefined();
     });
@@ -720,7 +714,6 @@ describe('CypherEngine Integration', () => {
     it('execution plan includes timing for multi-hop query', async () => {
       const result = await engine.execute(
         "MATCH (p:Person)-[:KNOWS]->(f:Person)-[:KNOWS]->(g:Person) WHERE p.name = 'Alice' AND f.name IN ['Bob', 'Charlie'] OR (g.name = 'David' AND g.city = 'Seattle') RETURN f.name AS name",
-        {},
         { executionPlan: { format: 'text' } },
       );
       expect(result.executionPlan).toContain('ms');
