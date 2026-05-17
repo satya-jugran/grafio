@@ -130,7 +130,7 @@ export class PlanFormatter {
     switch (step.kind) {
       case 'NodeScanStep':
         const filters = step.propertyFilters?.map(f => this.getPropertyFilterDescription(f)).join(', ') || '';
-        return 'NodeScanStep ' + step.variable + (step.label ? ':' + step.label : '') + (filters ? ' { ' + filters + ' }' : '');
+        return 'NodeScanStep ' + step.variable + (step.types && step.types.length ? ':' + step.types.join('|') : '') + (filters ? ' { ' + filters + ' }' : '');
 
       case 'NodeSeekStep':
         const nodeSeekVal = this.formatValue(step.value, _params);
@@ -142,12 +142,13 @@ export class PlanFormatter {
       case 'EdgeExpandStep': {
         const dir = step.direction === 'out' ? '->' : '<-';
         const edgeVar = step.edgeVar ? ' ' + step.edgeVar : '';
-        const edgeTypes = step.types?.length ? ':' + step.types.join(',') : '';
+        const edgeTypes = step.types?.length ? ':' + step.types.join('|') : '';
+        const targetTypes = step.targetTypes?.length ? ':' + step.targetTypes.join('|') : '';
         const hops = step.minHops === step.maxHops
           ? (step.minHops === 1 ? '' : '[*' + step.minHops + ']')
           : '[*' + step.minHops + '..' + (step.maxHops === Infinity ? '*' : step.maxHops) + ']';
         const strategy = step.strategy !== 'single-hop' ? ' ' + step.strategy : '';
-        return 'EdgeExpandStep' + edgeVar + ' ' + dir + ' ' + step.target + edgeTypes + hops + strategy;
+        return 'EdgeExpandStep' + edgeVar + edgeTypes + ' ' + dir + ' ' + step.target + targetTypes + hops + strategy;
       }
 
       case 'FilterStep':
@@ -189,7 +190,7 @@ export class PlanFormatter {
     switch (step.kind) {
       case 'NodeScanStep':
         const scanFilters = step.propertyFilters?.map(f => this.getPropertyFilterDescription(f)).join(', ') || '';
-        return 'NodeScanStep (' + step.variable + (step.label ? ':' + step.label : '') + (scanFilters ? ' { ' + scanFilters + ' }' : '') + ')';
+        return 'NodeScanStep (' + step.variable + (step.types && step.types.length ? ':' + step.types.join('|') : '') + (scanFilters ? ' { ' + scanFilters + ' }' : '') + ')';
 
       case 'NodeSeekStep':
         const seekValue = this.formatValue(step.value, params);
@@ -201,12 +202,13 @@ export class PlanFormatter {
       case 'EdgeExpandStep': {
         const dir = step.direction === 'out' ? '\u2192' : '\u2190';
         const edgeVar = step.edgeVar ? ' ' + step.edgeVar : '';
-        const edgeTypes = step.types?.length ? ':' + step.types.join(',') : '';
+        const edgeTypes = step.types?.length ? ':' + step.types.join('|') : '';
+        const targetTypes = step.targetTypes?.length ? ':' + step.targetTypes.join('|') : '';
         const hops = step.minHops === step.maxHops
           ? (step.minHops === 1 ? '' : '[*' + step.minHops + ']')
           : '[*' + step.minHops + '..' + (step.maxHops === Infinity ? '*' : step.maxHops) + ']';
         const strategy = step.strategy !== 'single-hop' ? ' ' + step.strategy : '';
-        return 'EdgeExpandStep (' + dir + ')' + edgeVar + ' \u2192 ' + step.target + edgeTypes + hops + strategy;
+        return 'EdgeExpandStep (' + dir + ')' + edgeVar + edgeTypes + ' \u2192 ' + step.target + targetTypes + hops +  strategy;
       }
 
       case 'FilterStep':
