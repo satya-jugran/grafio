@@ -263,15 +263,14 @@ export function buildCommonScenariosCypher(
       run: async (graph: any, meta: any) => {
         const engine = (meta as GraphMeta & { _engine?: CypherEngine })._engine!;
         return engine.execute(
-          `MATCH (p:Person)-[r:BOUGHT|IN_CATEGORY]->(t:Product|Category)
+          `MATCH (p:Person|Product)-[r:KNOWS|BOUGHT]->(t:People|Product)-[r2:IN_CATEGORY]->(c:Category)
            WHERE r.weight > 5 AND p.score > 90
            RETURN p.label AS personLabel,
                   p.score AS personScore,
                   avg(t.score) AS avgTargetScore,
                   sum(r.weight) AS totalWeight,
                   count(r) AS relationshipCount
-           ORDER BY personScore DESC
-           LIMIT 20`
+           ORDER BY personScore DESC`
         );
       },
       iterations: calcIterations(100, factor, isLarge, 50_000),
