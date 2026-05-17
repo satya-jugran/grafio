@@ -298,7 +298,7 @@ describe('Planner', () => {
       expect(agg.aggregates[0].expression.kind).toBe('Identifier');
       expect(agg.aggregates[0].expression.name).toBe('p');
       expect(agg.sourceVariable).toBe('p');
-      expect(agg.sourceType).toBe('Person');
+      expect(agg.sourceTypes).toEqual(['Person']);
 
       // Simple plan: no NodeScanStep present
       expect(p.steps.some((s) => s.kind === 'NodeScanStep')).toBe(false);
@@ -315,7 +315,8 @@ describe('Planner', () => {
       expect(agg.aggregates[0].expression.kind).toBe('PropertyAccess');
       expect(agg.aggregates[0].alias).toBe('avg_age');
       expect(agg.sourceVariable).toBe('p');
-      expect(agg.sourceType).toBe('Person');
+      expect(agg.sourceTypes).toEqual(['Person']);
+
     });
 
     it('produces multiple AggregateSpecs for MIN, MAX, AVG', async () => {
@@ -330,9 +331,8 @@ describe('Planner', () => {
       expect(agg.aggregates[1].function).toBe('MAX');
       expect(agg.aggregates[2].function).toBe('AVG');
       expect(agg.sourceVariable).toBe('p');
-      expect(agg.sourceType).toBe('Person');
+      expect(agg.sourceTypes).toEqual(['Person']);
     });
-
     it('handles COUNT(*) with undefined sourceVariable', async () => {
       const p = await plan('MATCH (p:Person) RETURN COUNT(*)');
 
@@ -409,6 +409,87 @@ describe('Planner', () => {
       expect(p.steps[0].kind).toBe('NodeScanStep');
       expect(p.steps[1].kind).toBe('ProjectStep');
       expect(p.steps.some((s) => s.kind === 'AggregateStep')).toBe(false);
+    });
+
+    // ── Edge aggregate storage-level guard ────────────────────────
+    describe('Edge aggregate storage-level guard', () => {
+      // Positive: should take storage-level path
+      it('uses storage-level for edge aggregate with no constraints', async () => {
+        const p = await plan('MATCH ()-[r:LIKES]->() RETURN count(r)');
+        const agg = p.steps.find((s) => s.kind === 'AggregateStep') as any;
+        expect(agg.useStorageLevel).toBe(true);
+        expect(agg.sourceEntity).toBe('edge');
+        expect(agg.edgeTypes).toEqual(['LIKES']);
+        // Steps cleared for storage-level
+        expect(p.steps.some((s) => s.kind === 'NodeScanStep')).toBe(false);
+        expect(p.steps.some((s) => s.kind === 'EdgeExpandStep')).toBe(false);
+      });
+
+      it('uses storage-level for edge aggregate with no types at all', async () => {
+        const p = await plan('MATCH ()-[r]->() RETURN count(r)');
+        const agg = p.steps.find((s) => s.kind === 'AggregateStep') as any;
+        expect(agg.useStorageLevel).toBe(true);
+        expect(agg.sourceEntity).toBe('edge');
+        expect(agg.edgeTypes).toBeUndefined();
+        // Steps cleared
+        expect(p.steps.some((s) => s.kind === 'NodeScanStep')).toBe(false);
+        expect(p.steps.some((s) => s.kind === 'EdgeExpandStep')).toBe(false);
+      });
+
+      // Negative: source node type constraint blocks storage-level
+      it('rejects storage-level when source node has type constraint', async () => {
+        const p = await plan('MATCH (p:Person)-[r:LIKES]->() RETURN count(r)');
+        const agg = p.steps.find((s) => s.kind === 'AggregateStep') as any;
+        expect(agg.useStorageLevel).toBe(false);
+        // Pipeline steps remain
+        expect(p.steps.some((s) => s.kind === 'NodeScanStep')).toBe(true);
+        expect(p.steps.some((s) => s.kind === 'EdgeExpandStep')).toBe(true);
+      });
+
+      // Negative: source node inline property blocks storage-level
+      it('rejects storage-level when source node has inline properties', async () => {
+        const p = await plan("MATCH (p {name: 'Alice'})-[r:LIKES]->() RETURN count(r)");
+        const agg = p.steps.find((s) => s.kind === 'AggregateStep') as any;
+        expect(agg.useStorageLevel).toBe(false);
+        expect(p.steps.some((s) => s.kind === 'NodeScanStep')).toBe(true);
+        expect(p.steps.some((s) => s.kind === 'EdgeExpandStep')).toBe(true);
+      });
+
+      // Negative: target node type constraint blocks storage-level
+      it('rejects storage-level when target node has type constraint', async () => {
+        const p = await plan('MATCH ()-[r:LIKES]->(t:Post) RETURN count(r)');
+        const agg = p.steps.find((s) => s.kind === 'AggregateStep') as any;
+        expect(agg.useStorageLevel).toBe(false);
+        expect(p.steps.some((s) => s.kind === 'NodeScanStep')).toBe(true);
+        expect(p.steps.some((s) => s.kind === 'EdgeExpandStep')).toBe(true);
+      });
+
+      // Negative: WHERE clause blocks storage-level
+      it('rejects storage-level when WHERE clause is present', async () => {
+        const p = await plan('MATCH ()-[r:LIKES]->() WHERE r.weight > 5 RETURN count(r)');
+        const agg = p.steps.find((s) => s.kind === 'AggregateStep') as any;
+        expect(agg.useStorageLevel).toBe(false);
+        expect(p.steps.some((s) => s.kind === 'NodeScanStep')).toBe(true);
+        expect(p.steps.some((s) => s.kind === 'EdgeExpandStep')).toBe(true);
+      });
+
+      // Negative: multi-hop edge expansion blocks storage-level
+      it('rejects storage-level for multi-hop edge expansion', async () => {
+        const p = await plan('MATCH ()-[r*2..3]->() RETURN count(r)');
+        const agg = p.steps.find((s) => s.kind === 'AggregateStep') as any;
+        expect(agg.useStorageLevel).toBe(false);
+        expect(p.steps.some((s) => s.kind === 'NodeScanStep')).toBe(true);
+        expect(p.steps.some((s) => s.kind === 'EdgeExpandStep')).toBe(true);
+      });
+
+      // Negative: target node inline property (produces FilterStep) blocks storage-level
+      it('rejects storage-level when target node has inline properties', async () => {
+        const p = await plan("MATCH ()-[r:LIKES]->(post {title: 'Hello'}) RETURN count(r)");
+        const agg = p.steps.find((s) => s.kind === 'AggregateStep') as any;
+        expect(agg.useStorageLevel).toBe(false);
+        // FilterStep present for inline target property
+        expect(p.steps.some((s) => s.kind === 'FilterStep')).toBe(true);
+      });
     });
   });
 

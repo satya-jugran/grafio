@@ -123,6 +123,35 @@ export class CacheManager {
   }
 
   /**
+ * Retrieves multiple cached nodes in a single call.
+ * @param graphId - The graph partition key
+ * @param nodeIds - Array of node ids
+ * @returns Map of nodeId → NodeData (only found nodes)
+ */
+  async getNodes(graphId: string, nodeIds: string[]): Promise<Map<string, NodeData>> {
+    const result = new Map<string, NodeData>();
+    const nodes = await Promise.all(
+       nodeIds.map(async (nodeId) => {
+         const node = await this._nodeCache.get(this._nodeKey(graphId, nodeId));
+         return [nodeId, node] as const;
+       })
+     );
+    for (const [nodeId, node] of nodes) {
+      if (node !== undefined) {
+        this._hitCount++;
+        result.set(nodeId, node);
+      }
+    }
+    if (result.size > 0) {
+      this._touchGraphId(graphId);
+    }
+    if (result.size < nodeIds.length) {
+      this._missCount += nodeIds.length - result.size;
+    }
+    return result;
+  }
+
+  /**
    * Stores a node in the cache.
    * If the global budget is exceeded, evicts the least-recently-used graphId first.
    * @param graphId - The graph partition key
@@ -143,7 +172,7 @@ export class CacheManager {
     const key = this._nodeKey(graphId, nodeId);
     const isNewEntry = !(await this._nodeCache.has(key));
     await this._nodeCache.set(key, node);
-    
+
     // Only register new entries to keep per-graphId counts accurate
     if (isNewEntry) {
       this._registerGraphId(graphId, 'node');
@@ -210,7 +239,7 @@ export class CacheManager {
     const key = this._edgeKey(graphId, edgeId);
     const isNewEntry = !(await this._edgeCache.has(key));
     await this._edgeCache.set(key, edge);
-    
+
     // Only register new entries to keep per-graphId counts accurate
     if (isNewEntry) {
       this._registerGraphId(graphId, 'edge');

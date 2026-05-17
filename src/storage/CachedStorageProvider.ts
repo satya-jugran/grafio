@@ -64,7 +64,7 @@ export class CachedStorageProvider implements IStorageProvider {
      * Cache configuration (used for preload strategy).
      */
     private readonly _config: CacheConfig
-  ) {}
+  ) { }
 
   // ─── Lifecycle ───────────────────────────────────────────────────────────────
 
@@ -155,6 +155,38 @@ export class CachedStorageProvider implements IStorageProvider {
       await this._cacheManager.setNode(this._graphId, id, node);
     }
     return node;
+  }
+
+  async getNodesByIds(ids: string[], transaction?: ITransactionHandle): Promise<Map<string, NodeData>> {
+    if (transaction) {
+      return this._underlying.getNodesByIds(ids, transaction);
+    }
+
+    // Try cache first
+    const uniqueIds = Array.from(new Set(ids));
+    const cached = await this._cacheManager.getNodes(this._graphId, uniqueIds);
+    const cachedIds = new Set(cached.keys());
+    const missingIds = uniqueIds.filter(id => !cachedIds.has(id));
+
+    if (missingIds.length === 0) {
+      return cached;
+    }
+
+    // Fetch missing from underlying provider
+    const fetched = await this._underlying.getNodesByIds(missingIds, transaction);
+
+    // Cache the fetched nodes
+    for (const [id, node] of fetched) {
+      await this._cacheManager.setNode(this._graphId, id, node);
+    }
+
+    // Merge cached + fetched
+    const result = new Map<string, NodeData>(cached);
+    for (const [id, node] of fetched) {
+      result.set(id, node);
+    }
+
+    return result;
   }
 
   // ─── Edge mutations ─────────────────────────────────────────────────────────
@@ -592,5 +624,5 @@ export class CachedStorageProvider implements IStorageProvider {
 
     return output;
   }
-  
+
 }

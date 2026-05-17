@@ -167,6 +167,16 @@ export class Graph {
   }
 
   /**
+ * Retrieves nodes by their ids.
+ * @param ids - Array of node ids
+ * @param transaction - Optional transaction
+ * @returns Map of id → Node
+ */
+  async getNodesByIds(ids: string[], transaction?: GraphTransaction): Promise<Map<string, Node>> {
+    return this._index.getNodesByIds(ids, transaction);
+  }
+
+  /**
    * Retrieves nodes by their type.
    * @param type - The node type to filter by
    * @param transaction - Optional transaction for consistent reads within a transaction

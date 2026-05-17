@@ -226,5 +226,54 @@ export function buildCommonScenariosCypher(
       },
       iterations: calcIterations(20, factor, isLarge, 50_000),
     },
+
+    // ── Aggregation: Basic aggregation on score and amount ──────────────────
+    {
+      category: 'Aggregation',
+      name: 'Aggregate score/amount by type',
+      setup: (meta: GraphMeta) => {
+        const engine = new CypherEngine(meta.graph);
+        (meta as GraphMeta & { _engine?: CypherEngine })._engine = engine;
+      },
+      run: async (graph: any, meta: any) => {
+        const engine = (meta as GraphMeta & { _engine?: CypherEngine })._engine!;
+        return engine.execute(
+          `MATCH (n:Person)
+           WHERE n.score > 50 AND n.amount > 100
+           RETURN n.label AS type,
+                  avg(n.score) AS avgScore,
+                  min(n.score) AS minScore,
+                  max(n.score) AS maxScore,
+                  sum(n.amount) AS totalAmount,
+                  avg(n.amount) AS avgAmount,
+                  count(n) AS nodeCount`
+        );
+      },
+      iterations: calcIterations(500, factor, isLarge, 50_000),
+    },
+
+    // ── Aggregation: JOIN across node types with aggregation ────────────────
+    {
+      category: 'Aggregation',
+      name: 'Aggregate across joined nodes',
+      setup: (meta: GraphMeta) => {
+        const engine = new CypherEngine(meta.graph);
+        (meta as GraphMeta & { _engine?: CypherEngine })._engine = engine;
+      },
+      run: async (graph: any, meta: any) => {
+        const engine = (meta as GraphMeta & { _engine?: CypherEngine })._engine!;
+        return engine.execute(
+          `MATCH (p:Person|Product)-[r:KNOWS|BOUGHT]->(t:People|Product)-[r2:IN_CATEGORY]->(c:Category)
+           WHERE r.weight > 5 AND p.score > 90
+           RETURN p.label AS personLabel,
+                  p.score AS personScore,
+                  avg(t.score) AS avgTargetScore,
+                  sum(r.weight) AS totalWeight,
+                  count(r) AS relationshipCount
+           ORDER BY personScore DESC`
+        );
+      },
+      iterations: calcIterations(100, factor, isLarge, 50_000),
+    },
   ];
 }

@@ -348,10 +348,16 @@ export class Executor {
         ? await this._graph.getEdgesFrom(sourceNode.id, { ...filterArg, transaction } as any)
         : await this._graph.getEdgesTo(sourceNode.id, { ...filterArg, transaction } as any);
 
+    // Collect all target IDs
+    const targetIds = edges.map(e => step.direction === 'out' ? e.targetId : e.sourceId);
+    const uniqueIds = [...new Set(targetIds)];
+    // Batch fetch all target nodes in ONE call
+    const nodeMap = await this._graph.getNodesByIds(uniqueIds, transaction);
+
     const result: Row[] = [];
     for (const edge of edges) {
       const targetId = step.direction === 'out' ? edge.targetId : edge.sourceId;
-      const targetNode = await this._graph.getNode(targetId, transaction);
+      const targetNode = nodeMap.get(targetId);
       if (!targetNode) continue;
 
       // Filter by target node type if labels were specified in the pattern
@@ -411,14 +417,14 @@ export class Executor {
       /** Edge objects in traversal order (for pathVar). */
       pathEdges?: Edge[];
     }> = [
-      {
-        node: sourceNode,
-        row,
-        hops: 0,
-        pathNodes: step.pathVar ? [sourceNode] : undefined,
-        pathEdges: step.pathVar ? [] : undefined,
-      },
-    ];
+        {
+          node: sourceNode,
+          row,
+          hops: 0,
+          pathNodes: step.pathVar ? [sourceNode] : undefined,
+          pathEdges: step.pathVar ? [] : undefined,
+        },
+      ];
 
     const isBFS = step.strategy !== 'multi-hop-dfs';
 
@@ -438,9 +444,14 @@ export class Executor {
           ? await this._graph.getEdgesFrom(node.id, { ...filterArg, transaction } as any)
           : await this._graph.getEdgesTo(node.id, { ...filterArg, transaction } as any);
 
+      // For each node in frontier:
+      const edgeIds = edges.map(e => step.direction === 'out' ? e.targetId : e.sourceId);
+      const uniqueIds = [...new Set(edgeIds)];
+      const nodeMap = await this._graph.getNodesByIds(uniqueIds, transaction);
+
       for (const edge of edges) {
         const targetId = step.direction === 'out' ? edge.targetId : edge.sourceId;
-        const targetNode = await this._graph.getNode(targetId, transaction);
+        const targetNode = nodeMap.get(targetId);
         if (!targetNode) continue;
 
         // Filter by target node type if labels were specified in the pattern.
@@ -626,25 +637,37 @@ export class Executor {
    *
    * Conditions (all must be true):
    * 1. `sourceVariable` is set.
-   * 2. `sourceType` is set.
+   * 2. `sourceEntity` is set.
    * 3. Every aggregate expression is "simple" — a variable reference,
    *    a property access on `sourceVariable`, or the COUNT(*) literal.
    */
   private _canUseStorageLevel(step: AggregateStep): boolean {
-    if (!step.sourceVariable) return false;
-    // Storage-level aggregation only supports scalar (non-grouped)
-    // aggregates.  GROUP BY queries must use the in-process path so
-    // the group key aliases are populated from the row data.
+    // sourceEntity must be set by the Planner for either node or edge
+    if (!step.sourceVariable || !step.sourceEntity) return false;
     if (step.groupBy.length > 0) return false;
 
+    if (step.sourceEntity === 'edge') {
+      // For edge-only aggregates: no type restriction needed
+      // (edge types come from step.edgeTypes, not sourceTypes)
+      for (const spec of step.aggregates) {
+        if (!this._isSimpleAggregateExpr(spec.expression, step.sourceVariable!)) {
+          return false;
+        }
+      }
+      return true;
+    }
+
+    // Node aggregates: sourceType is optional (undefined = all types).
+    // The storage-layer APIs accept undefined type filter internally.
     for (const spec of step.aggregates) {
-      if (!this._isSimpleAggregateExpr(spec.expression, step.sourceVariable)) {
+      if (!this._isSimpleAggregateExpr(spec.expression, step.sourceVariable!)) {
         return false;
       }
     }
 
     return true;
   }
+
 
   /**
    * Check whether an aggregate expression is "simple" — i.e. it only
@@ -707,10 +730,14 @@ export class Executor {
     step: AggregateStep,
     transaction?: GraphTransaction,
   ): Promise<Row[]> {
-    const sourceType = step.sourceType;
-    // When sourceType is undefined (unlabeled MATCH) the storage APIs
+    if (step.sourceEntity === 'edge') {
+      return this._executeEdgeAggregateStorageLevel(step, transaction);
+    }
+
+    const sourceTypes = step.sourceTypes;
+    // When sourceTypes is undefined (unlabeled MATCH) the storage APIs
     // accept undefined / empty filter to mean "all types".
-    const typeFilter = sourceType ? { types: [sourceType] } : undefined;
+    const typeFilter = sourceTypes ? { types: sourceTypes } : undefined;
     const resultRow = new Map<string, unknown>();
 
     // Partition aggregates by their storage call.
@@ -794,6 +821,117 @@ export class Executor {
 
     return [resultRow];
   }
+
+  /**
+ * Execute edge-only aggregates via storage-layer calls,
+ * avoiding full row materialisation.  Uses the existing
+ * {@code getEdgeCount} and {@code aggregateEdgeProperty} APIs.
+ *
+ * Edge type filtering comes from {@link AggregateStep.edgeTypes},
+ * which the Planner extracts from the EdgeExpandStep.
+ */
+  private async _executeEdgeAggregateStorageLevel(
+    step: AggregateStep,
+    transaction?: GraphTransaction,
+  ): Promise<Row[]> {
+    
+    // Defensive guard: this path is only semantically valid when there are
+    // NO source/target node constraints. The planner (_isEdgeSimplePlan)
+    // already ensures this, but we assert here as belt-and-suspenders.
+    if (step.sourceTypes && step.sourceTypes.length > 0) {
+      throw new Error(
+        'Edge storage-level aggregation cannot be used with source node type ' +
+        'constraints. The planner should have rejected this plan in _isEdgeSimplePlan.'
+      );
+    }
+
+    // Build type filter from the Planner-supplied edgeTypes.
+    const typeFilter = step.edgeTypes?.length
+      ? { types: step.edgeTypes }
+      : undefined;
+    const resultRow = new Map<string, unknown>();
+
+    const countAggs: AggregateSpec[] = [];
+    const propertyAggs = new Map<string, AggregateSpec[]>();
+    const collectAggs: AggregateSpec[] = [];
+
+    for (const spec of step.aggregates) {
+      if (spec.function === 'COLLECT') {
+        collectAggs.push(spec);
+        continue;
+      }
+
+      const propKey = this._extractPropertyKey(
+        spec.expression,
+        step.sourceVariable!,
+      );
+
+      if (propKey === null) {
+        countAggs.push(spec);
+      } else {
+        const coalesceKey = `${propKey}|${spec.distinct}`;
+        if (!propertyAggs.has(coalesceKey)) {
+          propertyAggs.set(coalesceKey, []);
+        }
+        propertyAggs.get(coalesceKey)!.push(spec);
+      }
+    }
+
+    // ── Edge-level COUNT ─────────────────────────────────────────
+    if (countAggs.length > 0) {
+      const edgeCount = await this._graph.getEdgeCount(
+        typeFilter
+          ? { filter: typeFilter, transaction }
+          : (transaction ? { transaction } : undefined),
+      );
+      for (const spec of countAggs) {
+        resultRow.set(spec.alias, edgeCount);
+      }
+    }
+
+    // ── Edge property aggregates (coalesced) ──────────────────────
+    for (const [coalesceKey, specs] of propertyAggs) {
+      const [propKey, distinctStr] = coalesceKey.split('|');
+      const distinct = distinctStr === 'true';
+
+      const aggResult = await this._graph.aggregateEdgeProperty(propKey, {
+        filter: typeFilter,
+        distinct,
+        transaction,
+      } as any);
+
+      for (const spec of specs) {
+        resultRow.set(spec.alias, this._extractAggField(aggResult, spec.function));
+      }
+    }
+
+    // ── COLLECT for edges (rare, but handle consistently) ────────
+    if (collectAggs.length > 0) {
+      const edges = await this._graph.getEdges(
+        typeFilter
+          ? { filter: typeFilter, transaction }
+          : (transaction ? { transaction } : undefined),
+      );
+
+      for (const spec of collectAggs) {
+        const propKey = this._extractPropertyKey(
+          spec.expression,
+          step.sourceVariable!,
+        );
+        const values = edges
+          .map((e) => (propKey ? e.properties[propKey] : e))
+          .filter((v) => v !== undefined);
+
+        resultRow.set(
+          spec.alias,
+          spec.distinct ? [...new Set(values)] : values,
+        );
+      }
+    }
+
+    return [resultRow];
+  }
+
 
   /**
    * Extract the relevant field from an {@link AggregateResult} based

@@ -67,6 +67,25 @@ export interface IStorageProvider {
   getNode(id: string, transaction?: ITransactionHandle): Promise<NodeData | undefined>;
 
   /**
+  * Returns NodeData for multiple ids in a single call.
+    * Enables batch fetching to avoid N+1 getNode() calls.
+    *
+    * Semantics:
+    * - The returned Map contains entries only for ids that were found.
+    * - Unknown ids MUST be omitted from the Map; they MUST NOT appear with
+    *   an `undefined` value.
+    * - Duplicate ids in `ids` do not produce duplicate Map entries; providers
+    *   should treat them as repeated requests for the same id.
+    *
+    * Callers should use `result.has(id)` to distinguish "not found" from
+    * a found node.
+    *
+    * @param ids - Array of node ids to fetch
+    * @param transaction - Optional transaction handle
+    */
+  getNodesByIds(ids: string[], transaction?: ITransactionHandle): Promise<Map<string, NodeData>>;
+
+  /**
    * Returns the number of nodes in storage matching the query options.
    * Used by CachedStorageProvider to determine cache completeness.
    * @param options - Optional query options for filtering
@@ -309,33 +328,33 @@ export interface IStorageProvider {
    * @throws EdgeAlreadyExistsError if an edge id is already present
    * @throws NodeNotFoundError if an edge references a non-existent node
    */
- importJSON(data: GraphData): Promise<void>;
+  importJSON(data: GraphData): Promise<void>;
 
- // ---------------------------------------------------------------------------
- // Transaction support
- // ---------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
+  // Transaction support
+  // ---------------------------------------------------------------------------
 
- /**
-  * Checks if the storage provider supports transactions.
-  * @returns true if transactions are supported, false otherwise
-  */
- supportsTransactions(): boolean;
+  /**
+   * Checks if the storage provider supports transactions.
+   * @returns true if transactions are supported, false otherwise
+   */
+  supportsTransactions(): boolean;
 
- /**
-  * Starts a new transaction.
-  * @returns A transaction handle that can be used to commit or rollback
-  */
- beginTransaction(): Promise<ITransactionHandle>;
+  /**
+   * Starts a new transaction.
+   * @returns A transaction handle that can be used to commit or rollback
+   */
+  beginTransaction(): Promise<ITransactionHandle>;
 
- /**
-  * Commits the given transaction, making all changes atomic.
-  * @param handle - The transaction handle returned by beginTransaction
-  */
- commitTransaction(handle: ITransactionHandle): Promise<void>;
+  /**
+   * Commits the given transaction, making all changes atomic.
+   * @param handle - The transaction handle returned by beginTransaction
+   */
+  commitTransaction(handle: ITransactionHandle): Promise<void>;
 
- /**
-  * Rolls back the given transaction, discarding all changes.
-  * @param handle - The transaction handle returned by beginTransaction
-  */
- rollbackTransaction(handle: ITransactionHandle): Promise<void>;
+  /**
+   * Rolls back the given transaction, discarding all changes.
+   * @param handle - The transaction handle returned by beginTransaction
+   */
+  rollbackTransaction(handle: ITransactionHandle): Promise<void>;
 }
