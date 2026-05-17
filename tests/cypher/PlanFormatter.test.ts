@@ -173,6 +173,7 @@ describe('PlanFormatter', () => {
           {
             kind: 'NodeScanStep',
             label: 'Person',
+            types: ['Person'],
             variable: 'p',
           },
         ],
@@ -301,6 +302,7 @@ describe('PlanFormatter', () => {
           {
             kind: 'NodeScanStep',
             label: 'Per<son>',
+            types: ['Per<son>'],
             variable: 'p>q',
           },
         ],

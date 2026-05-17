@@ -834,6 +834,17 @@ export class Executor {
     step: AggregateStep,
     transaction?: GraphTransaction,
   ): Promise<Row[]> {
+    
+    // Defensive guard: this path is only semantically valid when there are
+    // NO source/target node constraints. The planner (_isEdgeSimplePlan)
+    // already ensures this, but we assert here as belt-and-suspenders.
+    if (step.sourceTypes && step.sourceTypes.length > 0) {
+      throw new Error(
+        'Edge storage-level aggregation cannot be used with source node type ' +
+        'constraints. The planner should have rejected this plan in _isEdgeSimplePlan.'
+      );
+    }
+
     // Build type filter from the Planner-supplied edgeTypes.
     const typeFilter = step.edgeTypes?.length
       ? { types: step.edgeTypes }

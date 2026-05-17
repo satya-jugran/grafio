@@ -67,11 +67,22 @@ export interface IStorageProvider {
   getNode(id: string, transaction?: ITransactionHandle): Promise<NodeData | undefined>;
 
   /**
- * Returns NodeData for multiple ids in a single call.
- * Enables batch fetching to avoid N+1 getNode() calls.
- * @param ids - Array of node ids to fetch
- * @param transaction - Optional transaction handle
- */
+  * Returns NodeData for multiple ids in a single call.
+    * Enables batch fetching to avoid N+1 getNode() calls.
+    *
+    * Semantics:
+    * - The returned Map contains entries only for ids that were found.
+    * - Unknown ids MUST be omitted from the Map; they MUST NOT appear with
+    *   an `undefined` value.
+    * - Duplicate ids in `ids` do not produce duplicate Map entries; providers
+    *   should treat them as repeated requests for the same id.
+    *
+    * Callers should use `result.has(id)` to distinguish "not found" from
+    * a found node.
+    *
+    * @param ids - Array of node ids to fetch
+    * @param transaction - Optional transaction handle
+    */
   getNodesByIds(ids: string[], transaction?: ITransactionHandle): Promise<Map<string, NodeData>>;
 
   /**
