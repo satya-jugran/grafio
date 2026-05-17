@@ -393,6 +393,8 @@ export class ProjectionPlanner {
     for (const step of steps) {
       if (step.kind === 'NodeScanStep') {
         nodeScanCount++;
+        // Node type restriction → can't push to edge aggregation
+        if (step.types && step.types.length > 0) return false;
         // Node property filters (e.g. {name: 'Alice'}) cannot be pushed
         // into edge-level storage aggregation — stay with Path B.
         if (step.propertyFilters && step.propertyFilters.length > 0) {
@@ -402,6 +404,12 @@ export class ProjectionPlanner {
         edgeExpandCount++;
         // Only single-hop edge expansions can be pushed to storage
         if (step.strategy !== 'single-hop') return false;
+        // Target type restriction → can't push to edge aggregation
+        if (step.targetTypes && step.targetTypes.length > 0) return false;
+
+      } else if (step.kind === 'FilterStep' || step.kind === 'NodeSeekStep') {
+        // Any filter or seek means the plan isn't "simple"
+        return false;
       }
     }
 
