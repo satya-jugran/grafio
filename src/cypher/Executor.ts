@@ -350,9 +350,9 @@ export class Executor {
 
     // Collect all target IDs
     const targetIds = edges.map(e => step.direction === 'out' ? e.targetId : e.sourceId);
-
+    const uniqueIds = [...new Set(targetIds)];
     // Batch fetch all target nodes in ONE call
-    const nodeMap = await this._graph.getNodesByIds(targetIds, transaction);
+    const nodeMap = await this._graph.getNodesByIds(uniqueIds, transaction);
 
     const result: Row[] = [];
     for (const edge of edges) {
