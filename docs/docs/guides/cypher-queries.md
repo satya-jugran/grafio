@@ -5,10 +5,11 @@ Query your graph using the openCypher query language.
 ## Setup
 
 ```typescript
-import { Graph } from 'grafio';
+import { InMemoryGraphFactory } from 'grafio';
 import { CypherEngine } from 'grafio/cypher';
 
-const graph = new Graph();
+const factory = new InMemoryGraphFactory();
+const graph = factory.forGraph('default');
 // ... add nodes and edges ...
 
 const engine = new CypherEngine(graph);
@@ -127,17 +128,74 @@ const plan = await engine.getQueryPlan(
   undefined,
   'text'
 );
-/*
-NodeScanStep (Person)
-  EdgeExpandStep (KNOWS, outgoing)
-    ProjectStep [p.name, b.name]
-*/
 ```
 
 ### Mermaid Flowchart
 
 ```typescript
 const plan = await engine.getQueryPlan(query, undefined, 'mermaid');
+```
+
+## Execution Plans
+
+Use `CypherEngineOptions.executionPlan` to get the query execution plan with timing and row statistics:
+
+```typescript
+const result = await engine.execute(
+  'MATCH (p:Person) RETURN p.name AS name',
+  {},
+  { executionPlan: { format: 'text' } }
+);
+console.log(result.executionPlan);
+```
+
+### Example: Complex Query with Execution Plan
+
+For a query like:
+```cypher
+MATCH (p:Person|Product)-[r:KNOWS|BOUGHT]->(t:People|Product)-[r2:IN_CATEGORY]->(c:Category)
+WHERE r.weight > 5 AND p.score > 90
+RETURN p.label AS personLabel,
+       p.score AS personScore,
+       avg(t.score) AS avgTargetScore,
+       sum(r.weight) AS totalWeight,
+       count(r) AS relationshipCount
+ORDER BY personScore DESC
+```
+
+The **query plan** shows the execution steps:
+```
+├— NodeScanStep (p:Person|Product { score > 90 })
+├— EdgeExpandStep (→) r:KNOWS|BOUGHT → t:People|Product
+├— EdgeExpandStep (→) r2:IN_CATEGORY → c:Category
+├— FilterStep r.weight > 5
+├— AggregateStep [AVG(avgTargetScore), SUM(totalWeight), COUNT(relationshipCount)]
+├— SortStep [personScore DESC]
+└— ProjectStep [personLabel, personScore, avgTargetScore, totalWeight, relationshipCount]
+```
+
+The **execution plan** includes timing, percentage, and row counts:
+```
+├— NodeScanStep (p:Person|Product { score > 90 }) (1ms, 3.7%, 390 rows)
+├— EdgeExpandStep (→) r:KNOWS|BOUGHT → t:People|Product (21ms, 77.8%, 97 rows)
+├— EdgeExpandStep (→) r2:IN_CATEGORY → c:Category (5ms, 18.5%, 15 rows)
+├— FilterStep r.weight > 5 (0ms, 0.0%, 15 rows)
+├— AggregateStep [AVG(avgTargetScore), SUM(totalWeight), COUNT(relationshipCount)] (0ms, 0.0%, 14 rows)
+├— SortStep [personScore DESC] (0ms, 0.0%, 14 rows)
+└— ProjectStep [personLabel, personScore, avgTargetScore, totalWeight, relationshipCount] (0ms, 0.0%, 14 rows)
+```
+
+### Available Formats
+
+```typescript
+// Text tree with stats (default when executionPlan is set)
+{ executionPlan: { format: 'text' } }
+
+// JSON with full statistics
+{ executionPlan: { format: 'json' } }
+
+// Mermaid flowchart
+{ executionPlan: { format: 'mermaid' } }
 ```
 
 ## Supported Clauses

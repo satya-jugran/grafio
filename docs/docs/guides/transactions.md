@@ -19,9 +19,10 @@ stateDiagram-v2
 ## Basic Usage
 
 ```typescript
-import { Graph } from 'grafio';
+import { InMemoryGraphFactory } from 'grafio';
 
-const graph = new Graph();
+const factory = new InMemoryGraphFactory();
+const graph = factory.forGraph('default');
 const txn = graph.createTransaction();
 
 await txn.begin();
@@ -52,18 +53,23 @@ try {
 
 ## Transaction-Aware Queries
 
-Pass the transaction to read uncommitted data:
+Use Cypher queries with transaction support for consistent reads:
 
 ```typescript
+import { CypherEngine } from 'grafio/cypher';
+
+const engine = new CypherEngine(graph);
 const txn = graph.createTransaction();
 await txn.begin();
 
 await graph.addNode('Person', { name: 'Alice' }, txn);
 
-// Read uncommitted data
-const nodes = await graph.getNodes(txn);  // includes Alice
-const node = await graph.getNode(nodeId, txn);
-const hasIt = await graph.hasNode(nodeId, txn);
+// Read uncommitted data via Cypher query with transaction
+const result = await engine.execute(
+  'MATCH (p:Person) RETURN p.name AS name, p.id AS id',
+  { transaction: txn }  // Pass transaction via CypherEngineOptions
+);
+console.log(result.rows);  // includes Alice
 ```
 
 ## Automatic Rollback

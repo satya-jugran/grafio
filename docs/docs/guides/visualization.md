@@ -5,9 +5,10 @@ Export your graph to Mermaid diagrams for visualization.
 ## Quick Start
 
 ```typescript
-import { Graph, GraphToMermaid } from 'grafio';
+import { InMemoryGraphFactory, GraphToMermaid } from 'grafio';
 
-const graph = new Graph();
+const factory = new InMemoryGraphFactory();
+const graph = factory.forGraph('default');
 // ... add nodes and edges ...
 
 const mermaid = await GraphToMermaid.fromGraph(graph);

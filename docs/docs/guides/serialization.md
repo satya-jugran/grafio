@@ -81,9 +81,10 @@ const graph = await Graph.importJSON(testData);
 ## Complete Example
 
 ```typescript
-import { Graph } from 'grafio';
+import { InMemoryGraphFactory } from 'grafio';
 
-const graph = new Graph();
+const factory = new InMemoryGraphFactory();
+const graph = factory.forGraph('default');
 
 // Build graph
 const alice = await graph.addNode('Person', { name: 'Alice' });

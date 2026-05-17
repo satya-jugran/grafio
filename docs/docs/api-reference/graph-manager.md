@@ -39,8 +39,9 @@ GraphManager.init({
   }
 });
 
-// Graph instances now use caching automatically
-const graph = new Graph(new InMemoryStorageProvider());
+// Graph instances created via factory use caching automatically when enabled
+const factory = new InMemoryGraphFactory();
+const graph = factory.forGraph();
 ```
 
 ## getCacheManager()

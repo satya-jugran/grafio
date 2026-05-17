@@ -9,9 +9,10 @@ A course hierarchy with authors, courses, chapters, and lessons.
 ## Step 1: Create the Hierarchy
 
 ```typescript
-import { Graph } from 'grafio';
+import { InMemoryGraphFactory } from 'grafio';
 
-const graph = new Graph();
+const factory = new InMemoryGraphFactory();
+const graph = factory.forGraph('default');
 
 // Authors
 const author1 = await graph.addNode('Author', { name: 'Jane Smith' });
@@ -118,11 +119,12 @@ console.log(mermaid.toString());
 ## Complete Code
 
 ```typescript
-import { Graph } from 'grafio';
+import { InMemoryGraphFactory } from 'grafio';
 import { CypherEngine } from 'grafio/cypher';
 
 async function main() {
-  const graph = new Graph();
+  const factory = new InMemoryGraphFactory();
+  const graph = factory.forGraph();
   const engine = new CypherEngine(graph);
 
   // Create nodes

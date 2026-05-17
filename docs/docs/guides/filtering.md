@@ -68,13 +68,22 @@ WHERE p.age > 18 AND (p.city = 'NYC' OR p.city = 'LA')
 ```typescript
 interface GraphQueryOptions {
   filter?: {
-    nodeType?: string;         // filter nodes by type
-    edgeType?: string;         // filter edges by type
+    types?: string[];              // filter by node/edge types (OR within types)
+    properties?: FilterProperty[]; // property key-value pair filters
   };
-  orderBy?: IOrderBy[];        // sort results
-  limit?: number;               // limit results
-  offset?: number;              // skip results
+  orderBy?: IOrderBy;             // sort results (field + direction)
+  limit?: number;                  // limit results
+  distinct?: boolean;              // deduplicate values for aggregation
   transaction?: GraphTransaction;  // transaction context
+}
+
+// FilterProperty for property-based filtering
+interface FilterProperty {
+  key?: string;
+  value?: unknown;
+  op?: '=' | '<>' | '>' | '<' | '>=' | '<=' | 'CONTAINS' | 'STARTS_WITH' | 'ENDS_WITH' | 'IN' | 'NOT_IN' | 'IS_NULL' | 'IS_NOT_NULL';
+  AND?: FilterProperty[];
+  OR?: FilterProperty[];
 }
 ```
 

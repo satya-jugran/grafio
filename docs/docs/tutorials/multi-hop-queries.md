@@ -9,10 +9,11 @@ A network where we explore multi-hop relationship patterns.
 ## Setup
 
 ```typescript
-import { Graph } from 'grafio';
+import { InMemoryGraphFactory } from 'grafio';
 import { CypherEngine } from 'grafio/cypher';
 
-const graph = new Graph();
+const factory = new InMemoryGraphFactory();
+const graph = factory.forGraph('default');
 const engine = new CypherEngine(graph);
 
 // Build a network
@@ -171,11 +172,12 @@ const result = await engine.query(`
 ## Complete Example
 
 ```typescript
-import { Graph } from 'grafio';
+import { InMemoryGraphFactory } from 'grafio';
 import { CypherEngine } from 'grafio/cypher';
 
 async function main() {
-  const graph = new Graph();
+  const factory = new InMemoryGraphFactory();
+  const graph = factory.forGraph();
   const engine = new CypherEngine(graph);
 
   // Build network

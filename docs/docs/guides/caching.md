@@ -19,24 +19,22 @@ flowchart LR
 ## Quick Start
 
 ```typescript
-import { Graph, GraphManager, InMemoryStorageProvider } from 'grafio';
+import { GraphManager, InMemoryGraphFactory } from 'grafio';
 
 // 1. Initialize GraphManager with cache config
 GraphManager.init({
   cache: {
-    maxNodesCount: 10000,
-    maxEdgesCount: 20000,
+    maxNodesCount: 1000,
+    maxEdgesCount: 2000,
     cacheStore: 'in-memory',
     evictionStrategy: 'LRU',
     preloadStrategy: 'none',
   }
 });
 
-// 2. Create graph with caching
-const graph = new Graph(new InMemoryStorageProvider());
-
-// 3. Warm cache if needed
-await graph.warmCache();
+// 2. Create graph via factory
+const factory = new InMemoryGraphFactory();
+const graph = factory.forGraph('default');
 ```
 
 ## Cache Configuration
@@ -45,8 +43,8 @@ await graph.warmCache();
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `maxNodesCount` | number | 10000 | Max nodes to cache |
-| `maxEdgesCount` | number | 20000 | Max edges to cache |
+| `maxNodesCount` | number | 1000 | Max nodes to cache |
+| `maxEdgesCount` | number | 2000 | Max edges to cache |
 | `cacheStore` | `'in-memory'` \| `'redis'` | `'in-memory'` | Cache backend |
 | `evictionStrategy` | `'LRU'` \| `'LFU'` \| `'FIFO'` | `'LRU'` | Eviction algorithm |
 | `preloadStrategy` | `'none'` \| `'all'` \| `'first-n'` | `'none'` | Preload strategy |
@@ -71,14 +69,13 @@ await graph.warmCache();
 ## Using Redis Cache
 
 ```typescript
-import { GraphManager, RedisCache } from 'grafio';
-import { RedisCache } from 'grafio/cache';
+import { GraphManager, RedisCache } from 'grafio/cache';
 
 GraphManager.init({
   cache: {
     cacheStore: 'redis',
-    maxNodesCount: 50000,
-    maxEdgesCount: 100000,
+    maxNodesCount: 5000,
+    maxEdgesCount: 10000,
     evictionStrategy: 'LRU',
     preloadStrategy: 'all',
     ttlSeconds: 7200,

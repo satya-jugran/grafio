@@ -141,9 +141,10 @@ const result = await engine.query(`
 Grafio uses TypeScript's type system for compile-time safety:
 
 ```typescript
-import { Graph, Node, Edge } from 'grafio';
+import { InMemoryGraphFactory, Node, Edge } from 'grafio';
 
-const graph = new Graph();
+const factory = new InMemoryGraphFactory();
+const graph = factory.forGraph('default');
 const node: Node = await graph.addNode('Person', { name: 'Alice' });
 
 // TypeScript knows node.id is a string

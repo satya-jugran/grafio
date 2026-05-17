@@ -21,8 +21,8 @@ export type CacheStoreType = 'in-memory' | 'redis';
  * ```typescript
  * GraphManager.init({
  *   cache: {
- *     maxNodesCount: 10000,
- *     maxEdgesCount: 20000,
+ *     maxNodesCount: 1000,
+ *     maxEdgesCount: 2000,
  *     cacheStore: 'in-memory',
  *     evictionStrategy: 'LRU',
  *     preloadStrategy: 'none',
@@ -34,13 +34,13 @@ export interface CacheConfig {
   /**
    * Maximum total nodes cached across ALL graphId partitions.
    * When exceeded, the least-recently-used graphId is evicted.
-   * @default 10000
+   * @default 1000
    */
   maxNodesCount: number;
 
   /**
    * Maximum total edges cached across ALL graphId partitions.
-   * @default 20000
+   * @default 2000
    */
   maxEdgesCount: number;
 
@@ -89,8 +89,8 @@ export interface CacheConfig {
  * Default cache configuration values.
  */
 export const DEFAULT_CACHE_CONFIG: Pick<CacheConfig, 'maxNodesCount' | 'maxEdgesCount' | 'cacheStore' | 'evictionStrategy' | 'preloadStrategy'> = {
-  maxNodesCount: 10000,
-  maxEdgesCount: 20000,
+  maxNodesCount: 1000,
+  maxEdgesCount: 2000,
   cacheStore: 'in-memory',
   evictionStrategy: 'LRU',
   preloadStrategy: 'none',

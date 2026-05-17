@@ -20,10 +20,11 @@ npm install grafio
 Create your first graph in just a few lines:
 
 ```typescript
-import { Graph } from 'grafio';
+import { InMemoryGraphFactory } from 'grafio';
 import { CypherEngine } from 'grafio/cypher';
 
-const graph = new Graph();
+const factory = new InMemoryGraphFactory();
+const graph = factory.forGraph('default');
 const engine = new CypherEngine(graph);
 
 const course = await graph.addNode('Course', { name: 'Python 101', duration: 40 });
@@ -43,3 +44,4 @@ console.log(result.rows);
 
 - Learn about [Core Concepts](../guides/core-concepts) — understand nodes, edges, and relationships
 - Explore the [API Reference](../api-reference/graph) — complete method reference
+- [MongoDB Storage](../guides/mongodb-storage) — persistent storage with MongoDB

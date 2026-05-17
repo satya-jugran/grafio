@@ -14,10 +14,10 @@ Grafio's pluggable storage architecture lets you swap backends without changing 
 The default storage provider — no dependencies required.
 
 ```typescript
-import { Graph, InMemoryStorageProvider } from 'grafio';
+import { InMemoryGraphFactory } from 'grafio';
 
-const provider = new InMemoryStorageProvider();
-const graph = new Graph(provider);
+const factory = new InMemoryGraphFactory();
+const graph = factory.forGraph();
 ```
 
 ### Options
@@ -30,8 +30,9 @@ interface InMemoryStorageProviderOptions {
 
 ```typescript
 // Multiple isolated graphs
-const graph1 = new Graph(new InMemoryStorageProvider({ graphId: 'graph1' }));
-const graph2 = new Graph(new InMemoryStorageProvider({ graphId: 'graph2' }));
+const factory = new InMemoryGraphFactory();
+const graph1 = factory.forGraph('graph1');
+const graph2 = factory.forGraph('graph2');
 ```
 
 ## IStorageProvider Interface
@@ -89,24 +90,17 @@ interface IStorageProvider {
 
 ## MongoDB Storage
 
-See the [`grafio-mongo`](https://www.npmjs.com/package/grafio-mongo) package for MongoDB-backed persistence.
+For MongoDB-backed persistence, see the dedicated [MongoDB Storage](./mongodb-storage) guide.
 
-```typescript
-import { Graph } from 'grafio';
-import { MongoStorageProvider } from 'grafio-mongo';
-
-const provider = new MongoStorageProvider({
-  connectionString: 'mongodb://localhost:27017',
-  database: 'grafio'
-});
-
-const graph = new Graph(provider);
-```
+The [`grafio-mongo`](https://www.npmjs.com/package/grafio-mongo) package provides `MongoGraphFactory` with full support for:
+- Automatic index creation (`ensureIndexes()`)
+- Custom collection names
+- GraphManager caching integration
 
 ## GraphManager Integration
 
 ```typescript
-import { GraphManager, InMemoryStorageProvider } from 'grafio';
+import { GraphManager, InMemoryGraphFactory } from 'grafio';
 
 GraphManager.init({
   cache: {
@@ -116,8 +110,9 @@ GraphManager.init({
   }
 });
 
-// Graph instances automatically use caching when GraphManager is initialized
-const graph = new Graph(new InMemoryStorageProvider());
+// Graph instances from factory automatically use caching when GraphManager is initialized
+const factory = new InMemoryGraphFactory();
+const graph = factory.forGraph();
 ```
 
 ## Next Steps

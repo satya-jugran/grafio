@@ -9,10 +9,11 @@ A product catalog with real-time filtering by category, price, and availability.
 ## Step 1: Create Product Catalog
 
 ```typescript
-import { Graph } from 'grafio';
+import { InMemoryGraphFactory } from 'grafio';
 import { CypherEngine } from 'grafio/cypher';
 
-const graph = new Graph();
+const factory = new InMemoryGraphFactory();
+const graph = factory.forGraph('default');
 const engine = new CypherEngine(graph);
 
 // Create categories

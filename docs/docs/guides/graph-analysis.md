@@ -39,7 +39,10 @@ const order = await graph.topologicalSort();
 ### Simple Dependency Graph
 
 ```typescript
-const graph = new Graph();
+import { InMemoryGraphFactory } from 'grafio';
+
+const factory = new InMemoryGraphFactory();
+const graph = factory.forGraph('default');
 
 // Create dependency chain: a -> b -> c
 const a = await graph.addNode('Task', { name: 'a' });
@@ -57,7 +60,8 @@ const order = await graph.topologicalSort();
 ### Course Prerequisites
 
 ```typescript
-const graph = new Graph();
+const factory = new InMemoryGraphFactory();
+const graph = factory.forGraph('default');
 
 const math101 = await graph.addNode('Course', { name: 'Math 101' });
 const math201 = await graph.addNode('Course', { name: 'Math 201' });

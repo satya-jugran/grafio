@@ -9,9 +9,10 @@ A simple social network with users, friendships, and followers.
 ## Step 1: Create the Graph
 
 ```typescript
-import { Graph } from 'grafio';
+import { InMemoryGraphFactory } from 'grafio';
 
-const graph = new Graph();
+const factory = new InMemoryGraphFactory();
+const graph = factory.forGraph('default');
 ```
 
 ## Step 2: Add Users
@@ -93,11 +94,12 @@ console.log(paths); // [['davidId', 'carolId', 'aliceId']] or null
 ## Complete Code
 
 ```typescript
-import { Graph } from 'grafio';
+import { InMemoryGraphFactory } from 'grafio';
 import { CypherEngine } from 'grafio/cypher';
 
 async function main() {
-  const graph = new Graph();
+  const factory = new InMemoryGraphFactory();
+  const graph = factory.forGraph('default');
   const engine = new CypherEngine(graph);
 
   // Create users

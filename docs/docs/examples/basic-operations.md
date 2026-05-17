@@ -5,9 +5,10 @@ Minimal code examples for common graph operations.
 ## Create a Graph
 
 ```typescript
-import { Graph } from 'grafio';
+import { InMemoryGraphFactory } from 'grafio';
 
-const graph = new Graph();
+const factory = new InMemoryGraphFactory();
+const graph = factory.forGraph('default');
 ```
 
 ## Add Nodes

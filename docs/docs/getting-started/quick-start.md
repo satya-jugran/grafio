@@ -11,11 +11,12 @@ npm install grafio
 ## Your First Graph
 
 ```typescript
-import { Graph } from 'grafio';
+import { InMemoryGraphFactory } from 'grafio';
 import { CypherEngine } from 'grafio/cypher';
 
-// Create a graph (uses InMemoryStorageProvider by default)
-const graph = new Graph();
+// Create graph via factory (supports caching when GraphManager is initialized)
+const factory = new InMemoryGraphFactory();
+const graph = factory.forGraph('default');
 
 // Create Cypher engine
 const engine = new CypherEngine(graph);

@@ -18,9 +18,10 @@ import {
 Thrown when attempting an operation on an inactive transaction.
 
 ```typescript
-import { Graph, TransactionNotActiveError } from 'grafio';
+import { InMemoryGraphFactory, TransactionNotActiveError } from 'grafio';
 
-const graph = new Graph();
+const factory = new InMemoryGraphFactory();
+const graph = factory.forGraph('default');
 const txn = graph.createTransaction();
 
 // Transaction not started

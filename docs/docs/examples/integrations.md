@@ -5,15 +5,11 @@ Integrating Grafio with other tools.
 ## MongoDB Storage
 
 ```typescript
-import { Graph } from 'grafio';
-import { MongoStorageProvider } from 'grafio-mongo';
+import { GraphManager } from 'grafio';
+import { MongoGraphFactory } from 'grafio-mongo';
 
-const provider = new MongoStorageProvider({
-  connectionString: 'mongodb://localhost:27017',
-  database: 'grafio'
-});
-
-const graph = new Graph(provider);
+const factory = new MongoGraphFactory(db);
+const graph = factory.forGraph('default');
 ```
 
 ## Redis Caching
@@ -33,10 +29,11 @@ GraphManager.init({
 
 ```typescript
 import express from 'express';
-import { Graph } from 'grafio';
+import { InMemoryGraphFactory } from 'grafio';
 
 const app = express();
-const graph = new Graph();
+const factory = new InMemoryGraphFactory();
+const graph = factory.forGraph('default');
 
 app.get('/nodes', async (req, res) => {
   const nodes = await graph.getNodes();

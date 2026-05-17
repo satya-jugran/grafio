@@ -60,9 +60,10 @@ interface MermaidOptions {
 ### Basic Usage
 
 ```typescript
-import { Graph, GraphToMermaid } from 'grafio';
+import { InMemoryGraphFactory, GraphToMermaid } from 'grafio';
 
-const graph = new Graph();
+const factory = new InMemoryGraphFactory();
+const graph = factory.forGraph('default');
 const alice = await graph.addNode('Person', { name: 'Alice' });
 const bob = await graph.addNode('Person', { name: 'Bob' });
 await graph.addEdge(alice.id, bob.id, 'KNOWS');

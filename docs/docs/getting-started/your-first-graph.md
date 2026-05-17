@@ -19,12 +19,13 @@ npm install grafio
 Create a file `index.ts`:
 
 ```typescript
-import { Graph } from 'grafio';
+import { InMemoryGraphFactory } from 'grafio';
 import { CypherEngine } from 'grafio/cypher';
 
 async function main() {
-  // 1. Create a graph instance
-  const graph = new Graph();
+  // 1. Create graph via factory
+  const factory = new InMemoryGraphFactory();
+  const graph = factory.forGraph('default');
   const engine = new CypherEngine(graph);
 
   // 2. Add nodes

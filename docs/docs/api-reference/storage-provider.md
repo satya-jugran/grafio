@@ -133,6 +133,7 @@ class MyStorageProvider implements IStorageProvider {
 
 ```typescript
 import { Graph } from 'grafio';
+import type { IStorageProvider } from 'grafio';
 
-const myProvider = new MyStorageProvider();
+const myProvider: IStorageProvider = new MyStorageProvider();
 const graph = new Graph(myProvider);

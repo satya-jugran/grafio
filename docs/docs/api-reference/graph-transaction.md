@@ -13,7 +13,10 @@ import { GraphTransaction } from 'grafio';
 Returns a new `GraphTransaction` instance for atomic multi-operation updates.
 
 ```typescript
-const graph = new Graph();
+import { InMemoryGraphFactory } from 'grafio';
+
+const factory = new InMemoryGraphFactory();
+const graph = factory.forGraph('default');
 const txn = graph.createTransaction();
 ```
 

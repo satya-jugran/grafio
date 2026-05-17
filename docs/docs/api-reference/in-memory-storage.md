@@ -25,18 +25,15 @@ interface InMemoryStorageProviderOptions {
 ## Usage
 
 ```typescript
-import { Graph, InMemoryStorageProvider } from 'grafio';
+import { InMemoryGraphFactory } from 'grafio';
 
-// Default (uses InMemoryStorageProvider internally)
-const graph1 = new Graph();
-
-// Explicit
-const provider = new InMemoryStorageProvider();
-const graph2 = new Graph(provider);
+// Default - uses InMemoryStorageProvider internally
+const factory = new InMemoryGraphFactory();
+const graph1 = factory.forGraph('default');
 
 // Multiple isolated graphs
-const graphA = new Graph(new InMemoryStorageProvider({ graphId: 'graph-a' }));
-const graphB = new Graph(new InMemoryStorageProvider({ graphId: 'graph-b' }));
+const graphA = factory.forGraph('graph-a');
+const graphB = factory.forGraph('graph-b');
 ```
 
 ## Features
@@ -55,17 +52,21 @@ const graphB = new Graph(new InMemoryStorageProvider({ graphId: 'graph-b' }));
 ## Use Cases
 
 ```typescript
+import { InMemoryGraphFactory } from 'grafio';
+
+const factory = new InMemoryGraphFactory();
+
 // Development and testing
-const devGraph = new Graph();
+const devGraph = factory.forGraph('dev');
 
 // Unit tests
-const testGraph = new Graph(new InMemoryStorageProvider());
+const testGraph = factory.forGraph('test');
 
 // Scripting / CLI tools
-const scriptGraph = new Graph();
+const scriptGraph = factory.forGraph('script');
 
 // Temporary data processing
-const tempGraph = new Graph(new InMemoryStorageProvider({ graphId: 'temp' }));
+const tempGraph = factory.forGraph('temp');
 ```
 
 ## Next Steps
