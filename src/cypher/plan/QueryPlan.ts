@@ -263,6 +263,19 @@ export interface AggregateStep {
    * should attempt the O(1) storage-level aggregation path.
    */
   useStorageLevel?: boolean;
+   /**
+   * The entity kind being aggregated: 'node' or 'edge'.
+   * When 'node', sourceVariable/sourceType identify a NodeScanStep.
+   * When 'edge', sourceVariable identifies the edge variable
+   * from an EdgeExpandStep.
+   */
+  sourceEntity?: 'node' | 'edge';
+  /**
+   * Edge type filter for edge-level storage aggregation.
+   * Set by the Planner from the EdgeExpandStep when sourceEntity is 'edge'.
+   * When empty/undefined, aggregates across all edge types.
+   */
+  edgeTypes?: string[];
 }
 
 // ── Execution statistics ─────────────────────────────────────────

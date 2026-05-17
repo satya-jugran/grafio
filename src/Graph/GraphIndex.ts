@@ -187,6 +187,17 @@ export class GraphIndex {
     return new Node(data.type, data.properties, data.id, data.createdOn, data.updatedOn);
   }
 
+  /** Returns nodes by their ids. */
+  async getNodesByIds(ids: string[], transaction?: GraphTransaction): Promise<Map<string, Node>> {
+    const handle = transaction?._getHandle();
+    const data = await this._store.getNodesByIds(ids, handle);
+    const result = new Map<string, Node>();
+    for (const [id, d] of data) {
+      result.set(id, new Node(d.type, d.properties, d.id, d.createdOn, d.updatedOn));
+    }
+    return result;
+  }
+
   /**
    * Adds a new directed edge to the graph.
    * @throws InvalidPropertyError if properties contain non-primitive values

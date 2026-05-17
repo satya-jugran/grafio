@@ -225,6 +225,22 @@ export class InMemoryStorageProvider implements IStorageProvider {
     return nodes.length;
   }
 
+  async getNodesByIds(ids: string[], transaction?: ITransactionHandle): Promise<Map<string, NodeData>> {
+    const overlay = this._getOverlay(transaction?.id);
+    const result = new Map<string, NodeData>();
+    for (const id of ids) {
+      // Check overlay first (transactional writes)
+      const overlayNode = overlay?.nodes.get(id);
+      if (overlayNode !== undefined) {
+        if (overlayNode !== null) result.set(id, deepClone(overlayNode));
+        continue;
+      }
+      const node = this._nodes.get(id);
+      if (node) result.set(id, deepClone(node));
+    }
+    return result;
+  }
+
   async aggregateNodeProperty(
     key: string,
     options?: StorageQueryOptions

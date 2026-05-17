@@ -176,8 +176,9 @@ export class ProjectionPlanner {
 
     this._rewrittenProjections = rewrittenProjections;
 
-    // ── Determine sourceVariable ──────────────────────────────────
+    // ── Determine sourceVariable and sourceEntity ──────────────────
     let sourceVariable: string | undefined;
+    let sourceEntity: 'node' | 'edge' | undefined;
     const vars = new Set<string>();
     for (const agg of allAggregates) {
       const v = this._extractVariableName(agg.expression);
@@ -187,17 +188,11 @@ export class ProjectionPlanner {
       sourceVariable = [...vars][0];
     }
 
-    if (vars.size >= 2) {
-      throw new CypherSemanticError(
-        `Aggregates across multiple independent node patterns are not ` +
-        `supported. Use separate queries joined with WITH. ` +
-        `Aggregate source variables: ${[...vars].map(v => `'${v}'`).join(', ')}.`,
-      );
-    }
-
     // ── Plan shape decision ───────────────────────────────────────
     let sourceType: string | undefined;
-    const isSimple =
+
+    // Try simple node plan first
+    let isSimple =
       this._isSimplePlan(steps, ast) &&
       sourceVariable !== undefined &&
       groupBy.length === 0;
@@ -212,7 +207,31 @@ export class ProjectionPlanner {
           break;
         }
       }
+      sourceEntity = 'node';
       steps.length = 0;
+    }
+
+    // Fall back: try simple edge plan (new)
+    let edgeTypes: string[] | undefined;
+    if (!isSimple && sourceVariable !== undefined && groupBy.length === 0) {
+      isSimple = this._isEdgeSimplePlan(steps, ast);
+
+      if (isSimple) {
+        // Verify all aggregates reference the edge variable (not a node)
+        const edgeVar = sourceVariable;
+        const edgeExpand = steps.find(
+          (s) => s.kind === 'EdgeExpandStep' && s.edgeVar === edgeVar,
+        ) as import('./QueryPlan').EdgeExpandStep | undefined;
+        if (edgeExpand) {
+          // Source type not applicable for edges — use types array
+          sourceType = undefined;
+          sourceEntity = 'edge';
+          // Capture edge type(s) from the EdgeExpandStep so the executor
+          // can filter storage-level calls (getEdgeCount / aggregateEdgeProperty).
+          edgeTypes = edgeExpand.types.length > 0 ? edgeExpand.types : undefined;
+          steps.length = 0;
+        }
+      }
     }
 
     steps.push({
@@ -223,7 +242,10 @@ export class ProjectionPlanner {
       sourceVariable,
       sourceType,
       useStorageLevel: isSimple,
+      sourceEntity,                // <-- NEW
+      edgeTypes,                   // <-- NEW: edge type filter for Path C
     });
+
   }
 
   /**
@@ -354,6 +376,38 @@ export class ProjectionPlanner {
     return { rewritten, extracted };
   }
 
+  /**
+ * Returns true when the plan qualifies for the storage-level fast path.
+ *
+ * Two cases:
+ *  - Simple node: 1 NodeScanStep, no EdgeExpandStep, no WHERE
+ *  - Simple edge: 1 NodeScanStep + 1 EdgeExpandStep (single-hop),
+ *    no WHERE, aggregates reference only the edge variable
+ */
+  private _isEdgeSimplePlan(steps: PlanStep[], ast: QueryAst): boolean {
+    if (ast.where) return false;
+
+    let nodeScanCount = 0;
+    let edgeExpandCount = 0;
+
+    for (const step of steps) {
+      if (step.kind === 'NodeScanStep') {
+        nodeScanCount++;
+        // Node property filters (e.g. {name: 'Alice'}) cannot be pushed
+        // into edge-level storage aggregation — stay with Path B.
+        if (step.propertyFilters && step.propertyFilters.length > 0) {
+          return false;
+        }
+      } else if (step.kind === 'EdgeExpandStep') {
+        edgeExpandCount++;
+        // Only single-hop edge expansions can be pushed to storage
+        if (step.strategy !== 'single-hop') return false;
+      }
+    }
+
+    return nodeScanCount === 1 && edgeExpandCount === 1;
+  }
+
   private _isSimplePlan(steps: PlanStep[], ast: QueryAst): boolean {
     if (ast.where) return false;
 
@@ -365,6 +419,7 @@ export class ProjectionPlanner {
 
     return nodeScanCount === 1;
   }
+
 
   // ── General helpers ─────────────────────────────────────────────
 
