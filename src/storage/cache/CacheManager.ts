@@ -130,15 +130,22 @@ export class CacheManager {
  */
   async getNodes(graphId: string, nodeIds: string[]): Promise<Map<string, NodeData>> {
     const result = new Map<string, NodeData>();
-    for (const nodeId of nodeIds) {
-      const node = await this._nodeCache.get(this._nodeKey(graphId, nodeId));
+    const nodes = await Promise.all(
+       nodeIds.map(async (nodeId) => {
+         const node = await this._nodeCache.get(this._nodeKey(graphId, nodeId));
+         return [nodeId, node] as const;
+       })
+     );
+    for (const [nodeId, node] of nodes) {
       if (node !== undefined) {
         this._hitCount++;
         result.set(nodeId, node);
       }
     }
-    if (result.size < nodeIds.length) {
+    if (result.size > 0) {
       this._touchGraphId(graphId);
+    }
+    if (result.size < nodeIds.length) {
       this._missCount += nodeIds.length - result.size;
     }
     return result;

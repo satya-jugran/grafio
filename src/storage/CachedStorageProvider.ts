@@ -163,9 +163,10 @@ export class CachedStorageProvider implements IStorageProvider {
     }
 
     // Try cache first
-    const cached = await this._cacheManager.getNodes(this._graphId, ids);
+    const uniqueIds = Array.from(new Set(ids));
+    const cached = await this._cacheManager.getNodes(this._graphId, uniqueIds);
     const cachedIds = new Set(cached.keys());
-    const missingIds = ids.filter(id => !cachedIds.has(id));
+    const missingIds = uniqueIds.filter(id => !cachedIds.has(id));
 
     if (missingIds.length === 0) {
       return cached;

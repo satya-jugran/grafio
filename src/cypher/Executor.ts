@@ -446,7 +446,8 @@ export class Executor {
 
       // For each node in frontier:
       const edgeIds = edges.map(e => step.direction === 'out' ? e.targetId : e.sourceId);
-      const nodeMap = await this._graph.getNodesByIds(edgeIds, transaction);
+      const uniqueIds = [...new Set(edgeIds)];
+      const nodeMap = await this._graph.getNodesByIds(uniqueIds, transaction);
 
       for (const edge of edges) {
         const targetId = step.direction === 'out' ? edge.targetId : edge.sourceId;
