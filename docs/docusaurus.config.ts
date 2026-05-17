@@ -4,8 +4,8 @@ import type * as Preset from '@docusaurus/preset-classic';
 
 const config: Config = {
   title: 'Grafio',
-  tagline: 'A graph database with pluggable storage architecture',
-  favicon: 'img/favicon.ico',
+  tagline: 'High-performance graph database with native Cypher support and pluggable storage',
+  favicon: 'img/favicon.svg',
   url: 'https://satya-jugran.github.io',
   baseUrl: '/grafio/',
   trailingSlash: false,
