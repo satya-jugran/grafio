@@ -189,7 +189,7 @@ export class ProjectionPlanner {
     }
 
     // ── Plan shape decision ───────────────────────────────────────
-    let sourceType: string | undefined;
+    let sourceTypes: string[] | undefined;
 
     // Try simple node plan first
     let isSimple =
@@ -203,7 +203,9 @@ export class ProjectionPlanner {
           step.kind === 'NodeScanStep' &&
           step.variable === sourceVariable
         ) {
-          sourceType = step.label || undefined;
+          sourceTypes = step.types && step.types.length > 0
+            ? step.types
+            : undefined;
           break;
         }
       }
@@ -224,7 +226,7 @@ export class ProjectionPlanner {
         ) as import('./QueryPlan').EdgeExpandStep | undefined;
         if (edgeExpand) {
           // Source type not applicable for edges — use types array
-          sourceType = undefined;
+          sourceTypes = undefined;
           sourceEntity = 'edge';
           // Capture edge type(s) from the EdgeExpandStep so the executor
           // can filter storage-level calls (getEdgeCount / aggregateEdgeProperty).
@@ -240,7 +242,7 @@ export class ProjectionPlanner {
       groupBy,
       groupByAliases,
       sourceVariable,
-      sourceType,
+      sourceTypes,
       useStorageLevel: isSimple,
       sourceEntity,                // <-- NEW
       edgeTypes,                   // <-- NEW: edge type filter for Path C

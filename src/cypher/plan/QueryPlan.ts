@@ -254,10 +254,11 @@ export interface AggregateStep {
    */
   sourceVariable?: string;
   /**
-   * The entity type (label) being aggregated (e.g., 'Person').
-   * Set by the Planner from the NodeScanStep that binds sourceVariable.
+   * The entity type(s) being aggregated (e.g., ['Person', 'Employee']).
+   * Set by the Planner from the NodeScanStep.types that binds sourceVariable.
+   * Multiple types use OR semantics (matches the storage layer's includes check).
    */
-  sourceType?: string;
+  sourceTypes?: string[];
   /**
    * When true, the Planner cleared all prior steps and the Executor
    * should attempt the O(1) storage-level aggregation path.
@@ -265,7 +266,7 @@ export interface AggregateStep {
   useStorageLevel?: boolean;
    /**
    * The entity kind being aggregated: 'node' or 'edge'.
-   * When 'node', sourceVariable/sourceType identify a NodeScanStep.
+   * When 'node', sourceVariable/sourceTypes identify a NodeScanStep.
    * When 'edge', sourceVariable identifies the edge variable
    * from an EdgeExpandStep.
    */

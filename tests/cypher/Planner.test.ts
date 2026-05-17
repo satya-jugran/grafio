@@ -298,7 +298,7 @@ describe('Planner', () => {
       expect(agg.aggregates[0].expression.kind).toBe('Identifier');
       expect(agg.aggregates[0].expression.name).toBe('p');
       expect(agg.sourceVariable).toBe('p');
-      expect(agg.sourceType).toBe('Person');
+      expect(agg.sourceTypes).toEqual(['Person']);
 
       // Simple plan: no NodeScanStep present
       expect(p.steps.some((s) => s.kind === 'NodeScanStep')).toBe(false);
@@ -315,7 +315,8 @@ describe('Planner', () => {
       expect(agg.aggregates[0].expression.kind).toBe('PropertyAccess');
       expect(agg.aggregates[0].alias).toBe('avg_age');
       expect(agg.sourceVariable).toBe('p');
-      expect(agg.sourceType).toBe('Person');
+      expect(agg.sourceTypes).toEqual(['Person']);
+
     });
 
     it('produces multiple AggregateSpecs for MIN, MAX, AVG', async () => {
@@ -330,9 +331,8 @@ describe('Planner', () => {
       expect(agg.aggregates[1].function).toBe('MAX');
       expect(agg.aggregates[2].function).toBe('AVG');
       expect(agg.sourceVariable).toBe('p');
-      expect(agg.sourceType).toBe('Person');
+      expect(agg.sourceTypes).toEqual(['Person']);
     });
-
     it('handles COUNT(*) with undefined sourceVariable', async () => {
       const p = await plan('MATCH (p:Person) RETURN COUNT(*)');
 

@@ -637,7 +637,7 @@ export class Executor {
    *
    * Conditions (all must be true):
    * 1. `sourceVariable` is set.
-   * 2. `sourceType` is set.
+   * 2. `sourceEntity` is set.
    * 3. Every aggregate expression is "simple" — a variable reference,
    *    a property access on `sourceVariable`, or the COUNT(*) literal.
    */
@@ -648,7 +648,7 @@ export class Executor {
 
     if (step.sourceEntity === 'edge') {
       // For edge-only aggregates: no type restriction needed
-      // (edge types come from step.edgeTypes, not sourceType)
+      // (edge types come from step.edgeTypes, not sourceTypes)
       for (const spec of step.aggregates) {
         if (!this._isSimpleAggregateExpr(spec.expression, step.sourceVariable!)) {
           return false;
@@ -734,10 +734,10 @@ export class Executor {
       return this._executeEdgeAggregateStorageLevel(step, transaction);
     }
 
-    const sourceType = step.sourceType;
-    // When sourceType is undefined (unlabeled MATCH) the storage APIs
+    const sourceTypes = step.sourceTypes;
+    // When sourceTypes is undefined (unlabeled MATCH) the storage APIs
     // accept undefined / empty filter to mean "all types".
-    const typeFilter = sourceType ? { types: [sourceType] } : undefined;
+    const typeFilter = sourceTypes ? { types: sourceTypes } : undefined;
     const resultRow = new Map<string, unknown>();
 
     // Partition aggregates by their storage call.
