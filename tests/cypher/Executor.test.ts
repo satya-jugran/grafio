@@ -6,7 +6,7 @@ import { Parser } from '../../src/cypher/Parser';
 import { Semantic } from '../../src/cypher/Semantic';
 import { Planner } from '../../src/cypher/Planner';
 import { Executor } from '../../src/cypher/Executor';
-import { UnboundParameterError } from '../../src/cypher/errors';
+import { CypherRuntimeError, UnboundParameterError } from '../../src/cypher/errors';
 
 /** Helper: create a graph, run a query, return result. */
 async function executeQuery(
@@ -1155,6 +1155,9 @@ describe('Executor', () => {
         graph,
       );
       expect(result.rows).toHaveLength(1);
+      const node = result.rows[0].n as Node;
+      expect(node.type).toBe('Person');
+      expect(node.properties).toEqual({ name: 'Alice' });
       expect(result.summary.nodesCreated).toBe(1);
     });
 
@@ -1208,7 +1211,7 @@ describe('Executor', () => {
       expect(edges).toHaveLength(1);
     });
 
-    it('DELETE node', async () => {
+    it('DELETE node without edges', async () => {
       const node = await graph.addNode('Person', { name: 'Alice' });
 
       const result = await executeQuery(
@@ -1222,6 +1225,24 @@ describe('Executor', () => {
       // Verify node was removed
       const retrieved = await graph.getNode(node.id);
       expect(retrieved).toBeUndefined();
+    });
+
+    it('DELETE node with edges should throw CypherRuntimeError', async () => {
+      const a = await graph.addNode('Person', { name: 'Alice' });
+      const b = await graph.addNode('Person', { name: 'Bob' });
+      await graph.addEdge(a.id, b.id, 'KNOWS');
+
+      await expect(
+        executeQuery('MATCH (n:Person {name: "Alice"}) DELETE n RETURN 1 AS done', {}, graph),
+      ).rejects.toThrow(CypherRuntimeError);
+
+      // Verify node still exists (removal was rejected)
+      const nodeAfter = await graph.getNode(a.id);
+      expect(nodeAfter).toBeDefined();
+
+      // Verify edge still exists
+      const edgesAfter = await graph.getEdges();
+      expect(edgesAfter).toHaveLength(1);
     });
 
     it('DELETE edge', async () => {

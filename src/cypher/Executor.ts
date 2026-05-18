@@ -46,7 +46,7 @@ import {
 import { CypherResult, CypherRow, CypherSummary } from './Result';
 import { Expression } from './ast/AstNode';
 import { CypherRuntimeError, UnboundParameterError, TypeMismatchError } from './errors';
-import { PropertyNotFoundError } from '../errors';
+import { PropertyNotFoundError, NodeHasEdgesError } from '../errors';
 
 // ── Row type ──────────────────────────────────────────────────────
 
@@ -1484,9 +1484,18 @@ export class Executor {
       const entity = row.get(step.variable);
       if (!entity) continue;
       if (step.entityKind === 'node') {
-        await this._graph.removeNode(
-          (entity as Node).id, step.detach, transaction,
-        );
+        try {
+          await this._graph.removeNode(
+            (entity as Node).id, step.detach, transaction,
+          );
+        } catch (err) {
+          if (err instanceof NodeHasEdgesError && !step.detach) {
+            throw new CypherRuntimeError(
+              `Cannot delete node '${(entity as Node).id}': it still has incident edges. Use DETACH DELETE to also remove edges.`,
+            );
+          }
+          throw err;
+        }
         this._nodesDeleted++;
       } else {
         await this._graph.removeEdge((entity as Edge).id, transaction);

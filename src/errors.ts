@@ -67,6 +67,17 @@ export class TraversalLimitExceededError extends GraphError {
 }
 
 /**
+ * Error thrown when attempting to remove a node that still has incident edges without cascade
+ */
+export class NodeHasEdgesError extends GraphError {
+  constructor(nodeId: string, edgeCount: number) {
+    super(`Cannot remove node '${nodeId}': it still has ${edgeCount} incident edge(s). Use cascade=true to also remove them.`);
+    this.name = 'NodeHasEdgesError';
+    Object.setPrototypeOf(this, NodeHasEdgesError.prototype);
+  }
+}
+
+/**
  * Error thrown when GraphData is invalid (malformed JSON or missing required fields)
  */
 export class InvalidGraphDataError extends GraphError {

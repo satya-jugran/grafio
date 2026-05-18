@@ -97,13 +97,14 @@ export function runGraphNodeScenarios(
       await expect(graph.hasEdge(edge2.id)).resolves.toBe(false);
     });
 
-    it('should remove a node with edges', async () => {
+    it('should throw NodeHasEdgesError when removing a connected node without cascade', async () => {
       const alice = await graph.addNode('Person', { name: 'Alice' });
       const bob = await graph.addNode('Person', { name: 'Bob' });
-      const alice_knows_bob = await graph.addEdge(alice.id, bob.id, 'KNOWS');
-      await expect(graph.removeNode(alice.id)).resolves.toBe(true);
-      await expect(graph.hasNode(alice.id)).resolves.toBe(false);
-      await expect(graph.hasEdge(alice_knows_bob.id)).resolves.toBe(true);
+      await graph.addEdge(alice.id, bob.id, 'KNOWS');
+
+      await expect(graph.removeNode(alice.id)).rejects.toThrow();
+      // Node should still exist since removal was rejected
+      await expect(graph.hasNode(alice.id)).resolves.toBe(true);
     });
 
     it('should remove a node without edges (no cascade needed)', async () => {
