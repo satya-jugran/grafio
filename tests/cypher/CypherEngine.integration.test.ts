@@ -603,13 +603,6 @@ describe('CypherEngine Integration', () => {
       ).rejects.toThrow();
     });
 
-    it('throws on unsupported clause', async () => {
-      const engine = new CypherEngine(new Graph());
-      await expect(
-        engine.getQueryPlan('CREATE (n:Person) RETURN n'),
-      ).rejects.toThrow(CypherNotSupportedError);
-    });
-
     it('accepts query parameters', async () => {
       await buildSocialGraph(graph);
       const plan = await engine.getQueryPlan(
@@ -618,23 +611,6 @@ describe('CypherEngine Integration', () => {
         'json',
       );
       expect(JSON.parse(plan)).toHaveProperty('plan.steps');
-    });
-  });
-
-  describe('Validation Gate', () => {
-    it('rejects CREATE clause', async () => {
-      const graph = new Graph();
-      const engine = new CypherEngine(graph);
-      await expect(
-        engine.execute('CREATE (n:Person {name: "Test"}) RETURN n'),
-      ).rejects.toThrow(CypherNotSupportedError);
-    });
-
-    it('rejects DELETE clause', async () => {
-      const engine = new CypherEngine(new Graph());
-      await expect(
-        engine.execute('MATCH (n) DELETE n'),
-      ).rejects.toThrow(CypherNotSupportedError);
     });
   });
 

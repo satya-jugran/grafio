@@ -37,10 +37,16 @@ import {
   AggregateSpec,
   PlanStepExecutionStats,
   PlanExecutionStats,
+  CreateNodeStep,
+  CreateEdgeStep,
+  SetPropertyStep,
+  DeleteEntityStep,
+  RemovePropertyStep,
 } from './plan/QueryPlan';
 import { CypherResult, CypherRow, CypherSummary } from './Result';
 import { Expression } from './ast/AstNode';
 import { CypherRuntimeError, UnboundParameterError, TypeMismatchError } from './errors';
+import { PropertyNotFoundError } from '../errors';
 
 // ── Row type ──────────────────────────────────────────────────────
 
@@ -54,6 +60,14 @@ type Row = Map<string, unknown>;
  */
 export class Executor {
   private readonly _graph: Graph;
+
+  // ── Write counters ──────────────────────────────────────────────
+
+  private _nodesCreated = 0;
+  private _nodesDeleted = 0;
+  private _edgesCreated = 0;
+  private _edgesDeleted = 0;
+  private _propertiesSet = 0;
 
   constructor(graph: Graph) {
     this._graph = graph;
@@ -72,6 +86,13 @@ export class Executor {
     params: Record<string, unknown> = {},
     transaction?: GraphTransaction,
   ): Promise<CypherResult> {
+    // Reset write counters for this query execution
+    this._nodesCreated = 0;
+    this._nodesDeleted = 0;
+    this._edgesCreated = 0;
+    this._edgesDeleted = 0;
+    this._propertiesSet = 0;
+
     const startTime = Date.now();
     const stepStats: PlanStepExecutionStats[] = [];
 
@@ -133,6 +154,16 @@ export class Executor {
         return this._executeLimit(step, rows, params);
       case 'AggregateStep':
         return this._executeAggregate(step, rows, params, transaction);
+      case 'CreateNodeStep':
+        return this._executeCreateNode(step, rows, transaction);
+      case 'CreateEdgeStep':
+        return this._executeCreateEdge(step, rows, transaction);
+      case 'SetPropertyStep':
+        return this._executeSetProperty(step, rows, transaction);
+      case 'DeleteEntityStep':
+        return this._executeDeleteEntity(step, rows, transaction);
+      case 'RemovePropertyStep':
+        return this._executeRemoveProperty(step, rows, transaction);
       default:
         throw new CypherRuntimeError(
           `Unknown plan step kind: ${(step as PlanStep).kind}`,
@@ -1312,6 +1343,192 @@ export class Executor {
     return String(a).localeCompare(String(b));
   }
 
+  // ── CreateNodeStep ──────────────────────────────────────────────
+
+  /**
+   * Execute a {@link CreateNodeStep}: create a new node via
+   * {@code graph.addNode} and bind it to the step's variable in each row.
+   */
+  private async _executeCreateNode(
+    step: CreateNodeStep,
+    rows: Row[],
+    transaction?: GraphTransaction,
+  ): Promise<Row[]> {
+    const result: Row[] = [];
+    for (const row of rows) {
+      const node = await this._graph.addNode(
+        step.labels[0] ?? 'Node',
+        step.properties as Record<string, unknown>,
+        transaction,
+      );
+      const newRow = new Map(row);
+      newRow.set(step.variable, node);
+      result.push(newRow);
+    }
+    this._nodesCreated += result.length;
+    return result;
+  }
+
+  // ── CreateEdgeStep ──────────────────────────────────────────────
+
+  /**
+   * Execute a {@link CreateEdgeStep}: create a new edge between two
+   * already-bound nodes via {@code graph.addEdge} and bind it to the
+   * step's variable.
+   *
+   * @throws {CypherRuntimeError} If the source or target variable is
+   *         not bound in the current row.
+   */
+  private async _executeCreateEdge(
+    step: CreateEdgeStep,
+    rows: Row[],
+    transaction?: GraphTransaction,
+  ): Promise<Row[]> {
+    const result: Row[] = [];
+    for (const row of rows) {
+      const srcNode = row.get(step.source) as Node | undefined;
+      const tgtNode = row.get(step.target) as Node | undefined;
+      if (!srcNode || !tgtNode) {
+        throw new CypherRuntimeError(
+          `Cannot create edge: source or target node not bound`,
+        );
+      }
+      const edge = await this._graph.addEdge(
+        srcNode.id,
+        tgtNode.id,
+        step.types[0] ?? 'RELATIONSHIP',
+        step.properties as Record<string, unknown>,
+        transaction,
+      );
+      const newRow = new Map(row);
+      newRow.set(step.variable, edge);
+      result.push(newRow);
+    }
+    this._edgesCreated += result.length;
+    return result;
+  }
+
+  // ── SetPropertyStep ─────────────────────────────────────────────
+
+  /**
+   * Execute a {@link SetPropertyStep}: update each property on the
+   * target entity.  Attempts {@code updateNodeProperty} /
+   * {@code updateEdgeProperty} first; if the property does not yet
+   * exist ({@link PropertyNotFoundError}) it falls back to
+   * {@code addNodeProperty} / {@code addEdgeProperty}.
+   *
+   * Rows are passed through unchanged (SET is a side-effecting step).
+   */
+  private async _executeSetProperty(
+    step: SetPropertyStep,
+    rows: Row[],
+    transaction?: GraphTransaction,
+  ): Promise<Row[]> {
+    for (const row of rows) {
+      const entity = row.get(step.variable);
+      if (!entity) continue;
+      for (const { key, value } of step.assignments) {
+        try {
+          if (step.entityKind === 'node') {
+            await this._graph.updateNodeProperty(
+              (entity as Node).id, key, value, transaction,
+            );
+          } else {
+            await this._graph.updateEdgeProperty(
+              (entity as Edge).id, key, value, transaction,
+            );
+          }
+        } catch (e: unknown) {
+          // If the property doesn't exist yet, add it instead
+          if (
+            e instanceof PropertyNotFoundError ||
+            (e instanceof Error && e.message.includes('not found'))
+          ) {
+            if (step.entityKind === 'node') {
+              await this._graph.addNodeProperty(
+                (entity as Node).id, key, value, transaction,
+              );
+            } else {
+              await this._graph.addEdgeProperty(
+                (entity as Edge).id, key, value, transaction,
+              );
+            }
+          } else {
+            throw e;
+          }
+        }
+        this._propertiesSet++;
+      }
+    }
+    // SET always passes rows through unchanged
+    return rows;
+  }
+
+  // ── DeleteEntityStep ────────────────────────────────────────────
+
+  /**
+   * Execute a {@link DeleteEntityStep}: remove the target entity from
+   * the graph via {@code graph.removeNode} or {@code graph.removeEdge}.
+   *
+   * For {@code DETACH DELETE} on nodes, the {@code cascade} flag is
+   * passed through so incident edges are also removed.
+   *
+   * After deletion the variable binding is removed from affected rows.
+   */
+  private async _executeDeleteEntity(
+    step: DeleteEntityStep,
+    rows: Row[],
+    transaction?: GraphTransaction,
+  ): Promise<Row[]> {
+    for (const row of rows) {
+      const entity = row.get(step.variable);
+      if (!entity) continue;
+      if (step.entityKind === 'node') {
+        await this._graph.removeNode(
+          (entity as Node).id, step.detach, transaction,
+        );
+        this._nodesDeleted++;
+      } else {
+        await this._graph.removeEdge((entity as Edge).id, transaction);
+        this._edgesDeleted++;
+      }
+      // Remove the variable binding from the row
+      row.delete(step.variable);
+    }
+    return rows;
+  }
+
+  // ── RemovePropertyStep ──────────────────────────────────────────
+
+  /**
+   * Execute a {@link RemovePropertyStep}: delete a single property from
+   * the target entity via {@code graph.deleteNodeProperty} /
+   * {@code graph.deleteEdgeProperty}.
+   *
+   * Rows are passed through unchanged.
+   */
+  private async _executeRemoveProperty(
+    step: RemovePropertyStep,
+    rows: Row[],
+    transaction?: GraphTransaction,
+  ): Promise<Row[]> {
+    for (const row of rows) {
+      const entity = row.get(step.variable);
+      if (!entity) continue;
+      if (step.entityKind === 'node') {
+        await this._graph.deleteNodeProperty(
+          (entity as Node).id, step.property, transaction,
+        );
+      } else {
+        await this._graph.deleteEdgeProperty(
+          (entity as Edge).id, step.property, transaction,
+        );
+      }
+      this._propertiesSet++;
+    }
+    return rows;
+  }
+
   // ── Result builder ──────────────────────────────────────────────
 
   private _buildResult(
@@ -1337,11 +1554,11 @@ export class Executor {
 
     const summary: CypherSummary = {
       queryTimeMs: stats.totalTimeMs,
-      nodesCreated: 0,
-      nodesDeleted: 0,
-      edgesCreated: 0,
-      edgesDeleted: 0,
-      propertiesSet: 0,
+      nodesCreated: this._nodesCreated,
+      nodesDeleted: this._nodesDeleted,
+      edgesCreated: this._edgesCreated,
+      edgesDeleted: this._edgesDeleted,
+      propertiesSet: this._propertiesSet,
       planExecutionStats: stats,
     };
 

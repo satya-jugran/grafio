@@ -61,12 +61,7 @@ export interface CypherEngineOptions {
  */
 const GATED_TOKENS: ReadonlySet<TokenKind> = new Set([
   // Write clauses
-  TokenKind.CREATE,
   TokenKind.MERGE,
-  TokenKind.SET,
-  TokenKind.REMOVE,
-  TokenKind.DELETE,
-  TokenKind.DETACH,
   // Other unsupported clauses
   TokenKind.OPTIONAL,
   TokenKind.WITH,

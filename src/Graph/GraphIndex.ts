@@ -4,7 +4,6 @@ import {
   NodeAlreadyExistsError,
   EdgeAlreadyExistsError,
   NodeNotFoundError,
-  NodeHasEdgesError,
   InvalidPropertyError,
 } from '../errors';
 import { isFlatRecord, isPrimitive } from '../utils';
@@ -163,11 +162,6 @@ export class GraphIndex {
       if (cascade) {
         for (const edge of [...outgoing, ...incoming]) {
           await this._store.deleteEdge(edge.id, handle);
-        }
-      } else {
-        const incidentCount = outgoing.length + incoming.length;
-        if (incidentCount > 0) {
-          throw new NodeHasEdgesError(id, incidentCount);
         }
       }
 

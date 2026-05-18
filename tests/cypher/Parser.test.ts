@@ -322,8 +322,13 @@ describe('Parser', () => {
       expect(() => parse('')).toThrow(CypherSyntaxError);
     });
 
-    it('throws on missing MATCH', () => {
-      expect(() => parse('RETURN n')).toThrow(CypherSyntaxError);
+    it('parses standalone RETURN (no MATCH required)', () => {
+      const ast = parse('RETURN n');
+      expect(ast.kind).toBe('Query');
+      expect(ast.match.patterns).toHaveLength(0);
+      expect(ast.return.kind).toBe('Return');
+      expect(ast.return.items).toHaveLength(1);
+      expect(ast.return.items[0].expression.kind).toBe('Identifier');
     });
 
     it('throws on unclosed paren', () => {
@@ -464,6 +469,141 @@ describe('Parser', () => {
       expect(inner.args).toHaveLength(1);
       expect(inner.args[0].kind).toBe('Identifier');
       expect(inner.args[0].name).toBe('n');
+    });
+  });
+
+  // ── Write clause parsing ───────────────────────────────────────
+  describe('write clause parsing', () => {
+    it('parses CREATE node', () => {
+      const ast = parse("CREATE (n:Person {name: 'Alice'}) RETURN n");
+
+      expect(ast.create).toBeDefined();
+      expect(ast.create!.patterns).toHaveLength(1);
+
+      const segments = getSegments(ast.create!.patterns[0]);
+      expect(segments).toHaveLength(1);
+      expect(segments[0].kind).toBe('NodePattern');
+
+      const node = segments[0] as any;
+      expect(node.variable).toBe('n');
+      expect(node.labels).toEqual(['Person']);
+      expect(node.properties).toEqual({ name: 'Alice' });
+
+      expect(ast.return.kind).toBe('Return');
+      expect(ast.return.items[0].expression.kind).toBe('Identifier');
+    });
+
+    it('parses CREATE edge between matched nodes', () => {
+      const ast = parse(
+        "MATCH (a:Person) CREATE (a)-[:KNOWS]->(b:Person {name: 'Bob'}) RETURN b",
+      );
+
+      expect(ast.match.patterns).toHaveLength(1);
+
+      expect(ast.create).toBeDefined();
+      expect(ast.create!.patterns).toHaveLength(1);
+
+      const createSegs = getSegments(ast.create!.patterns[0]);
+      expect(createSegs).toHaveLength(3);
+
+      expect(createSegs[1].kind).toBe('EdgePattern');
+      expect((createSegs[1] as any).types).toEqual(['KNOWS']);
+      expect((createSegs[1] as any).direction).toBe('out');
+
+      const targetNode = createSegs[2] as any;
+      expect(targetNode.labels).toEqual(['Person']);
+      expect(targetNode.properties).toEqual({ name: 'Bob' });
+
+      expect(ast.return.kind).toBe('Return');
+    });
+
+    it('parses SET property', () => {
+      const ast = parse('MATCH (n:Person) SET n.age = 30 RETURN n');
+
+      expect(ast.set).toBeDefined();
+      expect(ast.set!.kind).toBe('Set');
+      expect(ast.set!.items).toHaveLength(1);
+
+      const item = ast.set!.items[0];
+      expect(item.kind).toBe('SetItem');
+      expect((item.variable as any).kind).toBe('Identifier');
+      expect((item.variable as any).name).toBe('n');
+      expect(item.property).toBe('age');
+      expect((item.value as any).kind).toBe('Literal');
+      expect((item.value as any).value).toBe(30);
+
+      expect(ast.return.kind).toBe('Return');
+    });
+
+    it('parses DELETE node', () => {
+      const ast = parse('MATCH (n:Person) DELETE n RETURN 1');
+
+      expect(ast.delete).toBeDefined();
+      expect(ast.delete!.kind).toBe('Delete');
+      expect(ast.delete!.detach).toBe(false);
+      expect(ast.delete!.variables).toEqual(['n']);
+      expect(ast.return.kind).toBe('Return');
+    });
+
+    it('parses DETACH DELETE', () => {
+      const ast = parse('MATCH (n:Person) DETACH DELETE n RETURN 1');
+
+      expect(ast.delete).toBeDefined();
+      expect(ast.delete!.kind).toBe('Delete');
+      expect(ast.delete!.detach).toBe(true);
+      expect(ast.delete!.variables).toEqual(['n']);
+      expect(ast.return.kind).toBe('Return');
+    });
+
+    it('parses REMOVE property', () => {
+      const ast = parse('MATCH (n:Person) REMOVE n.age RETURN n');
+
+      expect(ast.remove).toBeDefined();
+      expect(ast.remove!.kind).toBe('Remove');
+      expect(ast.remove!.items).toHaveLength(1);
+
+      const item = ast.remove!.items[0];
+      expect(item.kind).toBe('RemoveItem');
+      expect(item.variable.kind).toBe('Identifier');
+      expect(item.variable.name).toBe('n');
+      expect(item.property).toBe('age');
+
+      expect(ast.return.kind).toBe('Return');
+    });
+
+    it('parses combined read-write query', () => {
+      const ast = parse(
+        'MATCH (a), (b) CREATE (a)-[:FRIEND]->(b) SET a.updated = true RETURN a, b',
+      );
+
+      expect(ast.match.patterns).toHaveLength(2);
+      expect(ast.create).toBeDefined();
+      expect(ast.set).toBeDefined();
+      expect(ast.set!.items[0].property).toBe('updated');
+      expect((ast.set!.items[0].value as any).value).toBe(true);
+      expect(ast.return.items).toHaveLength(2);
+    });
+
+    it('parses standalone CREATE (no MATCH)', () => {
+      const ast = parse('CREATE (n) RETURN n');
+
+      expect(ast.match.patterns).toHaveLength(0);
+      expect(ast.create).toBeDefined();
+      expect(ast.create!.patterns).toHaveLength(1);
+
+      const segs = getSegments(ast.create!.patterns[0]);
+      expect(segs).toHaveLength(1);
+      expect(segs[0].kind).toBe('NodePattern');
+
+      expect(ast.return.items).toHaveLength(1);
+    });
+
+    it('throws on DELETE with non-variable (integer)', () => {
+      expect(() => parse('DELETE 42')).toThrow(CypherSyntaxError);
+    });
+
+    it('throws on SET with missing equals', () => {
+      expect(() => parse('MATCH (n) SET n.prop')).toThrow(CypherSyntaxError);
     });
   });
 

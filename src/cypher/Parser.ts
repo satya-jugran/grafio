@@ -6,15 +6,22 @@
  *
  * ### Grammar (simplified)
  * ```
- * query         → matchClause [whereClause] returnClause [orderByClause] [skipClause] [limitClause]
- * matchClause   → MATCH patternPath (',' patternPath)*
- * whereClause   → WHERE expression
- * returnClause  → RETURN [DISTINCT] returnItem (',' returnItem)*
- * returnItem    → expression [AS IDENT]
- * orderByClause → ORDER BY orderByItem (',' orderByItem)*
- * orderByItem   → expression [ASC | DESC]
- * skipClause    → SKIP expression
- * limitClause   → LIMIT expression
+ * query          → matchClause? [createClause] [setClause] [deleteClause] [removeClause]
+ *                  [whereClause] returnClause [orderByClause] [skipClause] [limitClause]
+ * matchClause    → MATCH patternPath (',' patternPath)*
+ * createClause   → CREATE patternPath (',' patternPath)*
+ * setClause      → SET setItem (',' setItem)*
+ * setItem        → IDENT '.' IDENT '=' expression
+ * deleteClause   → [DETACH] DELETE IDENT (',' IDENT)*
+ * removeClause   → REMOVE removeItem (',' removeItem)*
+ * removeItem     → IDENT '.' IDENT
+ * whereClause    → WHERE expression
+ * returnClause   → RETURN [DISTINCT] returnItem (',' returnItem)*
+ * returnItem     → expression [AS IDENT]
+ * orderByClause  → ORDER BY orderByItem (',' orderByItem)*
+ * orderByItem    → expression [ASC | DESC]
+ * skipClause     → SKIP expression
+ * limitClause    → LIMIT expression
  * ```
  *
  * ### Operator precedence (lowest → highest)
@@ -43,6 +50,12 @@ import { CypherSyntaxError } from './errors';
 import {
   QueryAst,
   MatchClause,
+  CreateClause,
+  SetClause,
+  SetItem,
+  DeleteClause,
+  RemoveClause,
+  RemoveItem,
   WhereClause,
   HavingClause,
   ReturnClause,
@@ -133,7 +146,17 @@ export class Parser {
    * @throws {CypherSyntaxError} on any syntax violation.
    */
   public parse(): QueryAst {
-    const match = this._parseMatchClause();
+    // MATCH is now optional — CREATE (n) RETURN n is valid standalone.
+    const match = this._check(TokenKind.MATCH) ? this._parseMatchClause() : undefined;
+
+    // Write clauses (each optional, in positional order).
+    const create = this._check(TokenKind.CREATE) ? this._parseCreateClause() : undefined;
+    const set = this._check(TokenKind.SET) ? this._parseSetClause() : undefined;
+    const del = this._check(TokenKind.DELETE) || this._check(TokenKind.DETACH)
+      ? this._parseDeleteClause()
+      : undefined;
+    const remove = this._check(TokenKind.REMOVE) ? this._parseRemoveClause() : undefined;
+
     const where = this._check(TokenKind.WHERE) ? this._parseWhereClause() : undefined;
     const ret = this._parseReturnClause();
     const having = this._check(TokenKind.HAVING) ? this._parseHavingClause() : undefined;
@@ -153,8 +176,12 @@ export class Parser {
 
     return {
       kind: 'Query',
-      match,
+      match: match ?? { kind: 'Match', patterns: [] },
       where,
+      create,
+      set,
+      delete: del,
+      remove,
       return: ret,
       having,
       orderBy,
@@ -265,6 +292,75 @@ export class Parser {
     this._consume(TokenKind.LIMIT, "Expected 'LIMIT'");
     const expression = this._parseExpression();
     return { kind: 'Limit', expression };
+  }
+
+  /** CREATE patternPath (',' patternPath)* */
+  private _parseCreateClause(): CreateClause {
+    this._consume(TokenKind.CREATE, "Expected 'CREATE'");
+    const patterns: MatchPattern[] = [this._parsePatternPath()];
+    while (this._check(TokenKind.COMMA)) {
+      this._advance();
+      patterns.push(this._parsePatternPath());
+    }
+    return { kind: 'Create', patterns };
+  }
+
+  /** DETACH? DELETE IDENT (',' IDENT)* */
+  private _parseDeleteClause(): DeleteClause {
+    let detach = false;
+    if (this._check(TokenKind.DETACH)) {
+      detach = true;
+      this._advance();
+    }
+    this._consume(TokenKind.DELETE, "Expected 'DELETE'");
+    const variables: string[] = [this._consume(TokenKind.IDENT, 'Expected variable name').value];
+    while (this._check(TokenKind.COMMA)) {
+      this._advance();
+      variables.push(this._consume(TokenKind.IDENT, 'Expected variable name').value);
+    }
+    return { kind: 'Delete', detach, variables };
+  }
+
+  /** SET setItem (',' setItem)* */
+  private _parseSetClause(): SetClause {
+    this._consume(TokenKind.SET, "Expected 'SET'");
+    const items: SetItem[] = [this._parseSetItem()];
+    while (this._check(TokenKind.COMMA)) {
+      this._advance();
+      items.push(this._parseSetItem());
+    }
+    return { kind: 'Set', items };
+  }
+
+  /** SET item: IDENT '.' IDENT '=' expression */
+  private _parseSetItem(): SetItem {
+    const varToken = this._consume(TokenKind.IDENT, 'Expected variable name in SET');
+    const variable: IdentifierExpr = { kind: 'Identifier', name: varToken.value };
+    this._consume(TokenKind.DOT, "Expected '.' in SET property assignment");
+    const propToken = this._consume(TokenKind.IDENT, 'Expected property name');
+    this._consume(TokenKind.EQ, "Expected '=' in SET assignment");
+    const value = this._parseExpression();
+    return { kind: 'SetItem', variable, property: propToken.value, value };
+  }
+
+  /** REMOVE removeItem (',' removeItem)* */
+  private _parseRemoveClause(): RemoveClause {
+    this._consume(TokenKind.REMOVE, "Expected 'REMOVE'");
+    const items: RemoveItem[] = [this._parseRemoveItem()];
+    while (this._check(TokenKind.COMMA)) {
+      this._advance();
+      items.push(this._parseRemoveItem());
+    }
+    return { kind: 'Remove', items };
+  }
+
+  /** REMOVE item: IDENT '.' IDENT */
+  private _parseRemoveItem(): RemoveItem {
+    const varToken = this._consume(TokenKind.IDENT, 'Expected variable name in REMOVE');
+    const variable: IdentifierExpr = { kind: 'Identifier', name: varToken.value };
+    this._consume(TokenKind.DOT, "Expected '.' in REMOVE property reference");
+    const propToken = this._consume(TokenKind.IDENT, 'Expected property name');
+    return { kind: 'RemoveItem', variable, property: propToken.value };
   }
 
   // ── Pattern parsers ─────────────────────────────────────────────
