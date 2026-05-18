@@ -2,6 +2,7 @@
 src/
 tests/
 plans/
+docs/
 
 # TypeScript files (keep declaration files)
 *.ts
@@ -28,6 +29,7 @@ LICENSE
 .git/
 .gitignore
 .npmignore
+.github/
 
 # Coverage reports
 coverage/
