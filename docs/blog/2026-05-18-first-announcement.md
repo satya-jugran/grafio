@@ -26,14 +26,24 @@ Grafio is a lightweight, embeddable graph database that brings the power of grap
 ## Getting Started
 
 ```typescript
-import { Graph } from 'grafio';
+import { CypherEngine } from 'grafio';
+import { InMemoryGraphFactory } from 'grafio/storage';
 
-const graph = new Graph();
-graph.addNode({ id: '1', label: 'Person', properties: { name: 'Alice' } });
-graph.addNode({ id: '2', label: 'Person', properties: { name: 'Bob' } });
-graph.addEdge({ from: '1', to: '2', label: 'KNOWS' });
+// Create graph via factory
+const factory = new InMemoryGraphFactory();
+const graph = factory.forGraph('social-network');
+const cypher = new CypherEngine(graph);
 
-const results = graph.traverse('1').relationships('KNOWS').depth(1..3).execute();
+// Add social network data
+graph.addNode({ id: 'alice', label: 'Person', properties: { name: 'Alice', age: 30 } });
+graph.addNode({ id: 'bob', label: 'Person', properties: { name: 'Bob', age: 25 } });
+graph.addNode({ id: 'charlie', label: 'Person', properties: { name: 'Charlie', age: 35 } });
+graph.addEdge({ from: 'alice', to: 'bob', label: 'KNOWS', properties: { since: 2020 } });
+graph.addEdge({ from: 'bob', to: 'charlie', label: 'KNOWS', properties: { since: 2019 } });
+
+// Query with Cypher
+const friends = cypher.execute('MATCH (p:Person)-[:KNOWS]->(friend:Person) RETURN p.name as name, friend.name as friend');
+// Returns: [{"name":"Alice","friend":"Bob"},{"name":"Bob","friend":"Charlie"}]
 ```
 
 ## What's Next?

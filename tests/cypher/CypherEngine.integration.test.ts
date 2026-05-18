@@ -133,7 +133,7 @@ describe('CypherEngine Integration', () => {
 
     it('follows variable-length [*1..2] KNOWS traversal', async () => {
       const result = await engine.execute(
-        "MATCH (p:Person)-[*1..2]->(f:Person) WHERE p.name = 'Alice' RETURN f.name AS friend ORDER BY f.name ASC",
+        "MATCH (p:Person)-[*1..2]->(f:Person) WHERE p.name = 'Alice' RETURN p.name AS name, f.name AS friend ORDER BY f.name ASC",
       );
       const friends = result.rows.map((r) => r.friend);
       // 1-hop: Bob, Charlie, David.  2-hop: David(via Bob), Eve(via Charlie), Frank(via David)
