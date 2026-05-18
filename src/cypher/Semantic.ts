@@ -849,29 +849,19 @@ export class Semantic {
 
   /**
    * Check that variables deleted in the DELETE clause are not subsequently
-   * referenced in RETURN or SET within the same query.
+   * referenced in SET within the same query.
    *
-   * openCypher semantics: DELETE removes the variable binding from the row
-   * buffer, so later references would be invalid.
+   * openCypher semantics: RETURN after DELETE is valid — the row is emitted
+   * before the variable binding is removed from the row buffer.
+   * SET after DELETE is rejected because writing to a deleted variable
+   * makes no sense.
    *
-   * @throws {CypherSemanticError} if a deleted variable appears in RETURN or SET.
+   * @throws {CypherSemanticError} if a deleted variable appears in SET.
    */
   private _checkDeleteSafety(ast: QueryAst): QueryAst {
     if (!ast.delete) return ast;
 
     const deletedVars = new Set(ast.delete.variables);
-
-    // Check RETURN clause for references to deleted variables.
-    if (ast.return) {
-      for (const item of ast.return.items) {
-        if (this._expressionReferencesAny(item.expression, deletedVars)) {
-          throw new CypherSemanticError(
-            `Cannot use deleted variable(s) in RETURN clause. ` +
-            `Variables deleted: ${[...deletedVars].join(', ')}`,
-          );
-        }
-      }
-    }
 
     // Check SET clause — writing to a deleted variable makes no sense.
     if (ast.set) {

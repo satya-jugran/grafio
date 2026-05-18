@@ -1163,13 +1163,15 @@ describe('Executor', () => {
 
     it('CREATE single node and verify via graph API', async () => {
       const result = await executeQuery(
-        "CREATE (n:Person {name: 'Alice'}) RETURN 1 AS done",
+        "CREATE (n:Person {name: 'Alice'}) RETURN n",
         {},
         graph,
       );
 
       expect(result.rows).toHaveLength(1);
-      expect(result.rows[0].done).toBe(1);
+      const node = result.rows[0].n as Node;
+      expect(node.type).toBe('Person');
+      expect(node.properties).toEqual({ name: 'Alice' });
       expect(result.summary.nodesCreated).toBe(1);
 
       // Verify node was persisted to the graph
@@ -1180,13 +1182,13 @@ describe('Executor', () => {
     });
 
     it('CREATE node with multiple properties', async () => {
-      await executeQuery(
-        "CREATE (n:Person {name: 'Bob', age: 30}) RETURN 1 AS done",
+      const result = await executeQuery(
+        "CREATE (n:Person {name: 'Bob', age: 30}) RETURN n",
         {},
         graph,
       );
 
-      const nodes = await graph.getNodes();
+      const nodes = result.rows.map((r) => r.n as Node);
       expect(nodes).toHaveLength(1);
       expect(nodes[0].type).toBe('Person');
       expect(nodes[0].properties.name).toBe('Bob');
@@ -1215,10 +1217,13 @@ describe('Executor', () => {
       const node = await graph.addNode('Person', { name: 'Alice' });
 
       const result = await executeQuery(
-        'MATCH (n:Person) DELETE n RETURN 1 AS done',
+        'MATCH (n:Person) DELETE n RETURN n',
         {},
         graph,
       );
+      const deletedNode = result.rows[0].n as Node;
+      expect(deletedNode.type).toBe('Person');
+      expect(deletedNode.properties).toEqual({ name: 'Alice' });
 
       expect(result.summary.nodesDeleted).toBeGreaterThanOrEqual(1);
 
@@ -1233,7 +1238,7 @@ describe('Executor', () => {
       await graph.addEdge(a.id, b.id, 'KNOWS');
 
       await expect(
-        executeQuery('MATCH (n:Person {name: "Alice"}) DELETE n RETURN 1 AS done', {}, graph),
+        executeQuery('MATCH (n:Person {name: "Alice"}) DELETE n RETURN n', {}, graph),
       ).rejects.toThrow(CypherRuntimeError);
 
       // Verify node still exists (removal was rejected)
@@ -1251,7 +1256,7 @@ describe('Executor', () => {
       const edge = await graph.addEdge(a.id, b.id, 'KNOWS');
 
       const result = await executeQuery(
-        'MATCH (:Person)-[e:KNOWS]->(:Person) DELETE e RETURN 1 AS done',
+        'MATCH (:Person)-[e:KNOWS]->(:Person) DELETE e RETURN e',
         {},
         graph,
       );
@@ -1269,7 +1274,7 @@ describe('Executor', () => {
       await graph.addEdge(a.id, b.id, 'KNOWS');
 
       const result = await executeQuery(
-        'MATCH (n:Person) DETACH DELETE n RETURN 1 AS done',
+        'MATCH (n:Person) DETACH DELETE n RETURN n',
         {},
         graph,
       );
@@ -1318,7 +1323,7 @@ describe('Executor', () => {
 
     it('write counters reflect operations on fresh graph', async () => {
       const result = await executeQuery(
-        "CREATE (n:Person {name: 'Alice'}) RETURN 1 AS done",
+        "CREATE (n:Person {name: 'Alice'}) RETURN n",
         {},
         graph,
       );

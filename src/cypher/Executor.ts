@@ -1473,7 +1473,8 @@ export class Executor {
    * For {@code DETACH DELETE} on nodes, the {@code cascade} flag is
    * passed through so incident edges are also removed.
    *
-   * After deletion the variable binding is removed from affected rows.
+   * The variable binding is kept in the row so downstream clauses
+   * (e.g. RETURN) can still reference the deleted entity.
    */
   private async _executeDeleteEntity(
     step: DeleteEntityStep,
@@ -1501,8 +1502,6 @@ export class Executor {
         await this._graph.removeEdge((entity as Edge).id, transaction);
         this._edgesDeleted++;
       }
-      // Remove the variable binding from the row
-      row.delete(step.variable);
     }
     return rows;
   }
