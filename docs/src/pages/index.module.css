@@ -114,3 +114,140 @@
     padding: 2rem 1rem;
   }
 }
+
+.codeSection {
+  background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
+  padding: 4rem 2rem;
+  border-top: 1px solid #e5e7eb;
+}
+
+[data-theme='dark'] .codeSection {
+  background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
+  border-top-color: #334155;
+}
+
+.codeSectionInner {
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.codeSectionTitle {
+  text-align: center;
+  font-size: 2rem;
+  font-weight: 700;
+  color: #1a1a2e;
+  margin-bottom: 0.5rem;
+}
+
+[data-theme='dark'] .codeSectionTitle {
+  color: #f1f5f9;
+}
+
+.codeSectionSubtitle {
+  text-align: center;
+  font-size: 1.1rem;
+  color: #64748b;
+  margin-bottom: 2rem;
+}
+
+.codeWindow {
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid #3c3c3c;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+[data-theme='dark'] .codeWindow {
+  border-color: #3c3c3c;
+}
+
+[data-theme='light'] .codeWindow {
+  border-color: #d4d4d4;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.codeWindowHeader {
+  background: #323233;
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+[data-theme='light'] .codeWindowHeader {
+  background: #f3f3f3;
+  border-bottom: 1px solid #d4d4d4;
+}
+
+[data-theme='dark'] .codeWindowHeader {
+  background: #1e1e1e;
+  border-bottom: 1px solid #3c3c3c;
+}
+
+.windowButton {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+}
+
+.windowButtonRed {
+  background: #ff5f56;
+}
+
+.windowButtonYellow {
+  background: #ffbd2e;
+}
+
+.windowButtonGreen {
+  background: #27c93f;
+}
+
+.codeWindowBody {
+  background: #1e1e1e;
+  margin: 0;
+  padding: 0;
+}
+
+[data-theme='light'] .codeWindowBody {
+  background: #ffffff;
+}
+
+[data-theme='dark'] .codeWindowBody {
+  background: #1e1e1e;
+}
+
+.codeWindowBody * {
+  margin-bottom: 0 !important;
+  --ifm-leading: 0 !important;
+}
+
+.codeWindowFooter {
+  background: #323233;
+  padding: 4px 12px;
+  font-size: 0.75rem;
+  color: #858585;
+  display: flex;
+  align-items: center;
+}
+
+[data-theme='light'] .codeWindowFooter {
+  background: #f3f3f3;
+  border-top: 1px solid #d4d4d4;
+  color: #6e6e6e;
+}
+
+[data-theme='dark'] .codeWindowFooter {
+  background: #1e1e1e;
+  border-top: 1px solid #3c3c3c;
+}
+
+.codeWindowFooter span {
+  margin-left: auto;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+@media screen and (max-width: 768px) {
+  .codeSectionTitle {
+    font-size: 1.5rem;
+  }
+}

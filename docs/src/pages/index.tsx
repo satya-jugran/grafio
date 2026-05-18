@@ -2,6 +2,9 @@ import Link from '@docusaurus/Link';
 import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
 import Layout from '@theme/Layout';
 import Heading from '@theme/Heading';
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+import CodeBlock from '@theme/CodeBlock';
 
 import styles from './index.module.css';
 
@@ -81,6 +84,132 @@ function HomepageFeatures() {
   );
 }
 
+function CodeExamples() {
+  const socialCode = `import { CypherEngine } from 'grafio';
+import { InMemoryGraphFactory } from 'grafio/storage';
+
+const graph = new InMemoryGraphFactory().forGraph('social');
+const cypher = new CypherEngine(graph);
+
+graph.addNode({ id: 'alice', label: 'Person', properties: { name: 'Alice' } });
+graph.addNode({ id: 'bob', label: 'Person', properties: { name: 'Bob' } });
+graph.addNode({ id: 'charlie', label: 'Person', properties: { name: 'Charlie' } });
+graph.addEdge({ from: 'alice', to: 'bob', label: 'KNOWS' });
+graph.addEdge({ from: 'bob', to: 'charlie', label: 'KNOWS' });
+
+const suggestions = cypher.execute(\`
+  MATCH (p:Person)-[:KNOWS]->(f)-[:KNOWS]->(s)
+  WHERE p.name = 'Alice' AND p <> s
+  RETURN s.name as suggested
+\`);
+// Result: [{ suggested: 'Charlie' }]`;
+
+  const ecommerceCode = `import { CypherEngine } from 'grafio';
+import { InMemoryGraphFactory } from 'grafio/storage';
+
+const graph = new InMemoryGraphFactory().forGraph('shop');
+const cypher = new CypherEngine(graph);
+
+graph.addNode({ id: 'laptop', label: 'Product', properties: { name: 'Laptop', price: 999 } });
+graph.addNode({ id: 'mouse', label: 'Product', properties: { name: 'Mouse', price: 29 } });
+graph.addNode({ id: 'john', label: 'Customer', properties: { name: 'John' } });
+graph.addNode({ id: 'order1', label: 'Order', properties: { total: 1028 } });
+
+graph.addEdge({ from: 'john', to: 'order1', label: 'PLACED' });
+graph.addEdge({ from: 'order1', to: 'laptop', label: 'CONTAINS' });
+graph.addEdge({ from: 'order1', to: 'mouse', label: 'CONTAINS' });
+
+const orders = cypher.execute(\`
+  MATCH (c:Customer)-[:PLACED]->(o:Order)-[:CONTAINS]->(p:Product)
+  RETURN c.name as customer, collect(p.name) as products
+\`);
+// Result: [{ customer: 'John', products: ['Laptop', 'Mouse'] }]`;
+
+  const healthcareCode = `import { CypherEngine } from 'grafio';
+import { InMemoryGraphFactory } from 'grafio/storage';
+
+const graph = new InMemoryGraphFactory().forGraph('clinic');
+const cypher = new CypherEngine(graph);
+
+graph.addNode({ id: 'john', label: 'Patient', properties: { name: 'John' } });
+graph.addNode({ id: 'emily', label: 'Patient', properties: { name: 'Emily' } });
+graph.addNode({ id: 'dr_chen', label: 'Doctor', properties: { name: 'Dr. Chen' } });
+graph.addNode({ id: 'hbp', label: 'Condition', properties: { name: 'Hypertension' } });
+graph.addNode({ id: 'migraine', label: 'Condition', properties: { name: 'Migraine' } });
+
+graph.addEdge({ from: 'john', to: 'dr_chen', label: 'SEES' });
+graph.addEdge({ from: 'john', to: 'hbp', label: 'DIAGNOSED_WITH' });
+graph.addEdge({ from: 'emily', to: 'dr_chen', label: 'SEES' });
+graph.addEdge({ from: 'emily', to: 'migraine', label: 'DIAGNOSED_WITH' });
+
+const patients = cypher.execute(\`
+  MATCH (doc)-[:SEES]-(p:Patient)-[:DIAGNOSED_WITH]-(c)
+  RETURN doc.name as doctor, p.name as patient, c.name as condition
+\`);
+// Result: [{ doctor: 'Dr. Chen', patient: 'John', condition: 'Hypertension' }, ...]`;
+
+  return (
+    <section className={styles.codeSection}>
+      <div className={styles.codeSectionInner}>
+        <Heading as="h2" className={styles.codeSectionTitle}>
+          See Grafio in Action
+        </Heading>
+        <p className={styles.codeSectionSubtitle}>
+          Real-world use cases powered by Cypher queries
+        </p>
+        
+        <Tabs groupId="use-case">
+          <TabItem value="social" label="Social Network">
+            <div className={styles.codeWindow}>
+              <div className={styles.codeWindowHeader}>
+                <div className={`${styles.windowButton} ${styles.windowButtonRed}`} />
+                <div className={`${styles.windowButton} ${styles.windowButtonYellow}`} />
+                <div className={`${styles.windowButton} ${styles.windowButtonGreen}`} />
+              </div>
+              <div className={styles.codeWindowBody}>
+                <CodeBlock language="typescript">{socialCode}</CodeBlock>
+              </div>
+              <div className={styles.codeWindowFooter}>
+                <span>TypeScript</span>
+              </div>
+            </div>
+          </TabItem>
+          <TabItem value="ecommerce" label="E-Commerce">
+            <div className={styles.codeWindow}>
+              <div className={styles.codeWindowHeader}>
+                <div className={`${styles.windowButton} ${styles.windowButtonRed}`} />
+                <div className={`${styles.windowButton} ${styles.windowButtonYellow}`} />
+                <div className={`${styles.windowButton} ${styles.windowButtonGreen}`} />
+              </div>
+              <div className={styles.codeWindowBody}>
+                <CodeBlock language="typescript">{ecommerceCode}</CodeBlock>
+              </div>
+              <div className={styles.codeWindowFooter}>
+                <span>TypeScript</span>
+              </div>
+            </div>
+          </TabItem>
+          <TabItem value="healthcare" label="Healthcare">
+            <div className={styles.codeWindow}>
+              <div className={styles.codeWindowHeader}>
+                <div className={`${styles.windowButton} ${styles.windowButtonRed}`} />
+                <div className={`${styles.windowButton} ${styles.windowButtonYellow}`} />
+                <div className={`${styles.windowButton} ${styles.windowButtonGreen}`} />
+              </div>
+              <div className={styles.codeWindowBody}>
+                <CodeBlock language="typescript">{healthcareCode}</CodeBlock>
+              </div>
+              <div className={styles.codeWindowFooter}>
+                <span>TypeScript</span>
+              </div>
+            </div>
+          </TabItem>
+        </Tabs>
+      </div>
+    </section>
+  );
+}
+
 export default function Home(): JSX.Element {
   const { siteConfig } = useDocusaurusContext();
   return (
@@ -90,6 +219,7 @@ export default function Home(): JSX.Element {
       <HomepageHeader />
       <main>
         <HomepageFeatures />
+        <CodeExamples />
       </main>
     </Layout>
   );
