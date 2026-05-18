@@ -31,7 +31,16 @@ const config: Config = {
           editUrl: 'https://github.com/satya-jugran/grafio/edit/main/docs/',
           showLastUpdateTime: true,
         },
-        blog: false,
+        blog: {
+          path: './blog',
+          authorsMapPath: './authors.yml',
+          blogTitle: 'Grafio Blog',
+          blogDescription: 'Updates, news, and insights about Grafio',
+          blogSidebarCount: 5,
+          blogSidebarTitle: 'All our posts',
+          routeBasePath: 'blog',
+          postsPerPage: 10,
+        },
         theme: {
           customCss: './src/css/custom.css',
         },
@@ -73,6 +82,17 @@ const config: Config = {
           sidebarId: 'tutorials',
           position: 'left',
           label: 'Tutorials',
+        },
+        {
+          to: 'blog',
+          label: 'Blog', 
+          position: 'left'
+        },
+        {
+          type: 'docSidebar',
+          sidebarId: 'contribute',
+          position: 'right',
+          label: 'Contribute',
         },
         {
           href: 'https://www.npmjs.com/package/grafio',

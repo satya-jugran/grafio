@@ -119,6 +119,18 @@ const sidebars: SidebarsConfig = {
       ],
     },
   ],
+
+  contribute: [
+    {
+      type: 'category',
+      label: 'Contribute',
+      collapsed: true,
+      items: [
+        'contribute/introduction',
+      ],
+    },
+  ],
+  
 };
 
 export default sidebars;

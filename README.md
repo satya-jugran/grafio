@@ -2,7 +2,7 @@
 
 High-performance graph database with **native Cypher support** and **pluggable storage**.
 
-📖 **Full documentation**: [https://satya-jugran.github.io/grafio](https://satya-jugran.github.io/grafio)
+**Full documentation**: [https://satya-jugran.github.io/grafio](https://satya-jugran.github.io/grafio)
 
 > **MongoDB Storage**: For MongoDB-backed persistence, see the separate [`grafio-mongo`](https://www.npmjs.com/package/grafio-mongo) package.
 

@@ -42,6 +42,66 @@ export function buildCommonScenariosCypher(
   const isLarge = nodeCount >= (50_000 * factor);
 
   return [
+    // ── Write: Graph Construction ─────────────────────────────────────────
+    // Only meaningful for in-memory (fast enough to benchmark construction)
+    {
+      category: 'Write',
+      name: 'Graph Construction',
+      setup: () => new Graph(),
+      run: async (_graph: Graph, meta: GraphMeta) => {
+        const g = new Graph();
+        const ids: string[] = [];
+        const batch = Math.min(500 * factor, Math.floor(meta.nodeCount / 20));
+        for (let i = 0; i < batch; i++) {
+          const n = await g.addNode('Person', { index: i, label: `node-${i}` });
+          ids.push(n.id);
+        }
+        const edgeBatch = Math.min(batch * 2, ids.length - 1);
+        for (let i = 0; i < edgeBatch; i++) {
+          await g.addEdge(ids[i], ids[(i + 1) % ids.length], 'KNOWS');
+        }
+        return g;
+      },
+      iterations: calcIterations(isLarge ? 5 : 10, factor, isLarge, 50_000),
+    },
+
+    // ── Write: addNode ────────────────────────────────────────────────────
+    {
+      category: 'Write',
+      name: 'addNode (single)',
+      setup: () => new Graph(),
+      run: async (graph, _meta) => {
+        await graph.addNode('Product', { label: `product-${Math.random()}`, score: 99 });
+      },
+      iterations: calcIterations(10_000, factor, isLarge, 50_000),
+    },
+
+    // ── Write: addEdge ────────────────────────────────────────────────────
+    {
+      category: 'Write',
+      name: 'addEdge (single)',
+      setup: async (meta) => {
+        const g = new Graph();
+        const pool = 100 * factor;
+        const nodeIds: string[] = [];
+        for (let i = 0; i < pool; i++) {
+          const n = await g.addNode('Person', { index: i });
+          nodeIds.push(n.id);
+        }
+        (meta as GraphMeta & { _edgePool?: string[] })._edgePool = nodeIds;
+        return g;
+      },
+      run: async (graph, meta) => {
+        const pool = (meta as GraphMeta & { _edgePool?: string[] })._edgePool!;
+        const src = pool[Math.floor(Math.random() * pool.length)];
+        const tgt = pool[Math.floor(Math.random() * pool.length)];
+        if (src !== tgt) {
+          try { await graph.addEdge(src, tgt, 'KNOWS'); } catch { /* dup — skip */ }
+        }
+      },
+      iterations: calcIterations(5_000, factor, isLarge, 50_000),
+    },
+    
     // ── Read: getNode by id ────────────────────────────────────────────────
     {
       category: 'Read',
