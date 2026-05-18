@@ -1,0 +1,1 @@
+"use strict";(globalThis.webpackChunkgrafio_docs=globalThis.webpackChunkgrafio_docs||[]).push([[4488],{7059(a){a.exports=JSON.parse('{"metadata":{"permalink":"/grafio/blog","page":1,"postsPerPage":10,"totalPages":1,"totalCount":2,"blogDescription":"Updates, news, and insights about Grafio","blogTitle":"Grafio Blog"}}')}}]);

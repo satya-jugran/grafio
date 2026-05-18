@@ -1,0 +1,1 @@
+"use strict";(globalThis.webpackChunkgrafio_docs=globalThis.webpackChunkgrafio_docs||[]).push([[1903],{1912(o){o.exports=JSON.parse('{"blogBasePath":"/grafio/blog","blogTitle":"Grafio Blog","authorsListPath":"/grafio/blog/authors"}')}}]);
