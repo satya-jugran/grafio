@@ -212,14 +212,18 @@ export class Semantic {
    * @throws {CypherSemanticError} if an undefined variable is referenced.
    */
   private _checkUnresolvedVars(ast: QueryAst): QueryAst {
+    // Build the extra scope from CREATE patterns so variables introduced
+    // by CREATE can be referenced in RETURN, WHERE, ORDER BY, etc.
+    const extraScope = this._collectCreateScope(ast);
+
     // Check WHERE clause.
     if (ast.where) {
-      this._checkExpressionVars(ast.where.expression, 'WHERE');
+      this._checkExpressionVars(ast.where.expression, 'WHERE', extraScope);
     }
 
     // Check RETURN items.
     for (const item of ast.return.items) {
-      this._checkExpressionVars(item.expression, 'RETURN');
+      this._checkExpressionVars(item.expression, 'RETURN', extraScope);
     }
 
     // Check ORDER BY items.
@@ -240,21 +244,22 @@ export class Semantic {
             item.expression,
             'ORDER BY',
             allowedAliases,
+            extraScope,
           );
         } else {
-          this._checkExpressionVars(item.expression, 'ORDER BY');
+          this._checkExpressionVars(item.expression, 'ORDER BY', extraScope);
         }
       }
     }
 
     // Check SKIP expression.
     if (ast.skip) {
-      this._checkExpressionVars(ast.skip.expression, 'SKIP');
+      this._checkExpressionVars(ast.skip.expression, 'SKIP', extraScope);
     }
 
     // Check LIMIT expression.
     if (ast.limit) {
-      this._checkExpressionVars(ast.limit.expression, 'LIMIT');
+      this._checkExpressionVars(ast.limit.expression, 'LIMIT', extraScope);
     }
 
     return ast;
@@ -264,12 +269,18 @@ export class Semantic {
    * Recursively walk an expression tree and verify that every
    * {@link IdentifierExpr} refers to a defined variable.
    *
+   * @param extraScope - Additional variable bindings from CREATE that
+   *   are not tracked in the main MATCH scope table.
    * @throws {CypherSemanticError} on the first unresolved reference.
    */
-  private _checkExpressionVars(expr: Expression, clause: string): void {
+  private _checkExpressionVars(
+    expr: Expression,
+    clause: string,
+    extraScope?: ReadonlySet<string>,
+  ): void {
     switch (expr.kind) {
       case 'Identifier': {
-        if (!this._scope.has(expr.name)) {
+        if (!this._scope.has(expr.name) && !extraScope?.has(expr.name)) {
           throw new CypherSemanticError(
             `Variable '${expr.name}' is not defined in ${clause} clause. ` +
             `Defined variables: ${[...this._scope.keys()].join(', ') || '(none)'}`,
@@ -279,36 +290,36 @@ export class Semantic {
       }
 
       case 'PropertyAccess':
-        this._checkExpressionVars(expr.object, clause);
+        this._checkExpressionVars(expr.object, clause, extraScope);
         return;
 
       case 'Binary':
-        this._checkExpressionVars(expr.left, clause);
-        this._checkExpressionVars(expr.right, clause);
+        this._checkExpressionVars(expr.left, clause, extraScope);
+        this._checkExpressionVars(expr.right, clause, extraScope);
         return;
 
       case 'Unary':
-        this._checkExpressionVars(expr.operand, clause);
+        this._checkExpressionVars(expr.operand, clause, extraScope);
         return;
 
       case 'In':
-        this._checkExpressionVars(expr.expression, clause);
-        this._checkExpressionVars(expr.list, clause);
+        this._checkExpressionVars(expr.expression, clause, extraScope);
+        this._checkExpressionVars(expr.list, clause, extraScope);
         return;
 
       case 'IsNull':
-        this._checkExpressionVars(expr.expression, clause);
+        this._checkExpressionVars(expr.expression, clause, extraScope);
         return;
 
       case 'List':
         for (const elem of expr.elements) {
-          this._checkExpressionVars(elem, clause);
+          this._checkExpressionVars(elem, clause, extraScope);
         }
         return;
 
       case 'FunctionCall':
         for (const arg of expr.args) {
-          this._checkExpressionVars(arg, clause);
+          this._checkExpressionVars(arg, clause, extraScope);
         }
         return;
 
@@ -325,6 +336,8 @@ export class Semantic {
    * are present so that aggregate aliases and group-by key aliases
    * (which are not in the MATCH scope) pass validation.
    *
+   * @param extraScope - Additional variable bindings from CREATE that
+   *   are not tracked in the main MATCH scope table.
    * @throws {CypherSemanticError} on the first unresolved reference that
    *         is not in the allowed set.
    */
@@ -332,6 +345,7 @@ export class Semantic {
     expr: Expression,
     clause: string,
     allowed: ReadonlySet<string>,
+    extraScope?: ReadonlySet<string>,
   ): void {
     switch (expr.kind) {
       case 'Identifier': {
@@ -347,8 +361,8 @@ export class Semantic {
               `Use an aggregate alias or a group-by key alias.`,
             );
           }
-        } else if (!this._scope.has(expr.name)) {
-          // Pre-aggregation context: check the MATCH scope.
+        } else if (!this._scope.has(expr.name) && !extraScope?.has(expr.name)) {
+          // Pre-aggregation context: check the MATCH scope + CREATE extras.
           throw new CypherSemanticError(
             `Variable '${expr.name}' is not defined in ${clause} clause. ` +
             `Defined variables: ${[...this._scope.keys()].join(', ') || '(none)'}` +
@@ -361,36 +375,36 @@ export class Semantic {
       }
 
       case 'PropertyAccess':
-        this._checkExpressionVarsWithAllowed(expr.object, clause, allowed);
+        this._checkExpressionVarsWithAllowed(expr.object, clause, allowed, extraScope);
         return;
 
       case 'Binary':
-        this._checkExpressionVarsWithAllowed(expr.left, clause, allowed);
-        this._checkExpressionVarsWithAllowed(expr.right, clause, allowed);
+        this._checkExpressionVarsWithAllowed(expr.left, clause, allowed, extraScope);
+        this._checkExpressionVarsWithAllowed(expr.right, clause, allowed, extraScope);
         return;
 
       case 'Unary':
-        this._checkExpressionVarsWithAllowed(expr.operand, clause, allowed);
+        this._checkExpressionVarsWithAllowed(expr.operand, clause, allowed, extraScope);
         return;
 
       case 'In':
-        this._checkExpressionVarsWithAllowed(expr.expression, clause, allowed);
-        this._checkExpressionVarsWithAllowed(expr.list, clause, allowed);
+        this._checkExpressionVarsWithAllowed(expr.expression, clause, allowed, extraScope);
+        this._checkExpressionVarsWithAllowed(expr.list, clause, allowed, extraScope);
         return;
 
       case 'IsNull':
-        this._checkExpressionVarsWithAllowed(expr.expression, clause, allowed);
+        this._checkExpressionVarsWithAllowed(expr.expression, clause, allowed, extraScope);
         return;
 
       case 'List':
         for (const elem of expr.elements) {
-          this._checkExpressionVarsWithAllowed(elem, clause, allowed);
+          this._checkExpressionVarsWithAllowed(elem, clause, allowed, extraScope);
         }
         return;
 
       case 'FunctionCall':
         for (const arg of expr.args) {
-          this._checkExpressionVarsWithAllowed(arg, clause, allowed);
+          this._checkExpressionVarsWithAllowed(arg, clause, allowed, extraScope);
         }
         return;
 
