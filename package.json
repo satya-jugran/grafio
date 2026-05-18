@@ -1,7 +1,7 @@
 {
   "name": "grafio",
-  "version": "7.0.0",
-  "description": "A graph database with pluggable storage architecture. Supports multiple isolated graphs via graphId partitioning. Ships with a zero-dependency in-memory provider. Includes high performance read-only Cypher query engine, multi hop traversals, type/property filtering, topological sort, DAG detection, transaction support, cache management, query plan and execution inspection and Mermaid export.",
+  "version": "7.1.0",
+  "description": "High-performance graph database with native Cypher support and pluggable storage",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {

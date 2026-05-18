@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.1.0] - 2026-05-17
+
+### 🐛 Bug Fixes
+
+1. **Cypher Transaction Support**
+   - Added `transaction` field to `CypherEngineOptions` interface
+   - `CypherEngine.execute()` now accepts optional `transaction: GraphTransaction` parameter
+   - `Executor.execute()` threads transaction through all graph method calls (NodeScan, NodeSeek, EdgeExpand, Aggregate)
+   - All graph reads within a Cypher query can now use a transaction for consistent reads
+
+### ✨ New Features
+1. **Aggregation and multi-hop performance improvements**
+   - While traversing the underlying storage can now query in batches which was single node fetch earlier.
+
+### 📝 Documentation
+
+1. **Complete Documentation Website**
+   - Added Docusaurus documentation under `/docs` directory
+   - Includes Getting Started, Guides, API Reference, and Tutorials sections
+   - All documentation updated to use Cypher queries for read operations
+   - Mermaid diagrams for visual representations
+   - Documentation aligned with actual source code API
+
 ## [7.0.0] - 2026-05-13
 
 ### 🚨 Breaking Changes

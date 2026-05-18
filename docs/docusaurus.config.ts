@@ -133,7 +133,7 @@ const config: Config = {
           ],
         },
       ],
-      copyright: `Copyright © ${new Date().getFullYear()} Satya Jugran. Built with Docusaurus.`,
+      copyright: `Copyright © ${new Date().getFullYear()} Satya Jugran`,
     },
     prism: {
       theme: prismThemes.github,
