@@ -1,9 +1,14 @@
-import { Graph, GraphManager, CachedStorageProvider, type IStorageProvider, type GraphData } from 'grafio';
+
 import {
   InMemoryStorageProvider,
   type InMemoryStorageProviderOptions,
 } from './InMemoryStorageProvider';
 import type { IGraphFactory } from './IGraphFactory';
+import { Graph } from '../Graph';
+import { GraphData } from '../types';
+import { IStorageProvider } from './IStorageProvider';
+import { GraphManager } from '../GraphManager';
+import { CachedStorageProvider } from './CachedStorageProvider';
 
 /**
  * In-memory factory for `Graph` instances.
