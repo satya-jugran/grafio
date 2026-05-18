@@ -35,7 +35,7 @@ async function main(): Promise<void> {
 
   if (typeof global.gc !== 'function') {
     console.log('\n  ⚠  TIP: Run with --expose-gc for more accurate heap measurements.');
-    console.log('     e.g.: npm run perf:in-memory:gc\n');
+    console.log('     e.g.: npm run perf:gc\n');
   } else {
     console.log('\n  ✓  GC available — heap measurements will be accurate.\n');
   }
