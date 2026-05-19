@@ -170,11 +170,17 @@ export class JoinReorderer {
       .filter(p => this._isEquality(p) && p.key)
       .map(p => p.key!);
 
-    // Check if ALL predicate properties are covered by the same index (compound index)
-    // This handles both single-property and multi-property predicates using compound indexes
     if (predicateKeys.length > 0 && this._graph) {
-      const indexed = await this._graph.hasIndex('node', predicateKeys);
-      if (indexed) return 5;
+      // First, check if ALL predicate properties are covered by the same index (compound index)
+      const compoundIndex = await this._graph.hasIndex('node', predicateKeys);
+      if (compoundIndex) return 5;
+
+      // Fall back: check if ANY single predicate has an index
+      // This handles the case where only some predicates are indexed
+      for (const key of predicateKeys) {
+        const singleIndex = await this._graph.hasIndex('node', [key]);
+        if (singleIndex) return 5;
+      }
     }
 
     // Non-indexed equality — score 10
