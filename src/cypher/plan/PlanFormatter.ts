@@ -178,6 +178,22 @@ export class PlanFormatter {
         return 'AggregateStep' + (funcs ? ' ' + funcs : '');
       }
 
+      case 'CreateNodeStep':
+        return 'CreateNodeStep ' + step.variable + ':' + step.labels.join('|') + ' ' + JSON.stringify(step.properties);
+
+      case 'CreateEdgeStep':
+        return 'CreateEdgeStep ' + step.variable + ':(' + step.source + ')-[:' + step.types.join('|') + ']->(' + step.target + ') ' + JSON.stringify(step.properties);
+
+      case 'SetPropertyStep':
+        const assignments = step.assignments.map(a => a.key + '=' + this.getExpressionDescription(a.value)).join(', ');
+        return 'SetPropertyStep ' + step.variable + '.' + step.entityKind + ' ' + assignments;
+      
+      case 'DeleteEntityStep':
+        return 'DeleteEntityStep ' + step.variable + '.' + step.entityKind + (step.detach ? ' DETACH' : '');
+      
+      case 'RemovePropertyStep':
+        return 'RemovePropertyStep ' + step.variable + '.' + step.entityKind + ' ' + step.property;
+
       case 'CreateIndexStep':
         return 'CreateIndexStep ' + step.name + ' target=' + step.target + ' keys=[' + step.propertyKeys.join(', ') + ']';
 
@@ -246,6 +262,22 @@ export class PlanFormatter {
         const funcs = step.aggregates.map(a => a.function + '(' + a.alias + ')').join(', ');
         return 'AggregateStep [' + funcs + ']';
       }
+
+      case 'CreateNodeStep':
+        return 'CreateNodeStep [' + step.variable + ':' + step.labels.join('|') + ' ' + JSON.stringify(step.properties) + ']';
+
+      case 'CreateEdgeStep':
+        return 'CreateEdgeStep [' + step.variable + ':(' + step.source + ')-[:' + step.types.join('|') + ']->(' + step.target + ') ' + JSON.stringify(step.properties) + ']';
+
+      case 'SetPropertyStep':
+        const assignments = step.assignments.map(a => a.key + '=' + this.getExpressionDescription(a.value)).join(', ');
+        return 'SetPropertyStep [' + step.variable + '.' + step.entityKind + ' ' + assignments + ']';
+
+      case 'DeleteEntityStep':
+        return 'DeleteEntityStep [' + step.variable + '.' + step.entityKind + (step.detach ? ' DETACH' : '') + ']';
+
+      case 'RemovePropertyStep':
+        return 'RemovePropertyStep [' + step.variable + '.' + step.entityKind + ' ' + step.property + ']';
 
       case 'CreateIndexStep':
         return 'CreateIndexStep [' + step.name + ' target=' + step.target + ' keys=(' + step.propertyKeys.join(', ') + ')]';
