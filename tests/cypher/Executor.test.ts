@@ -1325,18 +1325,20 @@ describe('Executor', () => {
       const node = await graph.addNode('Person', { name: 'Alice', age: 25 });
 
       const result = await executeQuery(
-        "MATCH (n:Person {name: 'Alice'}) SET n.age = 30 RETURN n",
+        "MATCH (n:Person {name: 'Alice'}) SET n.age = 30, n.city = 'Wonderland' RETURN n",
         {},
         graph,
       );
       expect(result.rows).toHaveLength(1);
       const updatedNode = result.rows[0].n as Node;
       expect(updatedNode.properties.age).toBe(30);
-      expect(result.summary.propertiesSet).toBeGreaterThanOrEqual(1);
+      expect(updatedNode.properties.city).toBe('Wonderland');
+      expect(result.summary.propertiesSet).toBeGreaterThanOrEqual(2);
 
       // Verify property set in persisted graph
       const reFetched = await graph.getNode(node.id);
       expect(reFetched!.properties.age).toBe(30);
+      expect(reFetched!.properties.city).toBe('Wonderland');
     });
 
     it('write counters reflect operations on fresh graph', async () => {
