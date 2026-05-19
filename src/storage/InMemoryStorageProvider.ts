@@ -190,6 +190,9 @@ export class InMemoryStorageProvider implements IStorageProvider {
     this._edgesByTarget.clear();
     this._nodesByProperty.clear();
     this._edgesByProperty.clear();
+    this._nodeIndexedKeys.clear();
+    this._edgeIndexedKeys.clear();
+    this._compoundIndexes.clear();
     // Clear transaction state so clear truly removes all stored data
     this._transactionOverlays.clear();
     this._activeTransaction = null;
