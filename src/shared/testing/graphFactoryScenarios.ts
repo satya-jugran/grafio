@@ -1,5 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 import type { IGraphFactory } from '../../storage/IGraphFactory';
+import { GraphManager } from '../../GraphManager';
 
 /**
  * Shared test scenarios for IGraphFactory implementations.
@@ -10,9 +11,9 @@ import type { IGraphFactory } from '../../storage/IGraphFactory';
  */
 export function runGraphFactoryScenarios(
   factoryFunc: () => Promise<IGraphFactory> = undefined as any,
-  beforeAllFunc: () => Promise<void> = async () => {},
-  afterAllFunc: () => Promise<void> = async () => {},
-  additionalTests: () => void = () => {}
+  beforeAllFunc: () => Promise<void> = async () => { },
+  afterAllFunc: () => Promise<void> = async () => { },
+  additionalTests: () => void = () => { }
 ): void {
   let factory: IGraphFactory;
 
@@ -34,7 +35,7 @@ export function runGraphFactoryScenarios(
   });
 
   additionalTests();
-  
+
   describe('IGraphFactory', () => {
     it('forGraph() should return a Graph instance', () => {
       const graph = factory.forGraph('any-id');
@@ -103,6 +104,56 @@ export function runGraphFactoryScenarios(
 
       // graph2 should be independent — empty
       expect(await graph2.getNodes()).toHaveLength(0);
+    });
+
+    describe('fromGraphData()', () => {
+      it('should create a Graph and import the given data', async () => {
+        GraphManager.init({
+          cache: {
+            cacheStore: 'in-memory',
+            evictionStrategy: 'LRU',
+            maxNodesCount: 10000,
+            maxEdgesCount: 20000,
+            preloadStrategy: 'none',
+          }
+        });
+
+        const data = {
+          nodes: [
+            { id: 'node-1', type: 'Person', properties: { name: 'Alice' } },
+            { id: 'node-2', type: 'Person', properties: { name: 'Bob' } },
+          ],
+          edges: [
+            { id: 'edge-1', type: 'KNOWS', sourceId: 'node-1', targetId: 'node-2', properties: {} },
+          ],
+        };
+
+        const graph = await factory.fromGraphData(data, 'graph-from-data');
+
+        const nodes = await graph.getNodes();
+        expect(nodes).toHaveLength(2);
+
+        const edges = await graph.getEdges();
+        expect(edges).toHaveLength(1);
+        expect(edges[0].sourceId).toBe('node-1');
+        expect(edges[0].targetId).toBe('node-2');
+        GraphManager.reset();  
+      });
+
+      it('should use default graphId when not provided', async () => {
+        const data = {
+          nodes: [
+            { id: 'node-1', type: 'Thing', properties: { value: 42 } },
+          ],
+          edges: [],
+        };
+
+        const graph = await factory.fromGraphData(data);
+
+        const nodes = await graph.getNodes();
+        expect(nodes).toHaveLength(1);
+        expect(nodes[0].properties.value).toBe(42);
+      });
     });
   });
 }

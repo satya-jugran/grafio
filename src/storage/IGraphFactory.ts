@@ -1,4 +1,5 @@
 import type { Graph } from '../Graph';
+import { GraphData } from '../types';
 
 /**
  * Factory interface for creating Graph instances backed by a specific storage provider.
@@ -28,4 +29,6 @@ export interface IGraphFactory {
    *                  All nodes/edges created on the returned Graph belong to this partition.
    */
   forGraph(graphId?: string): Graph;
+
+  fromGraphData(data: GraphData, graphId?: string): Promise<Graph>;
 }
