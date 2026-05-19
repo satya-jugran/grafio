@@ -155,11 +155,11 @@ export class Executor {
       case 'AggregateStep':
         return this._executeAggregate(step, rows, params, transaction);
       case 'CreateNodeStep':
-        return this._executeCreateNode(step, rows, transaction);
+        return this._executeCreateNode(step, rows, params, transaction);
       case 'CreateEdgeStep':
-        return this._executeCreateEdge(step, rows, transaction);
+        return this._executeCreateEdge(step, rows, params, transaction);
       case 'SetPropertyStep':
-        return this._executeSetProperty(step, rows, transaction);
+        return this._executeSetProperty(step, rows, params, transaction);
       case 'DeleteEntityStep':
         return this._executeDeleteEntity(step, rows, transaction);
       case 'RemovePropertyStep':
@@ -284,6 +284,22 @@ export class Executor {
       return params[name];
     }
     return value;
+  }
+
+  /**
+   * Resolve any {@code ParameterRef} values in a {@link PropertyMap}
+   * against the runtime parameter map, returning a plain record of
+   * primitive values suitable for the storage layer.
+   */
+  private _resolvePropertyMap(
+    properties: Record<string, unknown>,
+    params: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const resolved: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(properties)) {
+      resolved[key] = this._resolveParam(value, params);
+    }
+    return resolved;
   }
 
   /**
@@ -1352,13 +1368,17 @@ export class Executor {
   private async _executeCreateNode(
     step: CreateNodeStep,
     rows: Row[],
+    params: Record<string, unknown>,
     transaction?: GraphTransaction,
   ): Promise<Row[]> {
     const result: Row[] = [];
+    const resolvedProps = this._resolvePropertyMap(step.properties, params);
+    const propCount = Object.keys(resolvedProps).length;
+
     for (const row of rows) {
       const node = await this._graph.addNode(
         step.labels[0] ?? 'Node',
-        step.properties as Record<string, unknown>,
+        resolvedProps,
         transaction,
       );
       const newRow = new Map(row);
@@ -1366,6 +1386,7 @@ export class Executor {
       result.push(newRow);
     }
     this._nodesCreated += result.length;
+    this._propertiesSet += result.length * propCount;
     return result;
   }
 
@@ -1382,9 +1403,13 @@ export class Executor {
   private async _executeCreateEdge(
     step: CreateEdgeStep,
     rows: Row[],
+    params: Record<string, unknown>,
     transaction?: GraphTransaction,
   ): Promise<Row[]> {
     const result: Row[] = [];
+    const resolvedProps = this._resolvePropertyMap(step.properties, params);
+    const propCount = Object.keys(resolvedProps).length;
+
     for (const row of rows) {
       const srcNode = row.get(step.source) as Node | undefined;
       const tgtNode = row.get(step.target) as Node | undefined;
@@ -1397,7 +1422,7 @@ export class Executor {
         srcNode.id,
         tgtNode.id,
         step.types[0] ?? 'RELATIONSHIP',
-        step.properties as Record<string, unknown>,
+        resolvedProps,
         transaction,
       );
       const newRow = new Map(row);
@@ -1405,6 +1430,7 @@ export class Executor {
       result.push(newRow);
     }
     this._edgesCreated += result.length;
+    this._propertiesSet += result.length * propCount;
     return result;
   }
 
@@ -1422,20 +1448,31 @@ export class Executor {
   private async _executeSetProperty(
     step: SetPropertyStep,
     rows: Row[],
+    params: Record<string, unknown>,
     transaction?: GraphTransaction,
   ): Promise<Row[]> {
+    const result: Row[] = [];
     for (const row of rows) {
       const entity = row.get(step.variable);
-      if (!entity) continue;
+      if (!entity) {
+        result.push(row);
+        continue;
+      }
+
+      // Accumulate property changes to build the updated entity.
+      let updatedProperties = { ...(entity as Node | Edge).properties };
+
       for (const { key, value } of step.assignments) {
+        // Evaluate the value expression against the current row and parameters.
+        const evaluatedValue = this._evaluate(value as Expression, row, params);
         try {
           if (step.entityKind === 'node') {
             await this._graph.updateNodeProperty(
-              (entity as Node).id, key, value, transaction,
+              (entity as Node).id, key, evaluatedValue, transaction,
             );
           } else {
             await this._graph.updateEdgeProperty(
-              (entity as Edge).id, key, value, transaction,
+              (entity as Edge).id, key, evaluatedValue, transaction,
             );
           }
         } catch (e: unknown) {
@@ -1446,22 +1483,44 @@ export class Executor {
           ) {
             if (step.entityKind === 'node') {
               await this._graph.addNodeProperty(
-                (entity as Node).id, key, value, transaction,
+                (entity as Node).id, key, evaluatedValue, transaction,
               );
             } else {
               await this._graph.addEdgeProperty(
-                (entity as Edge).id, key, value, transaction,
+                (entity as Edge).id, key, evaluatedValue, transaction,
               );
             }
           } else {
             throw e;
           }
         }
+        updatedProperties = { ...updatedProperties, [key]: evaluatedValue };
         this._propertiesSet++;
       }
+
+      // Build a new Node/Edge with the updated properties, so that
+      // RETURN (or subsequent steps) sees the modified values.
+      const updatedOn = Date.now();
+      let updatedEntity: Node | Edge;
+      if (step.entityKind === 'node') {
+        const n = entity as Node;
+        updatedEntity = new Node(
+          n.type, updatedProperties, n.id, n.createdOn, updatedOn,
+        );
+      } else {
+        const e = entity as Edge;
+        updatedEntity = new Edge(
+          e.sourceId, e.targetId, e.type, updatedProperties,
+          e.id, e.createdOn, updatedOn,
+        );
+      }
+
+      // Replace the old entity in the row with the updated one.
+      const newRow = new Map(row);
+      newRow.set(step.variable, updatedEntity);
+      result.push(newRow);
     }
-    // SET always passes rows through unchanged
-    return rows;
+    return result;
   }
 
   // ── DeleteEntityStep ────────────────────────────────────────────

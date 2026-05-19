@@ -1321,6 +1321,24 @@ describe('Executor', () => {
       expect(updated!.properties.name).toBe('Alice');
     });
 
+    it('SET new property on node', async () => {
+      const node = await graph.addNode('Person', { name: 'Alice', age: 25 });
+
+      const result = await executeQuery(
+        "MATCH (n:Person {name: 'Alice'}) SET n.age = 30 RETURN n",
+        {},
+        graph,
+      );
+      expect(result.rows).toHaveLength(1);
+      const updatedNode = result.rows[0].n as Node;
+      expect(updatedNode.properties.age).toBe(30);
+      expect(result.summary.propertiesSet).toBeGreaterThanOrEqual(1);
+
+      // Verify property set in persisted graph
+      const reFetched = await graph.getNode(node.id);
+      expect(reFetched!.properties.age).toBe(30);
+    });
+
     it('write counters reflect operations on fresh graph', async () => {
       const result = await executeQuery(
         "CREATE (n:Person {name: 'Alice'}) RETURN n",
@@ -1332,8 +1350,9 @@ describe('Executor', () => {
       expect(result.summary.edgesCreated).toBe(0);
       expect(result.summary.nodesDeleted).toBe(0);
       expect(result.summary.edgesDeleted).toBe(0);
+      expect(result.summary.propertiesSet).toBe(1); // initial property set counts as 1
 
-      const nodes = await graph.getNodes();
+      const nodes = result.rows.map((r) => r.n as Node);
       expect(nodes).toHaveLength(1);
     });
   });
