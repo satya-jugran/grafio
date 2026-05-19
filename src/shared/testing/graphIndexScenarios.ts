@@ -168,6 +168,138 @@ export function runGraphIndexScenarios(
       });
     });
 
+    describe('deleteIndex', () => {
+      it('should delete an existing index by name', async () => {
+        await graph.addNode('Person', { name: 'Alice', email: 'alice@example.com' });
+
+        await graph.createIndex('email-index', 'node', ['email']);
+        
+        // Verify index exists
+        const indexBefore = await graph.getIndex('email-index');
+        expect(indexBefore).toBeDefined();
+
+        // Delete the index
+        await expect(graph.deleteIndex('email-index')).resolves.toBeUndefined();
+
+        // Verify index no longer exists
+        const indexAfter = await graph.getIndex('email-index');
+        expect(indexAfter).toBeUndefined();
+      });
+
+      it('should throw error when deleting non-existent index', async () => {
+        await expect(graph.deleteIndex('non-existent-index')).rejects.toThrow();
+      });
+
+      it('should allow recreating index after deletion', async () => {
+        await graph.addNode('Person', { name: 'Alice', email: 'alice@example.com' });
+
+        await graph.createIndex('email-index', 'node', ['email']);
+        await graph.deleteIndex('email-index');
+        
+        // Should be able to create a new index with the same name
+        await expect(graph.createIndex('email-index', 'node', ['email'])).resolves.toBeUndefined();
+        
+        const index = await graph.getIndex('email-index');
+        expect(index).toBeDefined();
+        expect(index!.name).toBe('email-index');
+      });
+
+      it('should delete edge index by name', async () => {
+        const alice = await graph.addNode('Person', { name: 'Alice' });
+        const bob = await graph.addNode('Person', { name: 'Bob' });
+
+        await graph.addEdge(alice.id, bob.id, 'KNOWS', { weight: 0.8 });
+
+        await graph.createIndex('weight-index', 'edge', ['weight']);
+        
+        // Verify index exists
+        const indexBefore = await graph.getIndex('weight-index');
+        expect(indexBefore).toBeDefined();
+
+        // Delete the index
+        await expect(graph.deleteIndex('weight-index')).resolves.toBeUndefined();
+
+        // Verify index no longer exists
+        const indexAfter = await graph.getIndex('weight-index');
+        expect(indexAfter).toBeUndefined();
+      });
+    });
+
+    describe('getIndexes', () => {
+      it('should return empty array when no indexes exist', async () => {
+        const indexes = await graph.getIndexes();
+        expect(indexes).toEqual([]);
+      });
+
+      it('should return all indexes after creation', async () => {
+        await graph.addNode('Person', { name: 'Alice', email: 'alice@example.com', age: 30 });
+        const alice = await graph.addNode('Person', { name: 'Bob' });
+        const carol = await graph.addNode('Person', { name: 'Carol' });
+
+        await graph.addEdge(alice.id, carol.id, 'KNOWS', { weight: 0.8 });
+
+        await graph.createIndex('email-index', 'node', ['email']);
+        await graph.createIndex('age-index', 'node', ['age']);
+        await graph.createIndex('weight-index', 'edge', ['weight']);
+
+        const indexes = await graph.getIndexes();
+        expect(indexes).toHaveLength(3);
+
+        // Verify all indexes are present
+        const indexNames = indexes.map(i => i.name).sort();
+        expect(indexNames).toEqual(['age-index', 'email-index', 'weight-index']);
+      });
+
+      it('should return node and edge indexes correctly', async () => {
+        await graph.addNode('Person', { name: 'Alice' });
+        const alice = await graph.addNode('Person', { name: 'Bob' });
+        const carol = await graph.addNode('Person', { name: 'Carol' });
+
+        await graph.addEdge(alice.id, carol.id, 'KNOWS', { weight: 0.8 });
+
+        await graph.createIndex('name-index', 'node', ['name']);
+        await graph.createIndex('weight-index', 'edge', ['weight']);
+
+        const indexes = await graph.getIndexes();
+        
+        const nodeIndexes = indexes.filter(i => i.target === 'node');
+        const edgeIndexes = indexes.filter(i => i.target === 'edge');
+
+        expect(nodeIndexes).toHaveLength(1);
+        expect(nodeIndexes[0].name).toBe('name-index');
+        expect(nodeIndexes[0].propertyKeys).toEqual(['name']);
+
+        expect(edgeIndexes).toHaveLength(1);
+        expect(edgeIndexes[0].name).toBe('weight-index');
+        expect(edgeIndexes[0].propertyKeys).toEqual(['weight']);
+      });
+
+      it('should reflect index deletion in getIndexes', async () => {
+        await graph.addNode('Person', { name: 'Alice', email: 'alice@example.com' });
+
+        await graph.createIndex('email-index', 'node', ['email']);
+        
+        let indexes = await graph.getIndexes();
+        expect(indexes).toHaveLength(1);
+
+        await graph.deleteIndex('email-index');
+        
+        indexes = await graph.getIndexes();
+        expect(indexes).toHaveLength(0);
+      });
+
+      it('should return compound indexes with all property keys', async () => {
+        await graph.addNode('Person', { name: 'Alice', email: 'alice@example.com', age: 30 });
+
+        await graph.createIndex('name-email-index', 'node', ['name', 'email']);
+
+        const indexes = await graph.getIndexes();
+        expect(indexes).toHaveLength(1);
+        expect(indexes[0].name).toBe('name-email-index');
+        expect(indexes[0].propertyKeys).toEqual(['email', 'name']); // Sorted
+      });
+    });
+
     describe('getNodes with filter.properties', () => {
       it('should find nodes by property value after creating index', async () => {
         await graph.addNode('Person', { name: 'Alice', email: 'alice@example.com' });

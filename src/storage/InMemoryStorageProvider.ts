@@ -886,6 +886,36 @@ export class InMemoryStorageProvider implements IStorageProvider {
     };
   }
 
+  /**
+   * Deletes an index by its name.
+   *
+   * @param name - The name of the index to delete
+   * @throws Error if the index does not exist
+   */
+  async deleteIndex(name: string): Promise<void> {
+    if (!this._namedIndexes.has(name)) {
+      throw new Error(`Index with name '${name}' does not exist`);
+    }
+    this._namedIndexes.delete(name);
+  }
+
+  /**
+   * Retrieves all indexes.
+   *
+   * @returns Array of all index metadata
+   */
+  async getIndexes(): Promise<{ name: string; target: 'node' | 'edge'; propertyKeys: string[] }[]> {
+    const indexes: { name: string; target: 'node' | 'edge'; propertyKeys: string[] }[] = [];
+    for (const [name, index] of this._namedIndexes.entries()) {
+      indexes.push({
+        name,
+        target: index.target,
+        propertyKeys: index.propertyKeys,
+      });
+    }
+    return indexes;
+  }
+
   // ---------------------------------------------------------------------------
   // Property mutations
   // ---------------------------------------------------------------------------

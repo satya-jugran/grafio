@@ -507,6 +507,25 @@ export class GraphIndex {
     return this._store.getIndex(name);
   }
 
+  /**
+   * Deletes an index by its name.
+   *
+   * @param name - The name of the index to delete
+   * @throws Error if the index does not exist
+   */
+  async deleteIndex(name: string): Promise<void> {
+    return this._store.deleteIndex(name);
+  }
+
+  /**
+   * Retrieves all indexes.
+   *
+   * @returns An array of all index metadata
+   */
+  async getIndexes(): Promise<{ name: string; target: 'node' | 'edge'; propertyKeys: string[] }[]> {
+    return this._store.getIndexes();
+  }
+
   // ---------------------------------------------------------------------------
   // Aggregation
   // ---------------------------------------------------------------------------

@@ -412,6 +412,14 @@ export class CachedStorageProvider implements IStorageProvider {
     return this._underlying.getIndex(name);
   }
 
+  async deleteIndex(name: string): Promise<void> {
+    return this._underlying.deleteIndex(name);
+  }
+
+  async getIndexes(): Promise<{ name: string; target: 'node' | 'edge'; propertyKeys: string[] }[]> {
+    return this._underlying.getIndexes();
+  }
+
   // ─── Data portability ────────────────────────────────────────────────────────
 
   async exportJSON(): Promise<GraphData> {

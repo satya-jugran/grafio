@@ -332,6 +332,21 @@ export interface IStorageProvider {
    */
   getIndex(name: string): Promise<IndexMetadata | undefined>;
 
+  /**
+   * Deletes an index by its name.
+   *
+   * @param name - The name of the index to delete
+   * @throws Error if the index does not exist
+   */
+  deleteIndex(name: string): Promise<void>;
+
+  /**
+   * Retrieves all indexes.
+   *
+   * @returns Array of all index metadata
+   */
+  getIndexes(): Promise<IndexMetadata[]>;
+
   // ---------------------------------------------------------------------------
   // Data portability
   // ---------------------------------------------------------------------------
