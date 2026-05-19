@@ -6,8 +6,8 @@
  *
  * ### Grammar (simplified)
  * ```
- * query          → matchClause? [createClause] [setClause] [deleteClause] [removeClause]
- *                  [whereClause] returnClause [orderByClause] [skipClause] [limitClause]
+ * query          → matchClause? [whereClause] [createClause] [setClause] [deleteClause]
+ *                  [removeClause] returnClause [orderByClause] [skipClause] [limitClause]
  * matchClause    → MATCH patternPath (',' patternPath)*
  * createClause   → CREATE patternPath (',' patternPath)*
  * setClause      → SET setItem (',' setItem)*
@@ -149,6 +149,9 @@ export class Parser {
     // MATCH is now optional — CREATE (n) RETURN n is valid standalone.
     const match = this._check(TokenKind.MATCH) ? this._parseMatchClause() : undefined;
 
+    // WHERE must appear immediately after MATCH per standard Cypher grammar.
+    const where = this._check(TokenKind.WHERE) ? this._parseWhereClause() : undefined;
+
     // Write clauses (each optional, in positional order).
     const create = this._check(TokenKind.CREATE) ? this._parseCreateClause() : undefined;
     const set = this._check(TokenKind.SET) ? this._parseSetClause() : undefined;
@@ -156,8 +159,6 @@ export class Parser {
       ? this._parseDeleteClause()
       : undefined;
     const remove = this._check(TokenKind.REMOVE) ? this._parseRemoveClause() : undefined;
-
-    const where = this._check(TokenKind.WHERE) ? this._parseWhereClause() : undefined;
     const ret = this._parseReturnClause();
     const having = this._check(TokenKind.HAVING) ? this._parseHavingClause() : undefined;
     const orderBy = this._check(TokenKind.ORDER) ? this._parseOrderByClause() : undefined;

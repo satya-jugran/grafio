@@ -584,6 +584,25 @@ describe('Parser', () => {
       expect(ast.return.items).toHaveLength(2);
     });
 
+    it('parses WHERE before SET (standard Cypher order)', () => {
+      const ast = parse(
+        "MATCH (n:Person) WHERE n.age > 30 SET n.age = 40 RETURN n",
+      );
+
+      expect(ast.match.patterns).toHaveLength(1);
+      expect(ast.where).toBeDefined();
+      expect(ast.where!.kind).toBe('Where');
+      expect(ast.where!.expression.kind).toBe('Binary');
+
+      expect(ast.set).toBeDefined();
+      expect(ast.set!.kind).toBe('Set');
+      expect(ast.set!.items).toHaveLength(1);
+      expect(ast.set!.items[0].property).toBe('age');
+      expect((ast.set!.items[0].value as any).value).toBe(40);
+
+      expect(ast.return.items).toHaveLength(1);
+    });
+
     it('parses standalone CREATE (no MATCH)', () => {
       const ast = parse('CREATE (n) RETURN n');
 
