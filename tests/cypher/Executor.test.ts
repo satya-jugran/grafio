@@ -870,6 +870,56 @@ describe('Executor', () => {
         expect(result.rows).toHaveLength(1);
         expect(result.rows[0].avg).toBe(30);
       });
+
+      // ── Edge-level COLLECT (storage-level Path A) ─────────────
+
+      it('COLLECT(r) returns all edge objects as array', async () => {
+        const graph = await buildSocialGraph();
+        // Social graph has KNOWS edges between people
+        const result = await executeQuery(
+          'MATCH ()-[r:KNOWS]->() RETURN COLLECT(r) AS edges',
+          {},
+          graph,
+        );
+        expect(result.rows).toHaveLength(1);
+        const edges = result.rows[0].edges as unknown[];
+        expect(edges.length).toBeGreaterThan(0);
+        // Each edge should have type, sourceId, targetId
+        const first = edges[0] as { type: string; sourceId: string; targetId: string };
+        expect(first.type).toBe('KNOWS');
+        expect(first.sourceId).toBeDefined();
+        expect(first.targetId).toBeDefined();
+      });
+
+      it('COLLECT(r.since) returns property values from edges', async () => {
+        const graph = await buildSocialGraph();
+        // Social graph edges have `since` property
+        const result = await executeQuery(
+          'MATCH ()-[r:KNOWS]->() RETURN COLLECT(r.since) AS years',
+          {},
+          graph,
+        );
+        expect(result.rows).toHaveLength(1);
+        const years = result.rows[0].years as number[];
+        expect(years.length).toBeGreaterThan(0);
+        // Verify all values are numbers (years)
+        expect(years.every((y) => typeof y === 'number')).toBe(true);
+      });
+
+      it('COLLECT(DISTINCT r.since) returns distinct property values', async () => {
+        const graph = await buildSocialGraph();
+        const result = await executeQuery(
+          'MATCH ()-[r:KNOWS]->() RETURN COLLECT(DISTINCT r.since) AS years',
+          {},
+          graph,
+        );
+        expect(result.rows).toHaveLength(1);
+        const years = result.rows[0].years as number[];
+        expect(years.length).toBeGreaterThan(0);
+        // DISTINCT should remove duplicates - verify no duplicates
+        const unique = [...new Set(years)];
+        expect(years.length).toBe(unique.length);
+      });
     });
 
     // ── Path B: In-process aggregation (group-by) ────────────────
