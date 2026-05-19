@@ -320,7 +320,7 @@ export interface SetPropertyStep {
   /** Which kind of entity. */
   entityKind: 'node' | 'edge';
   /** Property assignments. */
-  assignments: Array<{ key: string; value: unknown }>;
+  assignments: Array<{ key: string; value: Expression }>;
 }
 
 /** Delete a matched entity (node or edge). */

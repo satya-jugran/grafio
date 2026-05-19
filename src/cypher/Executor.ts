@@ -1477,10 +1477,7 @@ export class Executor {
           }
         } catch (e: unknown) {
           // If the property doesn't exist yet, add it instead
-          if (
-            e instanceof PropertyNotFoundError ||
-            (e instanceof Error && e.message.includes('not found'))
-          ) {
+          if (e instanceof PropertyNotFoundError) {
             if (step.entityKind === 'node') {
               await this._graph.addNodeProperty(
                 (entity as Node).id, key, evaluatedValue, transaction,
