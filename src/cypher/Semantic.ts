@@ -1068,15 +1068,20 @@ export class Semantic {
   /**
    * Validate index DDL statements.
    *
-   * Rules enforced:
-   * 1. CREATE INDEX must have a non-empty name.
-   * 2. CREATE INDEX must have at least one property key.
-   * 3. DROP INDEX must have a non-empty name.
-   * 4. DDL and DML cannot be combined in the same query.
+    * Rules enforced:
+    * 1. CREATE INDEX must have a non-empty name.
+    * 1b. CREATE INDEX name must match [a-zA-Z_][a-zA-Z0-9_]*.
+    * 2. CREATE INDEX must have at least one property key.
+    * 3. DROP INDEX must have a non-empty name.
+    * 3b. DROP INDEX name must match [a-zA-Z_][a-zA-Z0-9_]*.
+    * 4. DDL and DML cannot be combined in the same query.
    *
    * @throws {CypherSemanticError} if any rule is violated.
    */
   private _checkIndexDdlValidity(ast: QueryAst): QueryAst {
+    // ── Index name format pattern ──────────────────────────────────
+    const VALID_NAME = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+
     const hasDdl = !!(ast.createIndex || ast.dropIndex || ast.showIndexes);
     if (!hasDdl) return ast;
 
@@ -1084,6 +1089,15 @@ export class Semantic {
     if (ast.createIndex && !ast.createIndex.name) {
       throw new CypherSemanticError(
         'Index name is required for CREATE INDEX',
+      );
+    }
+
+    // ── Rule 1b: CREATE INDEX name format ──────────────────────────
+    if (ast.createIndex && !VALID_NAME.test(ast.createIndex.name)) {
+      throw new CypherSemanticError(
+        `Invalid index name '${ast.createIndex.name}'. Index names must ` +
+        `start with a letter or underscore and contain only alphanumeric ` +
+        `characters and underscores.`,
       );
     }
 
@@ -1098,6 +1112,15 @@ export class Semantic {
     if (ast.dropIndex && !ast.dropIndex.name) {
       throw new CypherSemanticError(
         'Index name is required for DROP INDEX',
+      );
+    }
+
+    // ── Rule 3b: DROP INDEX name format ────────────────────────────
+    if (ast.dropIndex && !VALID_NAME.test(ast.dropIndex.name)) {
+      throw new CypherSemanticError(
+        `Invalid index name '${ast.dropIndex.name}'. Index names must ` +
+        `start with a letter or underscore and contain only alphanumeric ` +
+        `characters and underscores.`,
       );
     }
 

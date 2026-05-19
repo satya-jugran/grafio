@@ -718,6 +718,11 @@ describe('Parser', () => {
         .toThrow(CypherSyntaxError);
     });
 
+    it('rejects DROP INDEX with missing name', () => {
+      expect(() => parse('DROP INDEX'))
+        .toThrow(CypherSyntaxError);
+    });
+
     it('rejects CREATE INDEX with missing ON clause', () => {
       expect(() => parse('CREATE INDEX idx FOR (n:P)'))
         .toThrow(CypherSyntaxError);

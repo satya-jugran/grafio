@@ -404,8 +404,18 @@ export class Parser {
   private _parseCreateIndex(): QueryAst {
     this._consume(TokenKind.CREATE, "Expected 'CREATE'");
     this._consume(TokenKind.INDEX, "Expected 'INDEX' after 'CREATE'");
-    const nameToken = this._consume(TokenKind.IDENT, "Expected index name after 'INDEX'");
-    const name = nameToken.value;
+    let name = '';
+    while (!this._check(TokenKind.FOR) && !this._isAtEnd()) {
+      name += this._advance().value;
+    }
+    if (name === '') {
+      const token = this._peek();
+      throw new CypherSyntaxError(
+        "Expected index name after 'INDEX'",
+        token.line,
+        token.col,
+      );
+    }
 
     // FOR
     this._consume(TokenKind.FOR, "Expected 'FOR' after index name");
@@ -483,15 +493,24 @@ export class Parser {
   private _parseDropIndex(): QueryAst {
     this._consume(TokenKind.DROP, "Expected 'DROP'");
     this._consume(TokenKind.INDEX, "Expected 'INDEX' after 'DROP'");
-    const nameToken = this._consume(TokenKind.IDENT, "Expected index name after 'DROP INDEX'");
-    this._ensureAtEnd('DROP INDEX');
+    let name = '';
+    while (!this._isAtEnd()) {
+      name += this._advance().value;
+    }
+    if (name === '') {
+      throw new CypherSyntaxError(
+        "Expected index name after 'INDEX'",
+        this._peek().line,
+        this._peek().col,
+      );
+    }
 
     return {
       kind: 'Query',
       match: { kind: 'Match', patterns: [] },
       dropIndex: {
         kind: 'DropIndex',
-        name: nameToken.value,
+        name: name.trim(),
       },
       return: { kind: 'Return', distinct: false, items: [] },
     };
