@@ -71,6 +71,24 @@ describe('Semantic', () => {
     });
   });
 
+  // ── CREATE uniqueness ──────────────────────────────────────────
+  describe('CREATE uniqueness', () => {
+    it('allows MATCH-bound variables as references in CREATE patterns', () => {
+      // MATCH (a) CREATE (a)-[:R]->(b) uses 'a' as a reference to
+      // connect the new node 'b' — it does NOT re-bind 'a'.
+      expect(() =>
+        analyse('MATCH (a) CREATE (a)-[:R]->(b) RETURN a, b'),
+      ).not.toThrow();
+    });
+
+    it('rejects a MATCH-bound variable used as a standalone CREATE node', () => {
+      // CREATE (a) when 'a' is already bound in MATCH is true re-binding.
+      expect(() => analyse('MATCH (a) CREATE (a) RETURN a')).toThrow(
+        CypherSemanticError,
+      );
+    });
+  });
+
   // ── Semantic Analysis for Aggregates ────────────────────────────
   describe('Semantic Analysis for Aggregates', () => {
     // -- Valid aggregate queries --

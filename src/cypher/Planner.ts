@@ -111,8 +111,12 @@ export class Planner {
 
     // ── NEW: Emit CREATE steps ─────────────────────────────────────
     if (ast.create) {
+      // Build a set of MATCH-bound variable names so that nodes
+      // already in scope are treated as endpoints rather than
+      // being re-created.
+      const matchVarNames = new Set(varRegistry.keys());
       for (const pattern of ast.create.patterns) {
-        this._planCreatePath(pattern, steps);
+        this._planCreatePath(pattern, steps, matchVarNames);
       }
     }
 
@@ -217,13 +221,20 @@ export class Planner {
    * Convert a CREATE pattern path (or named path) into write plan steps.
    *
    * Walks the pattern's path elements:
-   * - For each node pattern → emits a {@link CreateNodeStep}
+   * - For each node pattern → emits a {@link CreateNodeStep} **unless**
+   *   the variable is already bound in MATCH (it is then treated as an
+   *   existing endpoint reference).
    * - For each edge pattern → emits a {@link CreateEdgeStep} with
-   *   source = previous node variable, target = current node variable
+   *   source = previous node variable, target = current node variable.
+   *
+   * @param matchVarNames - Set of variable names already bound by the
+   *   MATCH clause.  Nodes whose variables appear in this set are
+   *   skipped (no {@code CreateNodeStep} emitted).
    */
   private _planCreatePath(
     pattern: import('./ast/AstNode').MatchPattern,
     steps: PlanStep[],
+    matchVarNames: ReadonlySet<string>,
   ): void {
     const segments = getPatternSegments(pattern);
     if (segments.length === 0) return;
@@ -240,12 +251,16 @@ export class Planner {
           node.variable ??
           this._patternPlanner._syntheticVar('create_node', createIdx++);
 
-        steps.push({
-          kind: 'CreateNodeStep',
-          variable,
-          labels: node.labels,
-          properties: node.properties,
-        });
+        // Skip CreateNodeStep when the variable is already bound
+        // by MATCH — it refers to an existing node, not a new one.
+        if (!matchVarNames.has(variable)) {
+          steps.push({
+            kind: 'CreateNodeStep',
+            variable,
+            labels: node.labels,
+            properties: node.properties,
+          });
+        }
 
         prevNodeVar = variable;
       } else {
@@ -268,7 +283,8 @@ export class Planner {
 
         // Emit the target node CREATE step BEFORE the edge so both
         // endpoints are bound in the row when the edge is created.
-        if (targetNode) {
+        // Skip when the target variable is already MATCH-bound.
+        if (targetNode && !matchVarNames.has(targetVar)) {
           steps.push({
             kind: 'CreateNodeStep',
             variable: targetVar,
@@ -277,6 +293,12 @@ export class Planner {
           });
           prevNodeVar = targetVar;
           i++; // skip the already-processed target node
+        } else if (targetNode) {
+          // Target node already exists; record its variable so the
+          // edge can reference it, but don't skip the segment
+          // (the segment was not "consumed" by CreateNodeStep).
+          prevNodeVar = targetVar;
+          i++; // advance past this node segment
         }
 
         steps.push({
