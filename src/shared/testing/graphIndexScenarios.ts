@@ -45,7 +45,7 @@ export function runGraphIndexScenarios(
         await graph.addNode('Course', { title: 'Math' });
 
         // Should not throw
-        await expect(graph.createIndex('node', 'email')).resolves.toBeUndefined();
+        await expect(graph.createIndex('node', ['email'])).resolves.toBeUndefined();
       });
 
       it('should create compound index on node property with type', async () => {
@@ -54,7 +54,7 @@ export function runGraphIndexScenarios(
         await graph.addNode('Course', { title: 'Math' });
 
         // Create compound index for Person nodes only
-        await expect(graph.createIndex('node', 'email')).resolves.toBeUndefined();
+        await expect(graph.createIndex('node', ['email'])).resolves.toBeUndefined();
       });
 
       it('should create simple index with type=*', async () => {
@@ -62,21 +62,21 @@ export function runGraphIndexScenarios(
         await graph.addNode('Course', { title: 'Math', email: 'math@example.com' });
 
         // type='*' should create simple index across all types
-        await expect(graph.createIndex('node', 'email')).resolves.toBeUndefined();
+        await expect(graph.createIndex('node', ['email'])).resolves.toBeUndefined();
       });
 
       it('should be idempotent - calling twice should not error', async () => {
         await graph.addNode('Person', { name: 'Alice', email: 'alice@example.com' });
 
-        await expect(graph.createIndex('node', 'email')).resolves.toBeUndefined();
-        await expect(graph.createIndex('node', 'email')).resolves.toBeUndefined();
+        await expect(graph.createIndex('node', ['email'])).resolves.toBeUndefined();
+        await expect(graph.createIndex('node', ['email'])).resolves.toBeUndefined();
       });
 
       it('should allow multiple indexes on same target', async () => {
         await graph.addNode('Person', { name: 'Alice', email: 'alice@example.com', age: 30 });
 
-        await expect(graph.createIndex('node', 'email')).resolves.toBeUndefined();
-        await expect(graph.createIndex('node', 'age')).resolves.toBeUndefined();
+        await expect(graph.createIndex('node', ['email'])).resolves.toBeUndefined();
+        await expect(graph.createIndex('node', ['age'])).resolves.toBeUndefined();
       });
     });
 
@@ -89,7 +89,7 @@ export function runGraphIndexScenarios(
         await graph.addEdge(alice.id, bob.id, 'KNOWS', { weight: 0.8 });
         await graph.addEdge(bob.id, carol.id, 'KNOWS', { weight: 0.9 });
 
-        await expect(graph.createIndex('edge', 'weight')).resolves.toBeUndefined();
+        await expect(graph.createIndex('edge', ['weight'])).resolves.toBeUndefined();
       });
 
       it('should create compound index on edge property with type', async () => {
@@ -101,7 +101,7 @@ export function runGraphIndexScenarios(
         await graph.addEdge(bob.id, carol.id, 'KNOWS', { weight: 0.9 });
 
         // Create compound index for LIKES edges only
-        await expect(graph.createIndex('edge', 'weight')).resolves.toBeUndefined();
+        await expect(graph.createIndex('edge', ['weight'])).resolves.toBeUndefined();
       });
 
       it('should be idempotent for edges - calling twice should not error', async () => {
@@ -110,8 +110,8 @@ export function runGraphIndexScenarios(
 
         await graph.addEdge(alice.id, bob.id, 'KNOWS', { weight: 0.8 });
 
-        await expect(graph.createIndex('edge', 'weight')).resolves.toBeUndefined();
-        await expect(graph.createIndex('edge', 'weight')).resolves.toBeUndefined();
+        await expect(graph.createIndex('edge', ['weight'])).resolves.toBeUndefined();
+        await expect(graph.createIndex('edge', ['weight'])).resolves.toBeUndefined();
       });
     });
 
@@ -121,7 +121,7 @@ export function runGraphIndexScenarios(
         await graph.addNode('Person', { name: 'Bob', email: 'bob@example.com' });
         await graph.addNode('Course', { title: 'Math' });
 
-        await graph.createIndex('node', 'email');
+        await graph.createIndex('node', ['email']);
 
         const results = await graph.getNodes({ filter: { properties: [{ key: 'email', value: 'alice@example.com' }] } });
         expect(results).toHaveLength(1);
@@ -133,7 +133,7 @@ export function runGraphIndexScenarios(
         await graph.addNode('Person', { name: 'Bob', email: 'bob@example.com' });
         await graph.addNode('Course', { title: 'Math', email: 'math@example.com' });
 
-        await graph.createIndex('node', 'email');
+        await graph.createIndex('node', ['email']);
 
         const results = await graph.getNodes({ filter: { types: ['Person'], properties: [{ key: 'email', value: 'alice@example.com' }] } });
         expect(results).toHaveLength(1);
@@ -143,7 +143,7 @@ export function runGraphIndexScenarios(
       it('should return empty array when property value does not match', async () => {
         await graph.addNode('Person', { name: 'Alice', email: 'alice@example.com' });
 
-        await graph.createIndex('node', 'email');
+        await graph.createIndex('node', ['email']);
 
         const results = await graph.getNodes({ filter: { properties: [{ key: 'email', value: 'notexist@example.com' }] } });
         expect(results).toHaveLength(0);
@@ -154,7 +154,7 @@ export function runGraphIndexScenarios(
         await graph.addNode('Person', { name: 'Bob', city: 'NYC' });
         await graph.addNode('Person', { name: 'Carol', city: 'LA' });
 
-        await graph.createIndex('node', 'city');
+        await graph.createIndex('node', ['city']);
 
         const results = await graph.getNodes({ filter: { properties: [{ key: 'city', value: 'NYC' }] } });
         expect(results).toHaveLength(2);
@@ -170,7 +170,7 @@ export function runGraphIndexScenarios(
         await graph.addEdge(alice.id, bob.id, 'KNOWS', { weight: 0.8 });
         await graph.addEdge(bob.id, carol.id, 'KNOWS', { weight: 0.9 });
 
-        await graph.createIndex('edge', 'weight');
+        await graph.createIndex('edge', ['weight']);
 
         const results = await graph.getEdges({ filter: { properties: [{ key: 'weight', value: 0.8 }] } });
         expect(results).toHaveLength(1);
@@ -185,7 +185,7 @@ export function runGraphIndexScenarios(
         await graph.addEdge(alice.id, bob.id, 'LIKES', { weight: 0.8 });
         await graph.addEdge(bob.id, carol.id, 'KNOWS', { weight: 0.9 });
 
-        await graph.createIndex('edge', 'weight');
+        await graph.createIndex('edge', ['weight']);
 
         const results = await graph.getEdges({ filter: { types: ['LIKES'], properties: [{ key: 'weight', value: 0.8 }] } });
         expect(results).toHaveLength(1);
@@ -197,7 +197,7 @@ export function runGraphIndexScenarios(
 
         await graph.addEdge(alice.id, bob.id, 'KNOWS', { weight: 0.8 });
 
-        await graph.createIndex('edge', 'weight');
+        await graph.createIndex('edge', ['weight']);
 
         const results = await graph.getEdges({ filter: { properties: [{ key: 'weight', value: 0.5 }] } });
         expect(results).toHaveLength(0);
@@ -212,7 +212,7 @@ export function runGraphIndexScenarios(
         await graph.addEdge(alice.id, bob.id, 'KNOWS', { weight: 0.8 });
         await graph.addEdge(carol.id, dave.id, 'KNOWS', { weight: 0.8 });
 
-        await graph.createIndex('edge', 'weight');
+        await graph.createIndex('edge', ['weight']);
 
         const results = await graph.getEdges({ filter: { properties: [{ key: 'weight', value: 0.8 }] } });
         expect(results).toHaveLength(2);
@@ -225,7 +225,7 @@ export function runGraphIndexScenarios(
         await graph.addNode('Person', { name: 'Bob' });
 
         // Creating index on non-existent property should not throw
-        await expect(graph.createIndex('node', 'nonexistent')).resolves.toBeUndefined();
+        await expect(graph.createIndex('node', ['nonexistent'])).resolves.toBeUndefined();
 
         // Querying for that property should return empty
         const results = await graph.getNodes({ filter: { properties: [{ key: 'nonexistent', value: 'value' }] } });
@@ -237,7 +237,7 @@ export function runGraphIndexScenarios(
         await graph.addNode('Person', { name: 'Bob' }); // No email property
         await graph.addNode('Course', { title: 'Math' });
 
-        await graph.createIndex('node', 'email');
+        await graph.createIndex('node', ['email']);
 
         const results = await graph.getNodes({ filter: { properties: [{ key: 'email', value: 'alice@example.com' }] } });
         expect(results).toHaveLength(1);
@@ -247,7 +247,7 @@ export function runGraphIndexScenarios(
         await graph.addNode('Person', { name: 'Alice', email: 'alice@example.com' });
         await graph.addNode('Course', { title: 'Math', email: 'math@example.com' });
 
-        await graph.createIndex('node', 'email');
+        await graph.createIndex('node', ['email']);
 
         // Querying for Course nodes should not return Person nodes
         const results = await graph.getNodes({ filter: { types: ['Course'], properties: [{ key: 'email', value: 'alice@example.com' }] } });

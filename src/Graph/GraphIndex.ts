@@ -477,14 +477,20 @@ export class GraphIndex {
   // ---------------------------------------------------------------------------
 
   /**
-   * Creates an index on a node or edge property.
+   * Creates an index on one or more node or edge properties.
+   * Supports both simple indexes (single property) and compound indexes (multiple properties).
    */
-  async createIndex(target: 'node' | 'edge', propertyKey: string): Promise<void> {
-    await this._store.createIndex(target, propertyKey);
+  async createIndex(target: 'node' | 'edge', propertyKeys: string[]): Promise<void> {
+    await this._store.createIndex(target, propertyKeys);
   }
 
-  async hasIndex(target: 'node' | 'edge', propertyKey: string): Promise<boolean> {
-    return this._store.hasIndex(target, propertyKey);
+  /**
+   * Checks if an index exists that covers the given property keys.
+   * For compound indexes, returns true if ALL provided propertyKeys are covered
+   * by the same index (the index may have additional properties).
+   */
+  async hasIndex(target: 'node' | 'edge', propertyKeys: string[]): Promise<boolean> {
+    return this._store.hasIndex(target, propertyKeys);
   }
 
   // ---------------------------------------------------------------------------
