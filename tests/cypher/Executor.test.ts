@@ -1213,6 +1213,38 @@ describe('Executor', () => {
       expect(edges).toHaveLength(1);
     });
 
+    it('CREATE node and edge in single query', async () => {
+      const result = await executeQuery(
+        "CREATE (a:Person {name: 'Alice'})-[:KNOWS {since: 2024}]->(b:Person {name: 'Bob'}) RETURN a, b",
+        {},
+        graph,
+      );
+
+      expect(result.rows).toHaveLength(1);
+
+      const a = result.rows[0].a as Node;
+      expect(a.type).toBe('Person');
+      expect(a.properties).toEqual({ name: 'Alice' });
+
+      const b = result.rows[0].b as Node;
+      expect(b.type).toBe('Person');
+      expect(b.properties).toEqual({ name: 'Bob' });
+
+      expect(result.summary.nodesCreated).toBe(2);
+      expect(result.summary.edgesCreated).toBe(1);
+
+      // Verify both nodes and the edge were persisted
+      const nodes = await graph.getNodes();
+      expect(nodes).toHaveLength(2);
+
+      const edges = await graph.getEdges();
+      expect(edges).toHaveLength(1);
+      expect(edges[0].type).toBe('KNOWS');
+      expect(edges[0].properties).toEqual({ since: 2024 });
+      expect(edges[0].sourceId).toBe(a.id);
+      expect(edges[0].targetId).toBe(b.id);
+    });
+
     it('DELETE node without edges', async () => {
       const node = await graph.addNode('Person', { name: 'Alice' });
 

@@ -249,8 +249,8 @@ export class Planner {
 
         prevNodeVar = variable;
       } else {
-        // EdgePattern — emitted after the next NodePattern has been
-        // processed so we know both source and target.
+        // EdgePattern — emit the target node first so it's bound
+        // before the edge step tries to reference it at runtime.
         const edge = seg as EdgePattern;
         // Peek at the next segment (must be a node)
         const nextSeg = segments[i + 1];
@@ -266,24 +266,8 @@ export class Planner {
           edge.variable ??
           this._patternPlanner._syntheticVar('create_edge', createIdx++);
 
-        steps.push({
-          kind: 'CreateEdgeStep',
-          variable: edgeVar,
-          source: sourceVar,
-          target: targetVar,
-          types: edge.types,
-          properties: edge.properties,
-        });
-
-        // Advance: the target node now becomes the previous node for
-        // the next edge in the chain.
-        // Also emit the target node as a CreateNodeStep if it hasn't
-        // been emitted yet (it will be emitted when we encounter it
-        // in the loop at i+1). But we need to skip that iteration
-        // since we already handled it here.
-        // However, the loop will process it at i+1, which would
-        // double-emit. To handle this cleanly, we emit the target
-        // node here and skip the next segment.
+        // Emit the target node CREATE step BEFORE the edge so both
+        // endpoints are bound in the row when the edge is created.
         if (targetNode) {
           steps.push({
             kind: 'CreateNodeStep',
@@ -294,6 +278,15 @@ export class Planner {
           prevNodeVar = targetVar;
           i++; // skip the already-processed target node
         }
+
+        steps.push({
+          kind: 'CreateEdgeStep',
+          variable: edgeVar,
+          source: sourceVar,
+          target: targetVar,
+          types: edge.types,
+          properties: edge.properties,
+        });
       }
     }
   }
