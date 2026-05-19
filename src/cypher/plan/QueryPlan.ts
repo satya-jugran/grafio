@@ -8,7 +8,7 @@
  * @module cypher/plan/QueryPlan
  */
 
-import { Expression } from '../ast/AstNode';
+import { Expression, PropertyMap } from '../ast/AstNode';
 
 // ── Shared filter types ───────────────────────────────────────────
 
@@ -51,7 +51,12 @@ export type PlanStep =
   | ProjectStep
   | SortStep
   | LimitStep
-  | AggregateStep;
+  | AggregateStep
+  | CreateNodeStep
+  | CreateEdgeStep
+  | SetPropertyStep
+  | DeleteEntityStep
+  | RemovePropertyStep;
 
 // ── Individual step types ─────────────────────────────────────────
 
@@ -277,6 +282,67 @@ export interface AggregateStep {
    * When empty/undefined, aggregates across all edge types.
    */
   edgeTypes?: string[];
+}
+
+// ── Write steps ─────────────────────────────────────────────────────
+
+/** Create a node and bind it to a variable. */
+export interface CreateNodeStep {
+  kind: 'CreateNodeStep';
+  /** Variable name to bind the newly created node. */
+  variable: string;
+  /** Node type(s) — e.g. `['Person']` for `CREATE (n:Person)`. */
+  labels: string[];
+  /** Inline properties (with ParameterRef resolved to values). */
+  properties: PropertyMap;
+}
+
+/** Create an edge and bind it to a variable. */
+export interface CreateEdgeStep {
+  kind: 'CreateEdgeStep';
+  /** Edge variable name. */
+  variable: string;
+  /** Source node variable (must be bound in current row). */
+  source: string;
+  /** Target node variable (must be bound in current row). */
+  target: string;
+  /** Edge type(s). */
+  types: string[];
+  /** Inline properties. */
+  properties: PropertyMap;
+}
+
+/** Set one or more properties on a matched or created entity. */
+export interface SetPropertyStep {
+  kind: 'SetPropertyStep';
+  /** The variable name of the entity being modified. */
+  variable: string;
+  /** Which kind of entity. */
+  entityKind: 'node' | 'edge';
+  /** Property assignments. */
+  assignments: Array<{ key: string; value: Expression }>;
+}
+
+/** Delete a matched entity (node or edge). */
+export interface DeleteEntityStep {
+  kind: 'DeleteEntityStep';
+  /** The variable name of the entity to delete. */
+  variable: string;
+  /** Whether this is a node or edge. */
+  entityKind: 'node' | 'edge';
+  /** If true, cascade-delete incident edges (DETACH DELETE). */
+  detach: boolean;
+}
+
+/** Remove a property from a matched entity. */
+export interface RemovePropertyStep {
+  kind: 'RemovePropertyStep';
+  /** The variable name of the entity. */
+  variable: string;
+  /** Which kind of entity. */
+  entityKind: 'node' | 'edge';
+  /** Property key to remove. */
+  property: string;
 }
 
 // ── Execution statistics ─────────────────────────────────────────

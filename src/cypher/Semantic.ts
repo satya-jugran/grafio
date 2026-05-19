@@ -7,11 +7,17 @@
  * it (possibly annotated) or throws {@link CypherSemanticError}.
  *
  * ### Current passes (in order)
- * | # | Pass                     | Responsibility                           |
- * |---|--------------------------|------------------------------------------|
- * | 1 | `resolveScopes`          | Collect variable bindings from MATCH     |
- * | 2 | `checkUnresolvedVars`    | Detect references to undefined variables |
- * | 3 | `checkDuplicateBindings` | Detect variables bound more than once    |
+ * | # | Pass                     | Responsibility                                    |
+ * |---|--------------------------|---------------------------------------------------|
+ * | 1 | `resolveScopes`          | Collect variable bindings from MATCH              |
+ * | 2 | `checkUnresolvedVars`    | Detect references to undefined variables           |
+ * | 3 | `checkDuplicateBindings` | Detect variables bound more than once              |
+ * | 4 | `checkCreateUniqueness`  | Ensure CREATE vars don't shadow MATCH vars         |
+ * | 5 | `checkWriteScope`        | Verify SET/DELETE/REMOVE vars are in scope         |
+ * | 6 | `checkDeleteSafety`      | Detect deleted vars used in RETURN/SET             |
+ * | 7 | `checkSetTypes`          | Validate SET values are primitives                 |
+ * | 8 | `checkAggregateGrouping` | Validate aggregate + grouping key rules            |
+ * | 9 | `checkHavingClause`      | Validate HAVING clause                             |
  *
  * ### Extensibility
  * New semantic rules are added by appending a pass function to the `_passes`
@@ -25,6 +31,10 @@ import {
   QueryAst,
   MatchClause,
   WhereClause,
+  CreateClause,
+  SetClause,
+  DeleteClause,
+  RemoveClause,
   ReturnClause,
   ReturnItem,
   OrderByClause,
@@ -99,6 +109,10 @@ export class Semantic {
     this._resolveScopes.bind(this),
     this._checkUnresolvedVars.bind(this),
     this._checkDuplicateBindings.bind(this),
+    this._checkCreateUniqueness.bind(this),
+    this._checkWriteScope.bind(this),
+    this._checkDeleteSafety.bind(this),
+    this._checkSetTypes.bind(this),
     this._checkAggregateGrouping.bind(this),
     this._checkHavingClause.bind(this),
   ];
@@ -198,14 +212,18 @@ export class Semantic {
    * @throws {CypherSemanticError} if an undefined variable is referenced.
    */
   private _checkUnresolvedVars(ast: QueryAst): QueryAst {
+    // Build the extra scope from CREATE patterns so variables introduced
+    // by CREATE can be referenced in RETURN, WHERE, ORDER BY, etc.
+    const extraScope = this._collectCreateScope(ast);
+
     // Check WHERE clause.
     if (ast.where) {
-      this._checkExpressionVars(ast.where.expression, 'WHERE');
+      this._checkExpressionVars(ast.where.expression, 'WHERE', extraScope);
     }
 
     // Check RETURN items.
     for (const item of ast.return.items) {
-      this._checkExpressionVars(item.expression, 'RETURN');
+      this._checkExpressionVars(item.expression, 'RETURN', extraScope);
     }
 
     // Check ORDER BY items.
@@ -226,21 +244,22 @@ export class Semantic {
             item.expression,
             'ORDER BY',
             allowedAliases,
+            extraScope,
           );
         } else {
-          this._checkExpressionVars(item.expression, 'ORDER BY');
+          this._checkExpressionVars(item.expression, 'ORDER BY', extraScope);
         }
       }
     }
 
     // Check SKIP expression.
     if (ast.skip) {
-      this._checkExpressionVars(ast.skip.expression, 'SKIP');
+      this._checkExpressionVars(ast.skip.expression, 'SKIP', extraScope);
     }
 
     // Check LIMIT expression.
     if (ast.limit) {
-      this._checkExpressionVars(ast.limit.expression, 'LIMIT');
+      this._checkExpressionVars(ast.limit.expression, 'LIMIT', extraScope);
     }
 
     return ast;
@@ -250,12 +269,18 @@ export class Semantic {
    * Recursively walk an expression tree and verify that every
    * {@link IdentifierExpr} refers to a defined variable.
    *
+   * @param extraScope - Additional variable bindings from CREATE that
+   *   are not tracked in the main MATCH scope table.
    * @throws {CypherSemanticError} on the first unresolved reference.
    */
-  private _checkExpressionVars(expr: Expression, clause: string): void {
+  private _checkExpressionVars(
+    expr: Expression,
+    clause: string,
+    extraScope?: ReadonlySet<string>,
+  ): void {
     switch (expr.kind) {
       case 'Identifier': {
-        if (!this._scope.has(expr.name)) {
+        if (!this._scope.has(expr.name) && !extraScope?.has(expr.name)) {
           throw new CypherSemanticError(
             `Variable '${expr.name}' is not defined in ${clause} clause. ` +
             `Defined variables: ${[...this._scope.keys()].join(', ') || '(none)'}`,
@@ -265,36 +290,36 @@ export class Semantic {
       }
 
       case 'PropertyAccess':
-        this._checkExpressionVars(expr.object, clause);
+        this._checkExpressionVars(expr.object, clause, extraScope);
         return;
 
       case 'Binary':
-        this._checkExpressionVars(expr.left, clause);
-        this._checkExpressionVars(expr.right, clause);
+        this._checkExpressionVars(expr.left, clause, extraScope);
+        this._checkExpressionVars(expr.right, clause, extraScope);
         return;
 
       case 'Unary':
-        this._checkExpressionVars(expr.operand, clause);
+        this._checkExpressionVars(expr.operand, clause, extraScope);
         return;
 
       case 'In':
-        this._checkExpressionVars(expr.expression, clause);
-        this._checkExpressionVars(expr.list, clause);
+        this._checkExpressionVars(expr.expression, clause, extraScope);
+        this._checkExpressionVars(expr.list, clause, extraScope);
         return;
 
       case 'IsNull':
-        this._checkExpressionVars(expr.expression, clause);
+        this._checkExpressionVars(expr.expression, clause, extraScope);
         return;
 
       case 'List':
         for (const elem of expr.elements) {
-          this._checkExpressionVars(elem, clause);
+          this._checkExpressionVars(elem, clause, extraScope);
         }
         return;
 
       case 'FunctionCall':
         for (const arg of expr.args) {
-          this._checkExpressionVars(arg, clause);
+          this._checkExpressionVars(arg, clause, extraScope);
         }
         return;
 
@@ -311,6 +336,8 @@ export class Semantic {
    * are present so that aggregate aliases and group-by key aliases
    * (which are not in the MATCH scope) pass validation.
    *
+   * @param extraScope - Additional variable bindings from CREATE that
+   *   are not tracked in the main MATCH scope table.
    * @throws {CypherSemanticError} on the first unresolved reference that
    *         is not in the allowed set.
    */
@@ -318,6 +345,7 @@ export class Semantic {
     expr: Expression,
     clause: string,
     allowed: ReadonlySet<string>,
+    extraScope?: ReadonlySet<string>,
   ): void {
     switch (expr.kind) {
       case 'Identifier': {
@@ -333,8 +361,8 @@ export class Semantic {
               `Use an aggregate alias or a group-by key alias.`,
             );
           }
-        } else if (!this._scope.has(expr.name)) {
-          // Pre-aggregation context: check the MATCH scope.
+        } else if (!this._scope.has(expr.name) && !extraScope?.has(expr.name)) {
+          // Pre-aggregation context: check the MATCH scope + CREATE extras.
           throw new CypherSemanticError(
             `Variable '${expr.name}' is not defined in ${clause} clause. ` +
             `Defined variables: ${[...this._scope.keys()].join(', ') || '(none)'}` +
@@ -347,36 +375,36 @@ export class Semantic {
       }
 
       case 'PropertyAccess':
-        this._checkExpressionVarsWithAllowed(expr.object, clause, allowed);
+        this._checkExpressionVarsWithAllowed(expr.object, clause, allowed, extraScope);
         return;
 
       case 'Binary':
-        this._checkExpressionVarsWithAllowed(expr.left, clause, allowed);
-        this._checkExpressionVarsWithAllowed(expr.right, clause, allowed);
+        this._checkExpressionVarsWithAllowed(expr.left, clause, allowed, extraScope);
+        this._checkExpressionVarsWithAllowed(expr.right, clause, allowed, extraScope);
         return;
 
       case 'Unary':
-        this._checkExpressionVarsWithAllowed(expr.operand, clause, allowed);
+        this._checkExpressionVarsWithAllowed(expr.operand, clause, allowed, extraScope);
         return;
 
       case 'In':
-        this._checkExpressionVarsWithAllowed(expr.expression, clause, allowed);
-        this._checkExpressionVarsWithAllowed(expr.list, clause, allowed);
+        this._checkExpressionVarsWithAllowed(expr.expression, clause, allowed, extraScope);
+        this._checkExpressionVarsWithAllowed(expr.list, clause, allowed, extraScope);
         return;
 
       case 'IsNull':
-        this._checkExpressionVarsWithAllowed(expr.expression, clause, allowed);
+        this._checkExpressionVarsWithAllowed(expr.expression, clause, allowed, extraScope);
         return;
 
       case 'List':
         for (const elem of expr.elements) {
-          this._checkExpressionVarsWithAllowed(elem, clause, allowed);
+          this._checkExpressionVarsWithAllowed(elem, clause, allowed, extraScope);
         }
         return;
 
       case 'FunctionCall':
         for (const arg of expr.args) {
-          this._checkExpressionVarsWithAllowed(arg, clause, allowed);
+          this._checkExpressionVarsWithAllowed(arg, clause, allowed, extraScope);
         }
         return;
 
@@ -736,5 +764,297 @@ export class Semantic {
     }
 
     return ast;
+  }
+
+  // ── Pass 6: CREATE uniqueness ───────────────────────────────────
+
+  /**
+   * Ensure variables introduced in CREATE patterns do not shadow existing
+   * MATCH variables within the same query.
+   *
+   * openCypher rule: a variable that is already bound cannot be re-bound.
+   *
+   * Already-bound MATCH variables that appear in CREATE path patterns
+   * (e.g. {@code MATCH (a) CREATE (a)-[:R]->(b)}) are treated as
+   * *references* — they serve as endpoints for new relationships and are
+   * not re-bindings.  Only a standalone CREATE node whose variable is
+   * already bound in MATCH is flagged as a true re-binding error.
+   *
+   * @throws {CypherSemanticError} if a CREATE node variable is already
+   *         in MATCH scope and the pattern contains no edge segments.
+   */
+  private _checkCreateUniqueness(ast: QueryAst): QueryAst {
+    if (!ast.create) return ast;
+
+    for (const pattern of ast.create.patterns) {
+      const segments = getPatternSegments(pattern);
+      const hasEdges = segments.some(s => s.kind === 'EdgePattern');
+
+      // Path patterns with edges use node variables as endpoints
+      // (references), never as re-bindings.
+      if (hasEdges) continue;
+
+      // Standalone node pattern(s): any node variable already bound
+      // in MATCH is a true re-binding.
+      for (const seg of segments) {
+        if (
+          seg.kind === 'NodePattern' &&
+          seg.variable &&
+          this._scope.has(seg.variable)
+        ) {
+          throw new CypherSemanticError(
+            `Variable '${seg.variable}' already bound in MATCH. ` +
+            `Cannot re-bind variables across MATCH and CREATE.`,
+          );
+        }
+      }
+    }
+
+    return ast;
+  }
+
+  // ── Pass 7: Write-scope validation ──────────────────────────────
+
+  /**
+   * Verify that all variables referenced in SET, DELETE, and REMOVE clauses
+   * are bound in either the MATCH scope or the CREATE scope.
+   *
+   * CREATE introduces new variable bindings into scope that downstream
+   * clauses (SET, RETURN, REMOVE) can reference.
+   *
+   * @throws {CypherSemanticError} if a variable used in a write clause is undefined.
+   */
+  private _checkWriteScope(ast: QueryAst): QueryAst {
+    if (!ast.set && !ast.delete && !ast.remove) return ast;
+
+    // Build the full set of known variables: MATCH scope ∪ CREATE scope.
+    const knownVars = new Set(this._scope.keys());
+    const createScope = this._collectCreateScope(ast);
+    for (const v of createScope) knownVars.add(v);
+
+    // SET clause: the variable property-access target must be in scope.
+    if (ast.set) {
+      for (const item of ast.set.items) {
+        this._checkExpressionVarsBound(item.variable, 'SET', knownVars);
+      }
+    }
+
+    // DELETE clause: each variable must be in scope.
+    if (ast.delete) {
+      for (const varName of ast.delete.variables) {
+        if (!knownVars.has(varName)) {
+          throw new CypherSemanticError(
+            `Variable '${varName}' not defined in DELETE clause. ` +
+            `Defined variables: ${[...knownVars].join(', ') || '(none)'}`,
+          );
+        }
+      }
+    }
+
+    // REMOVE clause: each target variable must be in scope.
+    if (ast.remove) {
+      for (const item of ast.remove.items) {
+        if (!knownVars.has(item.variable.name)) {
+          throw new CypherSemanticError(
+            `Variable '${item.variable.name}' not defined in REMOVE clause. ` +
+            `Defined variables: ${[...knownVars].join(', ') || '(none)'}`,
+          );
+        }
+      }
+    }
+
+    return ast;
+  }
+
+  // ── Pass 8: Delete safety ───────────────────────────────────────
+
+  /**
+   * Check that variables deleted in the DELETE clause are not subsequently
+   * referenced in SET within the same query.
+   *
+   * openCypher semantics: RETURN after DELETE is valid — the row is emitted
+   * before the variable binding is removed from the row buffer.
+   * SET after DELETE is rejected because writing to a deleted variable
+   * makes no sense.
+   *
+   * @throws {CypherSemanticError} if a deleted variable appears in SET.
+   */
+  private _checkDeleteSafety(ast: QueryAst): QueryAst {
+    if (!ast.delete) return ast;
+
+    const deletedVars = new Set(ast.delete.variables);
+
+    // Check SET clause — writing to a deleted variable makes no sense.
+    if (ast.set) {
+      for (const item of ast.set.items) {
+        if (this._expressionReferencesAny(item.variable, deletedVars)) {
+          throw new CypherSemanticError(
+            `Cannot SET property on deleted variable. ` +
+            `Variables deleted: ${[...deletedVars].join(', ')}`,
+          );
+        }
+      }
+    }
+
+    return ast;
+  }
+
+  // ── Pass 9: SET type checking ───────────────────────────────────
+
+  /**
+   * Ensure that property values assigned in SET are flat primitives
+   * (string, number, boolean, null), matching the Graph layer's
+   * `isPrimitive` constraint.
+   *
+   * Array literals (ListExpr) are rejected; all other expression types
+   * are allowed since they may resolve to primitives at runtime.
+   *
+   * @throws {CypherSemanticError} if a SET value is a non-primitive literal.
+   */
+  private _checkSetTypes(ast: QueryAst): QueryAst {
+    if (!ast.set) return ast;
+
+    for (const item of ast.set.items) {
+      if (!this._isPrimitiveExpression(item.value)) {
+        throw new CypherSemanticError(
+          'Property value must be a primitive type (string, number, boolean, or null)',
+        );
+      }
+    }
+
+    return ast;
+  }
+
+  // ── Write-pass helpers ──────────────────────────────────────────
+
+  /**
+   * Collect all variable names introduced by CREATE patterns into a Set.
+   *
+   * Walks the pattern paths in the CREATE clause the same way
+   * {@link _resolveScopes} walks MATCH patterns.
+   */
+  private _collectCreateScope(ast: QueryAst): Set<string> {
+    const vars = new Set<string>();
+    if (!ast.create) return vars;
+
+    for (const pattern of ast.create.patterns) {
+      // Handle NamedPath binding.
+      if (pattern.kind === 'NamedPath' && pattern.name) {
+        vars.add(pattern.name);
+      }
+      const segments = getPatternSegments(pattern);
+      for (const segment of segments) {
+        if (segment.kind === 'NodePattern' && segment.variable) {
+          vars.add(segment.variable);
+        } else if (segment.kind === 'EdgePattern' && segment.variable) {
+          vars.add(segment.variable);
+        }
+      }
+    }
+
+    return vars;
+  }
+
+  /**
+   * Verify that an expression (used as a SET target) only references
+   * variables present in the given set of known variable names.
+   *
+   * @throws {CypherSemanticError} on the first unresolved reference.
+   */
+  private _checkExpressionVarsBound(
+    expr: Expression,
+    clause: string,
+    knownVars: ReadonlySet<string>,
+  ): void {
+    switch (expr.kind) {
+      case 'Identifier': {
+        if (!knownVars.has(expr.name)) {
+          throw new CypherSemanticError(
+            `Variable '${expr.name}' not defined in ${clause} clause. ` +
+            `Defined variables: ${[...knownVars].join(', ') || '(none)'}`,
+          );
+        }
+        return;
+      }
+
+      case 'PropertyAccess':
+        this._checkExpressionVarsBound(expr.object, clause, knownVars);
+        return;
+
+      case 'Literal':
+      case 'Parameter':
+        return;
+
+      default:
+        // Binary, Unary, In, IsNull, FunctionCall, List — complex
+        // expressions; allow them (runtime will catch type issues).
+        return;
+    }
+  }
+
+  /**
+   * Recursively check whether an expression tree references any variable
+   * name in the given set.
+   *
+   * @returns `true` if any Identifier leaf in the tree matches a name in `varNames`.
+   */
+  private _expressionReferencesAny(
+    expr: Expression,
+    varNames: ReadonlySet<string>,
+  ): boolean {
+    switch (expr.kind) {
+      case 'Identifier':
+        return varNames.has(expr.name);
+
+      case 'PropertyAccess':
+        return this._expressionReferencesAny(expr.object, varNames);
+
+      case 'Binary':
+        return (
+          this._expressionReferencesAny(expr.left, varNames) ||
+          this._expressionReferencesAny(expr.right, varNames)
+        );
+
+      case 'Unary':
+        return this._expressionReferencesAny(expr.operand, varNames);
+
+      case 'In':
+        return (
+          this._expressionReferencesAny(expr.expression, varNames) ||
+          this._expressionReferencesAny(expr.list, varNames)
+        );
+
+      case 'IsNull':
+        return this._expressionReferencesAny(expr.expression, varNames);
+
+      case 'List':
+        return expr.elements.some(e =>
+          this._expressionReferencesAny(e, varNames),
+        );
+
+      case 'FunctionCall':
+        return expr.args.some(a =>
+          this._expressionReferencesAny(a, varNames),
+        );
+
+      case 'Literal':
+      case 'Parameter':
+        return false;
+    }
+  }
+
+  /**
+   * Determine whether an expression is guaranteed to evaluate to a
+   * primitive value (string, number, boolean, or null).
+   *
+   * Array literals ({@link ListExpr}) are rejected; all other expression
+   * types are allowed since they may resolve to primitives at runtime.
+   */
+  private _isPrimitiveExpression(expr: Expression): boolean {
+    if (expr.kind === 'List') return false;
+    // Literals are primitive by construction (string | number | boolean | null).
+    // Parameters, identifiers, property accesses, function calls, and binary
+    // expressions may resolve to primitives at runtime — be lenient.
+    return true;
   }
 }

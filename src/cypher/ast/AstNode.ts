@@ -26,6 +26,50 @@ export type PropertyValue =
 
 export type PropertyMap = Record<string, PropertyValue>;
 
+// ── Write clauses ─────────────────────────────────────────────────
+
+export interface CreateClause {
+  kind: 'Create';
+  /** One or more pattern paths to create (same structure as MATCH patterns). */
+  patterns: MatchPattern[];
+}
+
+export interface SetClause {
+  kind: 'Set';
+  items: SetItem[];
+}
+
+export interface SetItem {
+  kind: 'SetItem';
+  /** The entity variable being modified (e.g., `n` in `SET n.prop = val`). */
+  variable: Expression;
+  /** The property key. */
+  property: string;
+  /** The value expression. */
+  value: Expression;
+}
+
+export interface DeleteClause {
+  kind: 'Delete';
+  /** Whether DETACH was specified (cascade edge removal). */
+  detach: boolean;
+  /** Variables to delete (must be nodes or edges). */
+  variables: string[];
+}
+
+export interface RemoveClause {
+  kind: 'Remove';
+  items: RemoveItem[];
+}
+
+export interface RemoveItem {
+  kind: 'RemoveItem';
+  /** The variable whose property is being removed. */
+  variable: IdentifierExpr;
+  /** The property key to remove. */
+  property: string;
+}
+
 // ── Top-level query ───────────────────────────────────────────────
 
 export interface QueryAst {
@@ -34,6 +78,14 @@ export interface QueryAst {
   match: MatchClause;
   /** Optional WHERE clause. */
   where?: WhereClause;
+  /** Optional CREATE clause. */
+  create?: CreateClause;
+  /** Optional SET clause. */
+  set?: SetClause;
+  /** Optional DELETE clause. */
+  delete?: DeleteClause;
+  /** Optional REMOVE clause. */
+  remove?: RemoveClause;
   /** The RETURN clause (required). */
   return: ReturnClause;
   /** Optional HAVING clause (post-aggregation filter). */

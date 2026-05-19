@@ -4,8 +4,8 @@ import {
   NodeAlreadyExistsError,
   EdgeAlreadyExistsError,
   NodeNotFoundError,
-  NodeHasEdgesError,
   InvalidPropertyError,
+  NodeHasEdgesError,
 } from '../errors';
 import { isFlatRecord, isPrimitive } from '../utils';
 import type { IStorageProvider, StorageQueryOptions } from '../storage/IStorageProvider';

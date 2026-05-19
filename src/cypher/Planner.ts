@@ -18,7 +18,14 @@
  * @module cypher/Planner
  */
 
-import { QueryAst, Expression } from './ast/AstNode';
+import {
+  QueryAst,
+  Expression,
+  NodePattern,
+  EdgePattern,
+  IdentifierExpr,
+  getPatternSegments,
+} from './ast/AstNode';
 import { QueryPlan, PlanStep } from './plan/QueryPlan';
 import { WhereDecomposer, VarInfo } from './plan/WhereDecomposer';
 import { JoinReorderer } from './plan/JoinReorderer';
@@ -102,6 +109,61 @@ export class Planner {
       });
     }
 
+    // ── NEW: Emit CREATE steps ─────────────────────────────────────
+    if (ast.create) {
+      // Build a set of MATCH-bound variable names so that nodes
+      // already in scope are treated as endpoints rather than
+      // being re-created.
+      const matchVarNames = new Set(varRegistry.keys());
+      for (const pattern of ast.create.patterns) {
+        this._planCreatePath(pattern, steps, matchVarNames);
+      }
+    }
+
+    // ── NEW: Emit SET steps ────────────────────────────────────────
+    if (ast.set) {
+      for (const item of ast.set.items) {
+        const varName =
+          item.variable.kind === 'Identifier'
+            ? (item.variable as IdentifierExpr).name
+            : '';
+        if (!varName) continue;
+        const entityKind = this._resolveEntityKind(varName, ast);
+        steps.push({
+          kind: 'SetPropertyStep',
+          variable: varName,
+          entityKind,
+          assignments: [{ key: item.property, value: item.value }],
+        });
+      }
+    }
+
+    // ── NEW: Emit DELETE steps ─────────────────────────────────────
+    if (ast.delete) {
+      for (const varName of ast.delete.variables) {
+        const entityKind = this._resolveEntityKind(varName, ast);
+        steps.push({
+          kind: 'DeleteEntityStep',
+          variable: varName,
+          entityKind,
+          detach: ast.delete.detach,
+        });
+      }
+    }
+
+    // ── NEW: Emit REMOVE steps ─────────────────────────────────────
+    if (ast.remove) {
+      for (const item of ast.remove.items) {
+        const entityKind = this._resolveEntityKind(item.variable.name, ast);
+        steps.push({
+          kind: 'RemovePropertyStep',
+          variable: item.variable.name,
+          entityKind,
+          property: item.property,
+        });
+      }
+    }
+
     // ── 6. Post-scan clauses (aggregate path vs plain path) ───────
     const hasAggregates = this._projPlanner.hasAggregates(ast);
 
@@ -151,6 +213,156 @@ export class Planner {
     steps.push(this._projPlanner.planProjection(ast, hasAggregates));
 
     return { steps };
+  }
+
+  // ── CREATE pattern planning ──────────────────────────────────────
+
+  /**
+   * Convert a CREATE pattern path (or named path) into write plan steps.
+   *
+   * Walks the pattern's path elements:
+   * - For each node pattern → emits a {@link CreateNodeStep} **unless**
+   *   the variable is already bound in MATCH (it is then treated as an
+   *   existing endpoint reference).
+   * - For each edge pattern → emits a {@link CreateEdgeStep} with
+   *   source = previous node variable, target = current node variable.
+   *
+   * @param matchVarNames - Set of variable names already bound by the
+   *   MATCH clause.  Nodes whose variables appear in this set are
+   *   skipped (no {@code CreateNodeStep} emitted).
+   */
+  private _planCreatePath(
+    pattern: import('./ast/AstNode').MatchPattern,
+    steps: PlanStep[],
+    matchVarNames: ReadonlySet<string>,
+  ): void {
+    const segments = getPatternSegments(pattern);
+    if (segments.length === 0) return;
+
+    let prevNodeVar = '';
+    let createIdx = steps.length;
+
+    for (let i = 0; i < segments.length; i++) {
+      const seg = segments[i];
+
+      if (seg.kind === 'NodePattern') {
+        const node = seg as NodePattern;
+        const variable =
+          node.variable ??
+          this._patternPlanner._syntheticVar('create_node', createIdx++);
+
+        // Skip CreateNodeStep when the variable is already bound
+        // by MATCH — it refers to an existing node, not a new one.
+        if (!matchVarNames.has(variable)) {
+          steps.push({
+            kind: 'CreateNodeStep',
+            variable,
+            labels: node.labels,
+            properties: node.properties,
+          });
+        }
+
+        prevNodeVar = variable;
+      } else {
+        // EdgePattern — emit the target node first so it's bound
+        // before the edge step tries to reference it at runtime.
+        const edge = seg as EdgePattern;
+        // Peek at the next segment (must be a node)
+        const nextSeg = segments[i + 1];
+        const targetNode = nextSeg?.kind === 'NodePattern'
+          ? (nextSeg as NodePattern)
+          : undefined;
+        const targetVar =
+          targetNode?.variable ??
+          this._patternPlanner._syntheticVar('create_node', createIdx++);
+
+        const sourceVar = prevNodeVar;
+        const edgeVar =
+          edge.variable ??
+          this._patternPlanner._syntheticVar('create_edge', createIdx++);
+
+        // Emit the target node CREATE step BEFORE the edge so both
+        // endpoints are bound in the row when the edge is created.
+        // Skip when the target variable is already MATCH-bound.
+        if (targetNode && !matchVarNames.has(targetVar)) {
+          steps.push({
+            kind: 'CreateNodeStep',
+            variable: targetVar,
+            labels: targetNode.labels,
+            properties: targetNode.properties,
+          });
+          prevNodeVar = targetVar;
+          i++; // skip the already-processed target node
+        } else if (targetNode) {
+          // Target node already exists; record its variable so the
+          // edge can reference it, but don't skip the segment
+          // (the segment was not "consumed" by CreateNodeStep).
+          prevNodeVar = targetVar;
+          i++; // advance past this node segment
+        }
+
+        steps.push({
+          kind: 'CreateEdgeStep',
+          variable: edgeVar,
+          source: sourceVar,
+          target: targetVar,
+          types: edge.types,
+          properties: edge.properties,
+        });
+      }
+    }
+  }
+
+  // ── Entity-kind resolution ───────────────────────────────────────
+
+  /**
+   * Determine whether a variable refers to a node or an edge.
+   *
+   * Checks:
+   * 1. MATCH patterns — node variables and edge variables
+   * 2. CREATE patterns — node variables and edge variables
+   *
+   * Defaults to `'node'` if the variable cannot be resolved
+   * (e.g., it appears in both roles, or not at all).
+   */
+  private _resolveEntityKind(
+    varName: string,
+    ast: QueryAst,
+  ): 'node' | 'edge' {
+    let res: 'node' | 'edge' | undefined;
+
+    const checkPatterns = (
+      patterns: import('./ast/AstNode').MatchPattern[],
+    ): void => {
+      for (const pattern of patterns) {
+        const segs = getPatternSegments(pattern);
+        for (const seg of segs) {
+          if (seg.kind === 'NodePattern') {
+            const np = seg as NodePattern;
+            if (np.variable === varName) {
+              res = res ?? 'node';
+            }
+          } else if (seg.kind === 'EdgePattern') {
+            const ep = seg as EdgePattern;
+            if (ep.variable === varName) {
+              res = res ?? 'edge';
+            }
+          }
+        }
+      }
+    };
+
+    // Check MATCH patterns first
+    if (ast.match?.patterns) {
+      checkPatterns(ast.match.patterns);
+    }
+
+    // If still unresolved, check CREATE patterns
+    if (!res && ast.create?.patterns) {
+      checkPatterns(ast.create.patterns);
+    }
+
+    return res ?? 'node';
   }
 
 }
