@@ -762,6 +762,16 @@ export class InMemoryStorageProvider implements IStorageProvider {
     const sortedKeys = [...propertyKeys].sort();
     const compoundKey = sortedKeys.join('|');
 
+    // Check if an index on the same property keys already exists (for same target)
+    for (const existingIndex of this._namedIndexes.values()) {
+      if (existingIndex.target === target) {
+        const existingSortedKeys = [...existingIndex.propertyKeys].sort().join('|');
+        if (existingSortedKeys === compoundKey) {
+          throw new Error(`Index on ${target} property [${sortedKeys.join(', ')}] already exists`);
+        }
+      }
+    }
+
     // Store the named index
     this._namedIndexes.set(name, { target, propertyKeys: sortedKeys });
 

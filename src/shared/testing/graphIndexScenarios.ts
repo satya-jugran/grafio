@@ -72,11 +72,11 @@ export function runGraphIndexScenarios(
         await expect(graph.createIndex('email-index', 'node', ['email'])).rejects.toThrow();
       });
 
-      it('should allow multiple indexes with different names on same property keys', async () => {
+      it('should throw error when creating index with different name but same property keys', async () => {
         await graph.addNode('Person', { name: 'Alice', email: 'alice@example.com' });
 
         await expect(graph.createIndex('email-index-1', 'node', ['email'])).resolves.toBeUndefined();
-        await expect(graph.createIndex('email-index-2', 'node', ['email'])).resolves.toBeUndefined();
+        await expect(graph.createIndex('email-index-2', 'node', ['email'])).rejects.toThrow();
       });
 
       it('should allow multiple indexes on same target with different properties', async () => {
