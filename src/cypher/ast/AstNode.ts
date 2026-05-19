@@ -70,6 +70,32 @@ export interface RemoveItem {
   property: string;
 }
 
+// ── Index DDL clauses ──────────────────────────────────────────────
+
+export interface CreateIndexClause {
+  kind: 'CreateIndex';
+  /** Index name. Required — maps to Graph.createIndex(name, …). */
+  name: string;
+  /** The variable bound in the FOR pattern (e.g., 'n' in `(n:Person)`). */
+  variable: string;
+  /** The entity kind. Determined from pattern shape: `(n:Label)` = 'node', `()-[r:Type]-()` = 'edge'. */
+  target: 'node' | 'edge';
+  /** The label (node type) or edge type. */
+  labelOrType: string;
+  /** One or more property keys to index. */
+  propertyKeys: string[];
+}
+
+export interface DropIndexClause {
+  kind: 'DropIndex';
+  /** Index name to drop. */
+  name: string;
+}
+
+export interface ShowIndexesClause {
+  kind: 'ShowIndexes';
+}
+
 // ── Top-level query ───────────────────────────────────────────────
 
 export interface QueryAst {
@@ -86,6 +112,12 @@ export interface QueryAst {
   delete?: DeleteClause;
   /** Optional REMOVE clause. */
   remove?: RemoveClause;
+  /** Optional CREATE INDEX clause. */
+  createIndex?: CreateIndexClause;
+  /** Optional DROP INDEX clause. */
+  dropIndex?: DropIndexClause;
+  /** Optional SHOW INDEXES clause. */
+  showIndexes?: ShowIndexesClause;
   /** The RETURN clause (required). */
   return: ReturnClause;
   /** Optional HAVING clause (post-aggregation filter). */

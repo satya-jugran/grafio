@@ -1440,4 +1440,117 @@ describe('Executor', () => {
       expect(nodes).toHaveLength(1);
     });
   });
+
+  // ── Index DDL operations ─────────────────────────────────────────
+  describe('index DDL operations', () => {
+    it('executes CREATE INDEX for node', async () => {
+      const g = new Graph();
+      await g.addNode('Person', { name: 'Alice' });
+
+      const result = await executeQuery(
+        'CREATE INDEX email_idx FOR (n:Person) ON (n.email)',
+        {},
+        g,
+      );
+
+      // Verify index was created
+      const indexes = await g.getIndexes();
+      const created = indexes.find((idx) => idx.name === 'email_idx');
+      expect(created).toBeDefined();
+      expect(created!.target).toBe('node');
+      expect(created!.propertyKeys).toEqual(['email']);
+      expect(result.summary.indexesCreated).toBe(1);
+      expect(result.summary.indexesDeleted).toBe(0);
+    });
+
+    it('executes CREATE INDEX for edge', async () => {
+      const g = new Graph();
+      const a = await g.addNode('Person', {});
+      const b = await g.addNode('Person', {});
+      await g.addEdge(a.id, b.id, 'KNOWS', { since: 2020 });
+
+      const result = await executeQuery(
+        'CREATE INDEX since_idx FOR ()-[r:KNOWS]-() ON (r.since)',
+        {},
+        g,
+      );
+
+      const indexes = await g.getIndexes();
+      const created = indexes.find((idx) => idx.name === 'since_idx');
+      expect(created).toBeDefined();
+      expect(created!.target).toBe('edge');
+      expect(created!.propertyKeys).toEqual(['since']);
+      expect(result.summary.indexesCreated).toBe(1);
+    });
+
+    it('executes CREATE INDEX with compound properties', async () => {
+      const g = new Graph();
+      const result = await executeQuery(
+        'CREATE INDEX name_email_idx FOR (n:Person) ON (n.name, n.email)',
+        {},
+        g,
+      );
+
+      const indexes = await g.getIndexes();
+      const created = indexes.find((idx) => idx.name === 'name_email_idx');
+      expect(created).toBeDefined();
+      // propertyKeys may be sorted alphabetically by the storage layer
+      expect(created!.propertyKeys).toEqual(expect.arrayContaining(['name', 'email']));
+      expect(created!.propertyKeys).toHaveLength(2);
+      expect(result.summary.indexesCreated).toBe(1);
+    });
+
+    it('executes DROP INDEX', async () => {
+      const g = new Graph();
+      await g.createIndex('temp_idx', 'node', ['foo']);
+
+      const result = await executeQuery('DROP INDEX temp_idx', {}, g);
+
+      const indexes = await g.getIndexes();
+      expect(indexes.find((idx) => idx.name === 'temp_idx')).toBeUndefined();
+      expect(result.summary.indexesDeleted).toBe(1);
+    });
+
+    it('executes SHOW INDEXES with data', async () => {
+      const g = new Graph();
+      await g.createIndex('name_idx', 'node', ['name']);
+      await g.createIndex('age_idx', 'node', ['age']);
+
+      const result = await executeQuery('SHOW INDEXES', {}, g);
+
+      expect(result.rows).toHaveLength(2);
+      expect(result.columns).toEqual(['name', 'target', 'propertyKeys']);
+
+      const names = result.rows.map((r) => r.name);
+      expect(names).toContain('name_idx');
+      expect(names).toContain('age_idx');
+    });
+
+    it('executes SHOW INDEXES on empty graph', async () => {
+      const g = new Graph();
+
+      const result = await executeQuery('SHOW INDEXES', {}, g);
+
+      expect(result.rows).toHaveLength(0);
+      expect(result.columns).toEqual(['name', 'target', 'propertyKeys']);
+    });
+
+    it('increments and resets index counters correctly', async () => {
+      const g = new Graph();
+
+      // First query: create an index
+      const r1 = await executeQuery(
+        'CREATE INDEX idx1 FOR (n:Person) ON (n.name)',
+        {},
+        g,
+      );
+      expect(r1.summary.indexesCreated).toBe(1);
+      expect(r1.summary.indexesDeleted).toBe(0);
+
+      // Second query: drop the index
+      const r2 = await executeQuery('DROP INDEX idx1', {}, g);
+      expect(r2.summary.indexesCreated).toBe(0);
+      expect(r2.summary.indexesDeleted).toBe(1);
+    });
+  });
 });

@@ -164,6 +164,36 @@ export class Planner {
       }
     }
 
+    // ── NEW: Emit CREATE INDEX step ──────────────────────────────
+    if (ast.createIndex) {
+      steps.push({
+        kind: 'CreateIndexStep',
+        name: ast.createIndex.name,
+        target: ast.createIndex.target,
+        propertyKeys: ast.createIndex.propertyKeys,
+      });
+    }
+
+    // ── NEW: Emit DROP INDEX step ─────────────────────────────────
+    if (ast.dropIndex) {
+      steps.push({
+        kind: 'DropIndexStep',
+        name: ast.dropIndex.name,
+      });
+    }
+
+    // ── NEW: Emit SHOW INDEXES step ───────────────────────────────
+    if (ast.showIndexes) {
+      steps.push({
+        kind: 'ShowIndexesStep',
+        columns: [
+          { alias: 'name', source: 'name' },
+          { alias: 'target', source: 'target' },
+          { alias: 'propertyKeys', source: 'propertyKeys' },
+        ],
+      });
+    }
+
     // ── 6. Post-scan clauses (aggregate path vs plain path) ───────
     const hasAggregates = this._projPlanner.hasAggregates(ast);
 

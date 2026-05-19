@@ -23,7 +23,7 @@ module.exports = {
     }
   },
   testTimeout: 60000,
-  maxWorkers: 1,
+  maxWorkers: 5,
   coverageReporters: [
     "lcov",
     "json-summary"

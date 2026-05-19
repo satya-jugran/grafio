@@ -52,6 +52,10 @@ export interface CypherSummary {
   edgesDeleted: number;
   /** Number of properties set */
   propertiesSet: number;
+  /** Number of indexes created by this query. */
+  indexesCreated: number;
+  /** Number of indexes deleted by this query. */
+  indexesDeleted: number;
   /** Execution statistics for each plan step (optional). */
   planExecutionStats?: PlanExecutionStats;
 }

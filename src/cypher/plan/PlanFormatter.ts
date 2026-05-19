@@ -178,6 +178,15 @@ export class PlanFormatter {
         return 'AggregateStep' + (funcs ? ' ' + funcs : '');
       }
 
+      case 'CreateIndexStep':
+        return 'CreateIndexStep ' + step.name + ' target=' + step.target + ' keys=[' + step.propertyKeys.join(', ') + ']';
+
+      case 'DropIndexStep':
+        return 'DropIndexStep ' + step.name;
+
+      case 'ShowIndexesStep':
+        return 'ShowIndexesStep columns=[' + step.columns.map(c => c.alias).join(', ') + ']';
+
       default:
         return (step as PlanStep).kind;
     }
@@ -237,6 +246,15 @@ export class PlanFormatter {
         const funcs = step.aggregates.map(a => a.function + '(' + a.alias + ')').join(', ');
         return 'AggregateStep [' + funcs + ']';
       }
+
+      case 'CreateIndexStep':
+        return 'CreateIndexStep [' + step.name + ' target=' + step.target + ' keys=(' + step.propertyKeys.join(', ') + ')]';
+
+      case 'DropIndexStep':
+        return 'DropIndexStep [' + step.name + ']';
+
+      case 'ShowIndexesStep':
+        return 'ShowIndexesStep [columns: ' + step.columns.map(c => c.alias).join(', ') + ']';
 
       default:
         return (step as PlanStep).kind;

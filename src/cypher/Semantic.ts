@@ -115,6 +115,7 @@ export class Semantic {
     this._checkSetTypes.bind(this),
     this._checkAggregateGrouping.bind(this),
     this._checkHavingClause.bind(this),
+    this._checkIndexDdlValidity.bind(this),
   ];
 
   /** Cached scope table populated by `_resolveScopes` and consumed by later passes. */
@@ -212,6 +213,10 @@ export class Semantic {
    * @throws {CypherSemanticError} if an undefined variable is referenced.
    */
   private _checkUnresolvedVars(ast: QueryAst): QueryAst {
+    // Skip unresolved-var check for DDL statements — the RETURN clause
+    // items for SHOW INDEXES are projection aliases, not variable references.
+    if (ast.createIndex || ast.dropIndex || ast.showIndexes) return ast;
+
     // Build the extra scope from CREATE patterns so variables introduced
     // by CREATE can be referenced in RETURN, WHERE, ORDER BY, etc.
     const extraScope = this._collectCreateScope(ast);
@@ -1056,5 +1061,60 @@ export class Semantic {
     // Parameters, identifiers, property accesses, function calls, and binary
     // expressions may resolve to primitives at runtime — be lenient.
     return true;
+  }
+
+  // ── Pass 10: Index DDL validity ──────────────────────────────────
+
+  /**
+   * Validate index DDL statements.
+   *
+   * Rules enforced:
+   * 1. CREATE INDEX must have a non-empty name.
+   * 2. CREATE INDEX must have at least one property key.
+   * 3. DROP INDEX must have a non-empty name.
+   * 4. DDL and DML cannot be combined in the same query.
+   *
+   * @throws {CypherSemanticError} if any rule is violated.
+   */
+  private _checkIndexDdlValidity(ast: QueryAst): QueryAst {
+    const hasDdl = !!(ast.createIndex || ast.dropIndex || ast.showIndexes);
+    if (!hasDdl) return ast;
+
+    // ── Rule 1: CREATE INDEX name required ─────────────────────────
+    if (ast.createIndex && !ast.createIndex.name) {
+      throw new CypherSemanticError(
+        'Index name is required for CREATE INDEX',
+      );
+    }
+
+    // ── Rule 2: CREATE INDEX property keys non-empty ──────────────
+    if (ast.createIndex && ast.createIndex.propertyKeys.length === 0) {
+      throw new CypherSemanticError(
+        'At least one property key is required for CREATE INDEX',
+      );
+    }
+
+    // ── Rule 3: DROP INDEX name required ─────────────────────────
+    if (ast.dropIndex && !ast.dropIndex.name) {
+      throw new CypherSemanticError(
+        'Index name is required for DROP INDEX',
+      );
+    }
+
+    // ── Rule 4: DDL + DML mutual exclusion ─────────────────────────
+    const hasDml =
+      ast.match.patterns.length > 0 ||
+      !!ast.create ||
+      !!ast.set ||
+      !!ast.delete ||
+      !!ast.remove;
+
+    if (hasDml) {
+      throw new CypherSemanticError(
+        'DDL statements (CREATE INDEX, DROP INDEX, SHOW INDEXES) cannot be combined with MATCH/RETURN',
+      );
+    }
+
+    return ast;
   }
 }

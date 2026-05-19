@@ -66,7 +66,6 @@ const GATED_TOKENS: ReadonlySet<TokenKind> = new Set([
   TokenKind.OPTIONAL,
   TokenKind.WITH,
   TokenKind.UNWIND,
-  TokenKind.ON,
 ]);
 
 // ── CypherEngine ──────────────────────────────────────────────────

@@ -42,6 +42,9 @@ import {
   SetPropertyStep,
   DeleteEntityStep,
   RemovePropertyStep,
+  CreateIndexStep,
+  DropIndexStep,
+  ShowIndexesStep,
 } from './plan/QueryPlan';
 import { CypherResult, CypherRow, CypherSummary } from './Result';
 import { Expression } from './ast/AstNode';
@@ -68,6 +71,8 @@ export class Executor {
   private _edgesCreated = 0;
   private _edgesDeleted = 0;
   private _propertiesSet = 0;
+  private _indexesCreated = 0;
+  private _indexesDeleted = 0;
 
   constructor(graph: Graph) {
     this._graph = graph;
@@ -92,6 +97,8 @@ export class Executor {
     this._edgesCreated = 0;
     this._edgesDeleted = 0;
     this._propertiesSet = 0;
+    this._indexesCreated = 0;
+    this._indexesDeleted = 0;
 
     const startTime = Date.now();
     const stepStats: PlanStepExecutionStats[] = [];
@@ -164,6 +171,12 @@ export class Executor {
         return this._executeDeleteEntity(step, rows, transaction);
       case 'RemovePropertyStep':
         return this._executeRemoveProperty(step, rows, transaction);
+      case 'CreateIndexStep':
+        return this._executeCreateIndex(step, rows);
+      case 'DropIndexStep':
+        return this._executeDropIndex(step, rows);
+      case 'ShowIndexesStep':
+        return this._executeShowIndexes(step, rows);
       default:
         throw new CypherRuntimeError(
           `Unknown plan step kind: ${(step as PlanStep).kind}`,
@@ -1593,6 +1606,44 @@ export class Executor {
     return rows;
   }
 
+  // ── CreateIndexStep ─────────────────────────────────────────────
+
+  private async _executeCreateIndex(
+    step: CreateIndexStep,
+    rows: Row[],
+  ): Promise<Row[]> {
+    await this._graph.createIndex(step.name, step.target, step.propertyKeys);
+    this._indexesCreated++;
+    return rows;
+  }
+
+  // ── DropIndexStep ───────────────────────────────────────────────
+
+  private async _executeDropIndex(
+    step: DropIndexStep,
+    rows: Row[],
+  ): Promise<Row[]> {
+    await this._graph.deleteIndex(step.name);
+    this._indexesDeleted++;
+    return rows;
+  }
+
+  // ── ShowIndexesStep ─────────────────────────────────────────────
+
+  private async _executeShowIndexes(
+    step: ShowIndexesStep,
+    rows: Row[],
+  ): Promise<Row[]> {
+    const indexes = await this._graph.getIndexes();
+    return indexes.map((idx) => {
+      const row = new Map<string, unknown>();
+      for (const col of step.columns) {
+        row.set(col.alias, idx[col.source]);
+      }
+      return row;
+    });
+  }
+
   // ── Result builder ──────────────────────────────────────────────
 
   private _buildResult(
@@ -1623,6 +1674,8 @@ export class Executor {
       edgesCreated: this._edgesCreated,
       edgesDeleted: this._edgesDeleted,
       propertiesSet: this._propertiesSet,
+      indexesCreated: this._indexesCreated,
+      indexesDeleted: this._indexesDeleted,
       planExecutionStats: stats,
     };
 

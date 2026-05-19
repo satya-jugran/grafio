@@ -56,6 +56,9 @@ import {
   DeleteClause,
   RemoveClause,
   RemoveItem,
+  CreateIndexClause,
+  DropIndexClause,
+  ShowIndexesClause,
   WhereClause,
   HavingClause,
   ReturnClause,
@@ -146,6 +149,18 @@ export class Parser {
    * @throws {CypherSyntaxError} on any syntax violation.
    */
   public parse(): QueryAst {
+    // ── DDL: CREATE INDEX … ──────────────────────────────────────
+    if (this._check(TokenKind.CREATE) && this._peek(1)?.kind === TokenKind.INDEX) {
+      return this._parseCreateIndex();
+    }
+    // ── DDL: DROP INDEX … ────────────────────────────────────────
+    if (this._check(TokenKind.DROP) && this._peek(1)?.kind === TokenKind.INDEX) {
+      return this._parseDropIndex();
+    }
+    // ── DDL: SHOW INDEXES ────────────────────────────────────────
+    if (this._check(TokenKind.SHOW) && (this._peek(1)?.kind === TokenKind.INDEX || (this._peek(1)?.kind === TokenKind.IDENT && this._peek(1)?.value.toLowerCase() === 'indexes'))) {
+      return this._parseShowIndexes();
+    }
     // MATCH is now optional — CREATE (n) RETURN n is valid standalone.
     const match = this._check(TokenKind.MATCH) ? this._parseMatchClause() : undefined;
 
@@ -153,13 +168,18 @@ export class Parser {
     const where = this._check(TokenKind.WHERE) ? this._parseWhereClause() : undefined;
 
     // Write clauses (each optional, in positional order).
-    const create = this._check(TokenKind.CREATE) ? this._parseCreateClause() : undefined;
+    // If CREATE is followed by INDEX, this is DDL — skip and let _ensureAtEnd reject the hybrid query.
+    const create = this._check(TokenKind.CREATE) && this._peek(1)?.kind !== TokenKind.INDEX
+      ? this._parseCreateClause()
+      : undefined;
     const set = this._check(TokenKind.SET) ? this._parseSetClause() : undefined;
     const del = this._check(TokenKind.DELETE) || this._check(TokenKind.DETACH)
       ? this._parseDeleteClause()
       : undefined;
     const remove = this._check(TokenKind.REMOVE) ? this._parseRemoveClause() : undefined;
-    const ret = this._parseReturnClause();
+    const ret: ReturnClause = this._check(TokenKind.RETURN)
+      ? this._parseReturnClause()
+      : { kind: 'Return', distinct: false, items: [] };
     const having = this._check(TokenKind.HAVING) ? this._parseHavingClause() : undefined;
     const orderBy = this._check(TokenKind.ORDER) ? this._parseOrderByClause() : undefined;
     const skip = this._check(TokenKind.SKIP) ? this._parseSkipClause() : undefined;
@@ -172,6 +192,22 @@ export class Parser {
         `Unexpected token '${token.value}' after query clauses`,
         token.line,
         token.col,
+      );
+    }
+
+    const isEmpty =
+      match === undefined &&
+      create === undefined &&
+      set === undefined &&
+      del === undefined &&
+      remove === undefined &&
+      ret.items.length === 0;
+
+    if (isEmpty) {
+      throw new CypherSyntaxError(
+        "Query must contain at least one clause (MATCH, CREATE, RETURN, etc.)",
+        1,
+        1,
       );
     }
 
@@ -362,6 +398,137 @@ export class Parser {
     this._consume(TokenKind.DOT, "Expected '.' in REMOVE property reference");
     const propToken = this._consume(TokenKind.IDENT, 'Expected property name');
     return { kind: 'RemoveItem', variable, property: propToken.value };
+  }
+
+  /** CREATE INDEX index_name FOR pattern ON (var.prop [, var.prop]*) */
+  private _parseCreateIndex(): QueryAst {
+    this._consume(TokenKind.CREATE, "Expected 'CREATE'");
+    this._consume(TokenKind.INDEX, "Expected 'INDEX' after 'CREATE'");
+    const nameToken = this._consume(TokenKind.IDENT, "Expected index name after 'INDEX'");
+    const name = nameToken.value;
+
+    // FOR
+    this._consume(TokenKind.FOR, "Expected 'FOR' after index name");
+
+    let variable: string;
+    let target: 'node' | 'edge';
+    let labelOrType: string;
+
+    // Determine target from pattern shape:
+    if (this._check(TokenKind.LPAREN) && this._peek(1)?.kind === TokenKind.RPAREN) {
+      // edge pattern: ()-[r:TYPE]-()
+      this._consume(TokenKind.LPAREN, "Expected '('"); // '('
+      this._consume(TokenKind.RPAREN, "Expected ')'"); // ')'
+      // optional dash
+      if (this._check(TokenKind.MINUS)) this._advance();
+      this._consume(TokenKind.LBRACKET, "Expected '[' for edge pattern");
+      variable = this._consume(TokenKind.IDENT, "Expected variable name in edge pattern").value;
+      this._consume(TokenKind.COLON, "Expected ':' after edge variable");
+      labelOrType = this._consume(TokenKind.IDENT, "Expected edge type name").value;
+      this._consume(TokenKind.RBRACKET, "Expected ']'");
+      // optional dash
+      if (this._check(TokenKind.MINUS)) this._advance();
+      this._consume(TokenKind.LPAREN, "Expected '('"); // '('
+      this._consume(TokenKind.RPAREN, "Expected ')'"); // ')'
+      target = 'edge';
+    } else {
+      // node pattern: (var:Label)
+      this._consume(TokenKind.LPAREN, "Expected '(' for node pattern");
+      variable = this._consume(TokenKind.IDENT, "Expected variable name in FOR pattern").value;
+      this._consume(TokenKind.COLON, "Expected ':' after variable");
+      labelOrType = this._consume(TokenKind.IDENT, "Expected label name").value;
+      this._consume(TokenKind.RPAREN, "Expected ')'");
+      target = 'node';
+    }
+
+    // ON (var.prop1, var.prop2, …)
+    this._consume(TokenKind.ON, "Expected 'ON' after FOR pattern");
+    this._consume(TokenKind.LPAREN, "Expected '(' after 'ON'");
+
+    const propertyKeys: string[] = [];
+    do {
+      const v = this._consume(TokenKind.IDENT, "Expected variable in ON property list").value;
+      if (v !== variable) {
+        const tok = this._peek(-1);
+        throw new CypherSyntaxError(
+          `ON property variable '${v}' must match FOR variable '${variable}'`,
+          tok.line,
+          tok.col,
+        );
+      }
+      this._consume(TokenKind.DOT, "Expected '.' after variable in ON property list");
+      const prop = this._consume(TokenKind.IDENT, "Expected property name").value;
+      propertyKeys.push(prop);
+    } while (this._check(TokenKind.COMMA) && this._advance());
+    this._consume(TokenKind.RPAREN, "Expected ')' after ON property list");
+
+    this._ensureAtEnd('CREATE INDEX');
+
+    return {
+      kind: 'Query',
+      match: { kind: 'Match', patterns: [] },
+      createIndex: {
+        kind: 'CreateIndex',
+        name,
+        variable,
+        target,
+        labelOrType,
+        propertyKeys,
+      },
+      return: { kind: 'Return', distinct: false, items: [] },
+    };
+  }
+
+  /** DROP INDEX index_name */
+  private _parseDropIndex(): QueryAst {
+    this._consume(TokenKind.DROP, "Expected 'DROP'");
+    this._consume(TokenKind.INDEX, "Expected 'INDEX' after 'DROP'");
+    const nameToken = this._consume(TokenKind.IDENT, "Expected index name after 'DROP INDEX'");
+    this._ensureAtEnd('DROP INDEX');
+
+    return {
+      kind: 'Query',
+      match: { kind: 'Match', patterns: [] },
+      dropIndex: {
+        kind: 'DropIndex',
+        name: nameToken.value,
+      },
+      return: { kind: 'Return', distinct: false, items: [] },
+    };
+  }
+
+  /** SHOW INDEXES */
+  private _parseShowIndexes(): QueryAst {
+    this._consume(TokenKind.SHOW, "Expected 'SHOW'");
+    // 'INDEXES' tokenizes as IDENT if not a keyword; consume it regardless
+    if (this._check(TokenKind.INDEX)) {
+      this._advance();
+    } else {
+      const idxToken = this._consume(TokenKind.IDENT, "Expected 'INDEXES' after 'SHOW'");
+      if (idxToken.value.toLowerCase() !== 'indexes') {
+        throw new CypherSyntaxError(
+          `Expected 'INDEXES' after 'SHOW', but found '${idxToken.value}'`,
+          idxToken.line,
+          idxToken.col,
+        );
+      }
+    }
+    this._ensureAtEnd('SHOW INDEXES');
+
+    return {
+      kind: 'Query',
+      match: { kind: 'Match', patterns: [] },
+      showIndexes: { kind: 'ShowIndexes' },
+      return: {
+        kind: 'Return',
+        distinct: false,
+        items: [
+          { kind: 'ReturnItem', expression: { kind: 'Identifier', name: 'name' }, alias: 'name' },
+          { kind: 'ReturnItem', expression: { kind: 'Identifier', name: 'target' }, alias: 'target' },
+          { kind: 'ReturnItem', expression: { kind: 'Identifier', name: 'propertyKeys' }, alias: 'propertyKeys' },
+        ],
+      },
+    };
   }
 
   // ── Pattern parsers ─────────────────────────────────────────────
@@ -875,6 +1042,18 @@ export class Parser {
   }
 
   // ── Token stream helpers ────────────────────────────────────────
+
+  /** Ensure the token stream is at EOF; throws if trailing tokens exist. */
+  private _ensureAtEnd(context: string): void {
+    if (!this._isAtEnd()) {
+      const token = this._peek();
+      throw new CypherSyntaxError(
+        `Unexpected token '${token.value}' after ${context}`,
+        token.line,
+        token.col,
+      );
+    }
+  }
 
   private _isAtEnd(): boolean {
     return this._peek().kind === TokenKind.EOF;

@@ -52,6 +52,12 @@ export const enum TokenKind {
   WITH = 'WITH',
   UNWIND = 'UNWIND',
 
+  // ── DDL keywords ─────────────────────────────────────────────────
+  INDEX = 'INDEX',
+  DROP = 'DROP',
+  FOR = 'FOR',
+  SHOW = 'SHOW',
+
   // ── Literals ────────────────────────────────────────────────────
   INTEGER = 'INTEGER',
   FLOAT = 'FLOAT',

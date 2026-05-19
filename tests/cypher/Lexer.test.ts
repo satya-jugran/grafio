@@ -320,6 +320,57 @@ LIMIT 10`;
     });
   });
 
+  // ── Index DDL keywords ─────────────────────────────────────────
+  describe('index DDL keywords', () => {
+    it('tokenises INDEX', () => {
+      const tokens = new Lexer('INDEX').tokenise();
+      expect(tokens[0].kind).toBe(TokenKind.INDEX);
+    });
+
+    it('tokenises DROP', () => {
+      const tokens = new Lexer('DROP').tokenise();
+      expect(tokens[0].kind).toBe(TokenKind.DROP);
+    });
+
+    it('tokenises FOR', () => {
+      const tokens = new Lexer('FOR').tokenise();
+      expect(tokens[0].kind).toBe(TokenKind.FOR);
+    });
+
+    it('tokenises SHOW', () => {
+      const tokens = new Lexer('SHOW').tokenise();
+      expect(tokens[0].kind).toBe(TokenKind.SHOW);
+    });
+
+    it('tokenises CREATE INDEX sequence', () => {
+      const tokens = new Lexer('CREATE INDEX').tokenise();
+      expect(tokens[0].kind).toBe(TokenKind.CREATE);
+      expect(tokens[1].kind).toBe(TokenKind.INDEX);
+    });
+
+    it('tokenises DROP INDEX sequence', () => {
+      const tokens = new Lexer('DROP INDEX').tokenise();
+      expect(tokens[0].kind).toBe(TokenKind.DROP);
+      expect(tokens[1].kind).toBe(TokenKind.INDEX);
+    });
+
+    it('tokenises SHOW INDEXES (INDEXES as IDENT)', () => {
+      const tokens = new Lexer('SHOW INDEXES').tokenise();
+      expect(tokens[0].kind).toBe(TokenKind.SHOW);
+      // 'INDEXES' is not a keyword, so it tokenizes as IDENT
+      expect(tokens[1].kind).toBe(TokenKind.IDENT);
+      expect(tokens[1].value.toLowerCase()).toBe('indexes');
+    });
+
+    it('tokenises full CREATE INDEX statement', () => {
+      const tokens = new Lexer('CREATE INDEX idx FOR (n:P) ON (n.name)').tokenise();
+      expect(tokens[0].kind).toBe(TokenKind.CREATE);
+      expect(tokens[1].kind).toBe(TokenKind.INDEX);
+      expect(tokens[2].kind).toBe(TokenKind.IDENT); // idx
+      expect(tokens[3].kind).toBe(TokenKind.FOR);
+    });
+  });
+
   // ── Error: unexpected character ────────────────────────────────
   describe('errors', () => {
     it('throws on unrecognised character', () => {

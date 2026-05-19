@@ -56,7 +56,10 @@ export type PlanStep =
   | CreateEdgeStep
   | SetPropertyStep
   | DeleteEntityStep
-  | RemovePropertyStep;
+  | RemovePropertyStep
+  | CreateIndexStep
+  | DropIndexStep
+  | ShowIndexesStep;
 
 // ── Individual step types ─────────────────────────────────────────
 
@@ -343,6 +346,33 @@ export interface RemovePropertyStep {
   entityKind: 'node' | 'edge';
   /** Property key to remove. */
   property: string;
+}
+
+// ── Index DDL steps ────────────────────────────────────────────────
+
+/** Create a property index on nodes or edges. */
+export interface CreateIndexStep {
+  kind: 'CreateIndexStep';
+  /** Index name — passed directly to graph.createIndex(). */
+  name: string;
+  /** Entity target: 'node' or 'edge'. */
+  target: 'node' | 'edge';
+  /** Property keys to index (single or compound). */
+  propertyKeys: string[];
+}
+
+/** Drop a property index by name. */
+export interface DropIndexStep {
+  kind: 'DropIndexStep';
+  /** Index name — passed directly to graph.deleteIndex(). */
+  name: string;
+}
+
+/** List all indexes in the graph. */
+export interface ShowIndexesStep {
+  kind: 'ShowIndexesStep';
+  /** Output aliases for projected columns. */
+  columns: { alias: string; source: 'name' | 'target' | 'propertyKeys' }[];
 }
 
 // ── Execution statistics ─────────────────────────────────────────

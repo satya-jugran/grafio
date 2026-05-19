@@ -2,7 +2,7 @@ import { describe, expect, it, beforeAll, beforeEach, afterEach, jest } from '@j
 import { Lexer } from '../../src/cypher/Lexer';
 import { Parser } from '../../src/cypher/Parser';
 import { Semantic } from '../../src/cypher/Semantic';
-import { CypherSemanticError } from '../../src/cypher/errors';
+import { CypherSemanticError, CypherSyntaxError } from '../../src/cypher/errors';
 
 /** Helper: lex + parse + semantic analyse. */
 function analyse(query: string) {
@@ -171,6 +171,40 @@ describe('Semantic', () => {
     it('rejects ORDER BY with undefined variable when aggregates present', () => {
       expect(() => analyse('MATCH (p:Person) RETURN p.city, COUNT(*) AS cnt ORDER BY foo'))
         .toThrow(CypherSemanticError);
+    });
+  });
+
+  // ── Index DDL validation ──────────────────────────────────────────
+  describe('index DDL validation', () => {
+    it('allows standalone CREATE INDEX', () => {
+      expect(() => analyse('CREATE INDEX idx FOR (n:Person) ON (n.email)'))
+        .not.toThrow();
+    });
+
+    it('allows standalone DROP INDEX', () => {
+      expect(() => analyse('DROP INDEX idx'))
+        .not.toThrow();
+    });
+
+    it('allows standalone SHOW INDEXES', () => {
+      expect(() => analyse('SHOW INDEXES'))
+        .not.toThrow();
+    });
+
+    it('allows CREATE INDEX for edge', () => {
+      expect(() => analyse('CREATE INDEX since_idx FOR ()-[r:KNOWS]-() ON (r.since)'))
+        .not.toThrow();
+    });
+
+    it('rejects DDL + DML in same query (parser-level syntax error)', () => {
+      // Parser catches hybrid DDL + DML queries at the syntax level
+      expect(() => analyse('MATCH (n) CREATE INDEX idx FOR (n:P) ON (n.name) RETURN n'))
+        .toThrow(CypherSyntaxError);
+    });
+
+    it('rejects DDL with trailing tokens (parser-level)', () => {
+      expect(() => analyse('CREATE INDEX idx FOR (n:P) ON (n.name) CREATE (m:Q) RETURN m'))
+        .toThrow(CypherSyntaxError);
     });
   });
 });
