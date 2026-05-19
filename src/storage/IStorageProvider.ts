@@ -4,6 +4,18 @@ import type { NodeData, EdgeData, GraphData, StorageQueryOptions, IOrderBy, ITra
 export type { StorageQueryOptions, IOrderBy, ITransactionHandle };
 
 /**
+ * Metadata describing an index.
+ */
+export interface IndexMetadata {
+  /** Name of the index */
+  name: string;
+  /** Whether the index targets nodes or edges */
+  target: 'node' | 'edge';
+  /** The property keys that are indexed */
+  propertyKeys: string[];
+}
+
+/**
  * Contract that every storage backend must fulfill.
  *
  * All methods are async (v5.0+) to support both synchronous in-memory providers
@@ -279,7 +291,9 @@ export interface IStorageProvider {
   /**
    * Creates an index on one or more node or edge properties.
    * Supports both simple indexes (single property) and compound indexes (multiple properties).
+   * Each index must have a unique name.
    *
+   * @param name - Unique name for the index
    * @param target - Either 'node' or 'edge'
    * @param propertyKeys - Array of property names to index. For compound indexes,
    *                       the order matters for index structure but queries can use
@@ -288,8 +302,10 @@ export interface IStorageProvider {
    * Behavior:
    * - Single property ['email']: creates simple index on 'email'
    * - Multiple properties ['name', 'email']: creates compound index on (name, email)
+   *
+   * @throws Error if an index with the given name already exists
    */
-  createIndex(target: 'node' | 'edge', propertyKeys: string[]): Promise<void>;
+  createIndex(name: string, target: 'node' | 'edge', propertyKeys: string[]): Promise<void>;
 
   /**
    * Checks if an index exists that covers the given property keys.
@@ -307,6 +323,14 @@ export interface IStorageProvider {
    * - Index on ['name', 'email'], query ['email', 'name'] → true (same properties, diff order)
    */
   hasIndex(target: 'node' | 'edge', propertyKeys: string[]): Promise<boolean>;
+
+  /**
+   * Retrieves an index by its name.
+   *
+   * @param name - The name of the index to retrieve
+   * @returns The index metadata if found, undefined otherwise
+   */
+  getIndex(name: string): Promise<IndexMetadata | undefined>;
 
   // ---------------------------------------------------------------------------
   // Data portability

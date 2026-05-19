@@ -74,6 +74,12 @@ export class InMemoryStorageProvider implements IStorageProvider {
    */
   private readonly _compoundIndexes = new Map<string, 'node' | 'edge'>();
 
+  /**
+   * Named indexes map.
+   * Maps index name → index metadata (target type and property keys).
+   */
+  private readonly _namedIndexes = new Map<string, { target: 'node' | 'edge'; propertyKeys: string[] }>();
+
   // ---------------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------------
@@ -737,17 +743,27 @@ export class InMemoryStorageProvider implements IStorageProvider {
    * This method primarily tracks which properties should be indexed and rebuilds
    * compound indexes if needed.
    *
+   * @param name - Unique name for the index
    * @param target - Either 'node' or 'edge'
    * @param propertyKeys - Array of property names to index. For compound indexes,
    *                       the order matters for index structure but queries can use
    *                       any subset of the indexed properties.
+   * @throws Error if an index with the given name already exists
    */
-  async createIndex(target: 'node' | 'edge', propertyKeys: string[]): Promise<void> {
+  async createIndex(name: string, target: 'node' | 'edge', propertyKeys: string[]): Promise<void> {
     if (propertyKeys.length === 0) return;
+
+    // Check if an index with the same name already exists
+    if (this._namedIndexes.has(name)) {
+      throw new Error(`Index with name '${name}' already exists`);
+    }
 
     // Sort keys for consistent compound index key generation
     const sortedKeys = [...propertyKeys].sort();
     const compoundKey = sortedKeys.join('|');
+
+    // Store the named index
+    this._namedIndexes.set(name, { target, propertyKeys: sortedKeys });
 
     if (target === 'node') {
       // Track single-property indexes
@@ -840,6 +856,24 @@ export class InMemoryStorageProvider implements IStorageProvider {
     } else {
       return propertyKeys.every(key => this._edgesByProperty.has(key));
     }
+  }
+
+  /**
+   * Retrieves an index by its name.
+   *
+   * @param name - The name of the index to retrieve
+   * @returns The index metadata if found, undefined otherwise
+   */
+  async getIndex(name: string): Promise<{ name: string; target: 'node' | 'edge'; propertyKeys: string[] } | undefined> {
+    const index = this._namedIndexes.get(name);
+    if (!index) {
+      return undefined;
+    }
+    return {
+      name,
+      target: index.target,
+      propertyKeys: index.propertyKeys,
+    };
   }
 
   // ---------------------------------------------------------------------------

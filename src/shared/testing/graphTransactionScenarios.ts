@@ -36,8 +36,8 @@ export function runGraphTransactionScenarios(
 
     beforeEach(async () => {
       graph = new Graph(provider);
-      await graph.createIndex('edge', ['weight']);
-      await graph.createIndex('node', ['email']);
+      await graph.createIndex('weight-index', 'edge', ['weight']);
+      await graph.createIndex('email-index', 'node', ['email']);
     });
 
 

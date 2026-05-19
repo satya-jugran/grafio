@@ -141,7 +141,7 @@ export function runGraphPropertiesScenarios(
         await graph.addNode('Course', { title: 'Math' });
 
         // Should not throw
-        await expect(graph.createIndex('node', ['email'])).resolves.toBeUndefined();
+        await expect(graph.createIndex('email-index', 'node', ['email'])).resolves.toBeUndefined();
 
         // Should be able to query by the indexed property
         const results = await graph.getNodes({ filter: { properties: [{ key: 'email', value: 'alice@example.com' }] } });
@@ -155,7 +155,7 @@ export function runGraphPropertiesScenarios(
         await graph.addNode('Course', { title: 'Math' });
 
         // Create compound index for Person nodes only
-        await expect(graph.createIndex('node', ['email'])).resolves.toBeUndefined();
+        await expect(graph.createIndex('email-index', 'node', ['email'])).resolves.toBeUndefined();
 
         const results = await graph.getNodes({ filter: { types: ['Person'], properties: [{ key: 'email', value: 'alice@example.com' }] } });
         expect(results).toHaveLength(1);
@@ -167,7 +167,7 @@ export function runGraphPropertiesScenarios(
         await graph.addNode('Course', { title: 'Math', email: 'math@example.com' });
 
         // type='*' should create simple index across all types
-        await expect(graph.createIndex('node', ['email'])).resolves.toBeUndefined();
+        await expect(graph.createIndex('email-index', 'node', ['email'])).resolves.toBeUndefined();
 
         const results = await graph.getNodes({ filter: { properties: [{ key: 'email', value: 'math@example.com' }] } });
         expect(results).toHaveLength(1);
@@ -184,7 +184,7 @@ export function runGraphPropertiesScenarios(
         await graph.addEdge(alice.id, bob.id, 'KNOWS', { weight: 0.8 });
         await graph.addEdge(bob.id, carol.id, 'KNOWS', { weight: 0.9 });
 
-        await expect(graph.createIndex('edge', ['weight'])).resolves.toBeUndefined();
+        await expect(graph.createIndex('weight-index', 'edge', ['weight'])).resolves.toBeUndefined();
 
         const results = await graph.getEdges({ filter: { properties: [{ key: 'weight', value: 0.8 }] } });
         expect(results).toHaveLength(1);

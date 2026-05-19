@@ -92,7 +92,7 @@ export async function buildGraph(
   const graph = await Graph.importJSON({ graphId, nodes, edges }, provider);
 
   // Create indexes for benchmark query patterns
-  await graph.createIndex('node', ['active']);
+  await graph.createIndex('active-index', 'node', ['active']);
 
   if (typeof global.gc === 'function') global.gc();
   const heapAfter = process.memoryUsage().heapUsed;

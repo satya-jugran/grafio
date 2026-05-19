@@ -381,11 +381,12 @@ export class Graph {
    * Creates an index on one or more node or edge properties.
    * Supports both simple indexes (single property) and compound indexes (multiple properties).
    *
+   * @param name - Unique name for the index
    * @param target - Either 'node' or 'edge'
    * @param propertyKeys - Array of property names to index
    */
-  async createIndex(target: 'node' | 'edge', propertyKeys: string[]): Promise<void> {
-    return this._index.createIndex(target, propertyKeys);
+  async createIndex(name: string, target: 'node' | 'edge', propertyKeys: string[]): Promise<void> {
+    return this._index.createIndex(name, target, propertyKeys);
   }
 
   /**
@@ -398,6 +399,16 @@ export class Graph {
    */
   async hasIndex(target: 'node' | 'edge', propertyKeys: string[]): Promise<boolean> {
     return this._index.hasIndex(target, propertyKeys);
+  }
+
+  /**
+   * Retrieves an index by its name.
+   *
+   * @param name - The name of the index to retrieve
+   * @returns The index metadata if found, undefined otherwise
+   */
+  async getIndex(name: string): Promise<{ name: string; target: 'node' | 'edge'; propertyKeys: string[] } | undefined> {
+    return this._index.getIndex(name);
   }
 
   // ---------------------------------------------------------------------------

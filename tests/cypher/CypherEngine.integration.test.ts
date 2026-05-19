@@ -37,12 +37,12 @@ async function buildSocialGraph(graph: Graph): Promise<void> {
   await graph.addEdge(henry.id, alice.id, 'KNOWS', { since: 2023 });
   await graph.addEdge(alice.id, david.id, 'KNOWS', { since: 2019 });
 
-  await graph.createIndex('node', ['name']);
-  await graph.createIndex('node', ['age']);
-  await graph.createIndex('node', ['name', 'age']);
-  await graph.createIndex('node', ['city']);
-  await graph.createIndex('node', ['occupation']);
-  await graph.createIndex('edge', ['since']);
+  await graph.createIndex('name-index', 'node', ['name']);
+  await graph.createIndex('age-index', 'node', ['age']);
+  await graph.createIndex('name-age-index', 'node', ['name', 'age']);
+  await graph.createIndex('city-index', 'node', ['city']);
+  await graph.createIndex('occupation-index', 'node', ['occupation']);
+  await graph.createIndex('since-index', 'edge', ['since']);
 }
 
 /** Build an education graph with courses, students, and teachers. */

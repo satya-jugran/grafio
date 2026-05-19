@@ -567,8 +567,8 @@ describe('CachedStorageProvider', () => {
   describe('delegation to underlying — createIndex', () => {
     it('should delegate createIndex', async () => {
       const spy = jest.spyOn(mockProvider, 'createIndex');
-      await provider.createIndex('node', 'name');
-      expect(spy).toHaveBeenCalledWith('node', 'name');
+      await provider.createIndex('name-index', 'node', ['name']);
+      expect(spy).toHaveBeenCalledWith('name-index', 'node', ['name']);
     });
   });
 

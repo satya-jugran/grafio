@@ -397,14 +397,19 @@ export class CachedStorageProvider implements IStorageProvider {
   // ─── Index management ────────────────────────────────────────────────────────
 
   async createIndex(
+    name: string,
     target: 'node' | 'edge',
     propertyKeys: string[]
   ): Promise<void> {
-    return this._underlying.createIndex(target, propertyKeys);
+    return this._underlying.createIndex(name, target, propertyKeys);
   }
 
   async hasIndex(target: 'node' | 'edge', propertyKeys: string[]): Promise<boolean> {
     return this._underlying.hasIndex(target, propertyKeys);
+  }
+
+  async getIndex(name: string): Promise<{ name: string; target: 'node' | 'edge'; propertyKeys: string[] } | undefined> {
+    return this._underlying.getIndex(name);
   }
 
   // ─── Data portability ────────────────────────────────────────────────────────
