@@ -277,26 +277,36 @@ export interface IStorageProvider {
   // ---------------------------------------------------------------------------
 
   /**
-   * Creates an index on a node or edge property.
+   * Creates an index on one or more node or edge properties.
+   * Supports both simple indexes (single property) and compound indexes (multiple properties).
    *
    * @param target - Either 'node' or 'edge'
-   * @param propertyKey - The property name to index
-   * @param type - Optional type filter. If provided (not '*' or undefined), creates a compound index on (type, propertyKey)
+   * @param propertyKeys - Array of property names to index. For compound indexes,
+   *                       the order matters for index structure but queries can use
+   *                       any subset of the indexed properties.
    *
    * Behavior:
-   * - If type is undefined or '*': creates a simple index on propertyKey only
-   * - If type is specified (e.g., 'User'): creates a compound index on (type, propertyKey)
+   * - Single property ['email']: creates simple index on 'email'
+   * - Multiple properties ['name', 'email']: creates compound index on (name, email)
    */
-  createIndex(target: 'node' | 'edge', propertyKey: string): Promise<void>;
+  createIndex(target: 'node' | 'edge', propertyKeys: string[]): Promise<void>;
 
   /**
-   * Checks if an index exists on a node or edge property.
+   * Checks if an index exists that covers the given property keys.
+   *
+   * For compound indexes, returns true if ALL provided propertyKeys are covered
+   * by the same index (the index may have additional properties).
    *
    * @param target - Either 'node' or 'edge'
-   * @param propertyKey - The property name to check for an index
-   * @returns true if an index exists for the given property, false otherwise
+   * @param propertyKeys - Array of property names to check
+   * @returns true if an index exists that covers all given properties, false otherwise
+   *
+   * Example:
+   * - Index on ['name', 'email'], query ['email'] → false (partial coverage)
+   * - Index on ['name', 'email'], query ['name', 'email'] → true (full coverage)
+   * - Index on ['name', 'email'], query ['email', 'name'] → true (same properties, diff order)
    */
-  hasIndex(target: 'node' | 'edge', propertyKey: string): Promise<boolean>;
+  hasIndex(target: 'node' | 'edge', propertyKeys: string[]): Promise<boolean>;
 
   // ---------------------------------------------------------------------------
   // Data portability

@@ -165,17 +165,26 @@ export class JoinReorderer {
   ): Promise<number> {
     if (idLookups.has(v.name)) return 1;
 
-    // Indexed equality — score 5 when the property has a storage-level
-    // index; score 10 for non-indexed equality.
-    for (const p of predicates) {
-      if (this._isEquality(p) && p.key) {
-        if (this._graph) {
-          const indexed = await this._graph.hasIndex('node', p.key);
-          if (indexed) return 5;
-        }
-        return 10;
+    // Collect all equality predicate property keys
+    const predicateKeys = predicates
+      .filter(p => this._isEquality(p) && p.key)
+      .map(p => p.key!);
+
+    if (predicateKeys.length > 0 && this._graph) {
+      // First, check if ALL predicate properties are covered by the same index (compound index)
+      const compoundIndex = await this._graph.hasIndex('node', predicateKeys);
+      if (compoundIndex) return 5;
+
+      // Fall back: check if ANY single predicate has an index
+      // This handles the case where only some predicates are indexed
+      for (const key of predicateKeys) {
+        const singleIndex = await this._graph.hasIndex('node', [key]);
+        if (singleIndex) return 5;
       }
     }
+
+    // Non-indexed equality — score 10
+    if (predicateKeys.length > 0) return 10;
 
     if (v.labels.length > 0) return 100;
     return 10000;

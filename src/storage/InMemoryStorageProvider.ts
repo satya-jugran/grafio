@@ -61,11 +61,18 @@ export class InMemoryStorageProvider implements IStorageProvider {
   private readonly _nodesByProperty = new Map<string, Map<string, Set<string>>>();
   private _edgesByProperty = new Map<string, Map<string, Set<string>>>();
 
-  /** Tracks created index keys for nodes */
+  /** Tracks created index keys for nodes (single property indexes) */
   private readonly _nodeIndexedKeys = new Set<string>();
 
-  /** Tracks created index keys for edges */
+  /** Tracks created index keys for edges (single property indexes) */
   private readonly _edgeIndexedKeys = new Set<string>();
+
+  /**
+   * Tracks compound indexes using sorted key tuple as string key.
+   * Format: "prop1|prop2|..." → target ('node' | 'edge')
+   * This allows O(1) lookup for compound index existence.
+   */
+  private readonly _compoundIndexes = new Map<string, 'node' | 'edge'>();
 
   // ---------------------------------------------------------------------------
   // Helpers
@@ -183,6 +190,9 @@ export class InMemoryStorageProvider implements IStorageProvider {
     this._edgesByTarget.clear();
     this._nodesByProperty.clear();
     this._edgesByProperty.clear();
+    this._nodeIndexedKeys.clear();
+    this._edgeIndexedKeys.clear();
+    this._compoundIndexes.clear();
     // Clear transaction state so clear truly removes all stored data
     this._transactionOverlays.clear();
     this._activeTransaction = null;
@@ -720,59 +730,115 @@ export class InMemoryStorageProvider implements IStorageProvider {
   // ---------------------------------------------------------------------------
 
   /**
-   * Creates an index on a node or edge property.
+   * Creates an index on one or more node or edge properties.
+   * Supports both simple indexes (single property) and compound indexes (multiple properties).
    *
    * For InMemoryStorageProvider, property indexes are auto-maintained on insert/delete.
    * This method primarily tracks which properties should be indexed and rebuilds
    * compound indexes if needed.
    *
    * @param target - Either 'node' or 'edge'
-   * @param propertyKey - The property name to index
+   * @param propertyKeys - Array of property names to index. For compound indexes,
+   *                       the order matters for index structure but queries can use
+   *                       any subset of the indexed properties.
    */
-  async createIndex(target: 'node' | 'edge', propertyKey: string): Promise<void> {
-    if (target === 'node') {
-      if (!this._nodesByProperty.has(propertyKey)) {
-        this._nodesByProperty.set(propertyKey, new Map());
-      }
+  async createIndex(target: 'node' | 'edge', propertyKeys: string[]): Promise<void> {
+    if (propertyKeys.length === 0) return;
 
-      const valueMap = this._nodesByProperty.get(propertyKey)!;
-      for (const node of this._nodes.values()) {
-        if (propertyKey in node.properties) {
-          const serialized = this._propKey(node.properties[propertyKey]);
-          if (!valueMap.has(serialized)) {
-            valueMap.set(serialized, new Set());
+    // Sort keys for consistent compound index key generation
+    const sortedKeys = [...propertyKeys].sort();
+    const compoundKey = sortedKeys.join('|');
+
+    if (target === 'node') {
+      // Track single-property indexes
+      for (const key of propertyKeys) {
+        this._nodeIndexedKeys.add(key);
+        if (!this._nodesByProperty.has(key)) {
+          this._nodesByProperty.set(key, new Map());
+        }
+
+        const valueMap = this._nodesByProperty.get(key)!;
+        for (const node of this._nodes.values()) {
+          if (key in node.properties) {
+            const serialized = this._propKey(node.properties[key]);
+            if (!valueMap.has(serialized)) {
+              valueMap.set(serialized, new Set());
+            }
+            valueMap.get(serialized)!.add(node.id);
           }
-          valueMap.get(serialized)!.add(node.id);
         }
       }
+
+      // Track compound index
+      this._compoundIndexes.set(compoundKey, 'node');
     } else {
       // For edges
-      this._edgeIndexedKeys.add(propertyKey);
-      if (!this._edgesByProperty.has(propertyKey)) {
-        this._edgesByProperty.set(propertyKey, new Map());
-      }
+      for (const key of propertyKeys) {
+        this._edgeIndexedKeys.add(key);
+        if (!this._edgesByProperty.has(key)) {
+          this._edgesByProperty.set(key, new Map());
+        }
 
-      const valueMap = this._edgesByProperty.get(propertyKey)!;
-      for (const edge of this._edges.values()) {
-        if (propertyKey in edge.properties) {
-          const serialized = this._propKey(edge.properties[propertyKey]);
-          if (!valueMap.has(serialized)) {
-            valueMap.set(serialized, new Set());
+        const valueMap = this._edgesByProperty.get(key)!;
+        for (const edge of this._edges.values()) {
+          if (key in edge.properties) {
+            const serialized = this._propKey(edge.properties[key]);
+            if (!valueMap.has(serialized)) {
+              valueMap.set(serialized, new Set());
+            }
+            valueMap.get(serialized)!.add(edge.id);
           }
-          valueMap.get(serialized)!.add(edge.id);
         }
       }
+
+      // Track compound index
+      this._compoundIndexes.set(compoundKey, 'edge');
     }
   }
 
   /**
-   * Checks if an index exists on a node or edge property.
+   * Checks if an index exists that covers the given property keys.
+   *
+   * For compound indexes, returns true if ALL provided propertyKeys are covered
+   * by the same index (the index may have additional properties).
+   *
+   * @param target - Either 'node' or 'edge'
+   * @param propertyKeys - Array of property names to check
+   * @returns true if an index exists that covers all given properties, false otherwise
    */
-  async hasIndex(target: 'node' | 'edge', propertyKey: string): Promise<boolean> {
+  async hasIndex(target: 'node' | 'edge', propertyKeys: string[]): Promise<boolean> {
+    if (propertyKeys.length === 0) return false;
+
+    // First, check if there's a compound index that covers all these properties
+    const sortedQueryKeys = [...propertyKeys].sort();
+    const queryKey = sortedQueryKeys.join('|');
+
+    // Check all compound indexes for target type
+    for (const [indexKey, indexTarget] of this._compoundIndexes.entries()) {
+      if (indexTarget !== target) continue;
+
+      // A compound index covers the query if all query keys are present in the index key
+      const indexKeys = indexKey.split('|');
+      const allCovered = sortedQueryKeys.every(qKey => indexKeys.includes(qKey));
+
+      if (allCovered) return true;
+    }
+
+    // Fallback: check single-property indexes (backwards compatibility)
+    if (propertyKeys.length === 1) {
+      const key = propertyKeys[0];
+      if (target === 'node') {
+        return this._nodesByProperty.has(key);
+      } else {
+        return this._edgesByProperty.has(key);
+      }
+    }
+
+    // For multi-property queries without compound index match, check if ALL keys have single indexes
     if (target === 'node') {
-      return this._nodesByProperty.has(propertyKey);
+      return propertyKeys.every(key => this._nodesByProperty.has(key));
     } else {
-      return this._edgesByProperty.has(propertyKey);
+      return propertyKeys.every(key => this._edgesByProperty.has(key));
     }
   }
 

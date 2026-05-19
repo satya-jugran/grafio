@@ -4,7 +4,7 @@ import { Graph, IStorageProvider, Node } from '../../index';
 export async function prepareSocialGraph(provider?: IStorageProvider): Promise<Graph> {
  const graph = new Graph(provider);
       // Create index on 'name' property since socialGraphScenarios queries by name
-      await graph.createIndex('node', 'name');
+      await graph.createIndex('node', ['name']);
 
       // ========================================
       // CREATE PEOPLE (10 nodes)
