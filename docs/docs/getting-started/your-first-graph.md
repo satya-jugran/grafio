@@ -28,25 +28,25 @@ async function main() {
   const graph = factory.forGraph('default');
   const engine = new CypherEngine(graph);
 
-  // 2. Add nodes
-  const author = await graph.addNode('Author', { name: 'Jane Smith' });
-  const course = await graph.addNode('Course', {
-    title: 'TypeScript Fundamentals',
-    duration: 60
-  });
-  const chapter1 = await graph.addNode('Chapter', {
-    title: 'Introduction',
-    order: 1
-  });
-  const chapter2 = await graph.addNode('Chapter', {
-    title: 'Advanced Types',
-    order: 2
-  });
+  // 2. Build graph
+  await engine.execute(`
+    CREATE (author:Author {name: 'Jane Smith'}),
+           (course:Course {title: 'TypeScript Fundamentals', duration: 60}),
+           (chapter1:Chapter {title: 'Introduction', order: 1}),
+           (chapter2:Chapter {title: 'Advanced Types', order: 2})
+  `);
 
-  // 3. Connect nodes with edges
-  await graph.addEdge(author.id, course.id, 'AUTHOR_OF');
-  await graph.addEdge(course.id, chapter1.id, 'CONTAINS');
-  await graph.addEdge(course.id, chapter2.id, 'CONTAINS');
+  // 3. Connect nodes with Cypher
+  await engine.execute(`
+    MATCH (author:Author), (course:Course)
+    CREATE (author)-[:AUTHOR_OF]->(course)
+  `);
+
+  await engine.execute(`
+    MATCH (course:Course), (chapter1:Chapter {title: 'Introduction'}), (chapter2:Chapter {title: 'Advanced Types'})
+    CREATE (course)-[:CONTAINS]->(chapter1)
+    CREATE (course)-[:CONTAINS]->(chapter2)
+  `);
 
   // 4. Query the graph using Cypher
 

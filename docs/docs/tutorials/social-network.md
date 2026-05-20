@@ -10,33 +10,36 @@ A simple social network with users, friendships, and followers.
 
 ```typescript
 import { InMemoryGraphFactory } from 'grafio';
+import { CypherEngine } from 'grafio/cypher';
 
 const factory = new InMemoryGraphFactory();
 const graph = factory.forGraph('default');
+const engine = new CypherEngine(graph);
 ```
 
 ## Step 2: Add Users
 
 ```typescript
-const alice = await graph.addNode('User', { name: 'Alice', age: 30, city: 'NYC' });
-const bob = await graph.addNode('User', { name: 'Bob', age: 25, city: 'LA' });
-const carol = await graph.addNode('User', { name: 'Carol', age: 35, city: 'NYC' });
-const david = await graph.addNode('User', { name: 'David', age: 28, city: 'SF' });
+await engine.execute(`
+  CREATE (alice:User {name: 'Alice', age: 30, city: 'NYC'}),
+         (bob:User {name: 'Bob', age: 25, city: 'LA'}),
+         (carol:User {name: 'Carol', age: 35, city: 'NYC'}),
+         (david:User {name: 'David', age: 28, city: 'SF'})
+`);
 ```
 
 ## Step 3: Create Relationships
 
 ```typescript
-// Alice and Bob are friends
-await graph.addEdge(alice.id, bob.id, 'KNOWS');
-await graph.addEdge(bob.id, alice.id, 'KNOWS');
-
-// Carol follows Alice
-await graph.addEdge(carol.id, alice.id, 'FOLLOWS');
-
-// David is friends with Carol
-await graph.addEdge(david.id, carol.id, 'KNOWS');
-await graph.addEdge(carol.id, david.id, 'KNOWS');
+await engine.execute(`
+  MATCH (a:User {name: 'Alice'}), (b:User {name: 'Bob'})
+  MATCH (c:User {name: 'Carol'}), (d:User {name: 'David'})
+  CREATE (a)-[:KNOWS]->(b)
+  CREATE (b)-[:KNOWS]->(a)
+  CREATE (c)-[:FOLLOWS]->(a)
+  CREATE (d)-[:KNOWS]->(c)
+  CREATE (c)-[:KNOWS]->(d)
+`);
 ```
 
 ## Step 4: Query the Network
@@ -102,18 +105,23 @@ async function main() {
   const graph = factory.forGraph('default');
   const engine = new CypherEngine(graph);
 
-  // Create users
-  const alice = await graph.addNode('User', { name: 'Alice', age: 30, city: 'NYC' });
-  const bob = await graph.addNode('User', { name: 'Bob', age: 25, city: 'LA' });
-  const carol = await graph.addNode('User', { name: 'Carol', age: 35, city: 'NYC' });
-  const david = await graph.addNode('User', { name: 'David', age: 28, city: 'SF' });
+  // Build graph
+  await engine.execute(`
+    CREATE (alice:User {name: 'Alice', age: 30, city: 'NYC'}),
+           (bob:User {name: 'Bob', age: 25, city: 'LA'}),
+           (carol:User {name: 'Carol', age: 35, city: 'NYC'}),
+           (david:User {name: 'David', age: 28, city: 'SF'})
+  `);
 
-  // Create relationships
-  await graph.addEdge(alice.id, bob.id, 'KNOWS');
-  await graph.addEdge(bob.id, alice.id, 'KNOWS');
-  await graph.addEdge(carol.id, alice.id, 'FOLLOWS');
-  await graph.addEdge(david.id, carol.id, 'KNOWS');
-  await graph.addEdge(carol.id, david.id, 'KNOWS');
+  await engine.execute(`
+    MATCH (a:User {name: 'Alice'}), (b:User {name: 'Bob'})
+    MATCH (c:User {name: 'Carol'}), (d:User {name: 'David'})
+    CREATE (a)-[:KNOWS]->(b)
+    CREATE (b)-[:KNOWS]->(a)
+    CREATE (c)-[:FOLLOWS]->(a)
+    CREATE (d)-[:KNOWS]->(c)
+    CREATE (c)-[:KNOWS]->(d)
+  `);
 
   // Find Alice's friends
   const friends = await engine.query(`

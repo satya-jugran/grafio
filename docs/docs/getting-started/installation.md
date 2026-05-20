@@ -27,12 +27,18 @@ const factory = new InMemoryGraphFactory();
 const graph = factory.forGraph('default');
 const engine = new CypherEngine(graph);
 
-const course = await graph.addNode('Course', { name: 'Python 101', duration: 40 });
-const chapter = await graph.addNode('Chapter', { name: 'Getting Started', order: 1 });
+// Build graph
+await engine.execute(`
+  CREATE (course:Course {name: 'Python 101', duration: 40}),
+         (chapter:Chapter {name: 'Getting Started', order: 1})
+`);
 
-await graph.addEdge(course.id, chapter.id, 'CONTAINS');
+await engine.execute(`
+  MATCH (course:Course), (chapter:Chapter)
+  CREATE (course)-[:CONTAINS]->(chapter)
+`);
 
-// Query using Cypher
+// Query
 const result = await engine.query(`
   MATCH (c:Course)-[:CONTAINS]->(ch:Chapter)
   RETURN c.name AS course, collect(ch.name) AS chapters

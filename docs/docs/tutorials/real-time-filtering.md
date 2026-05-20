@@ -16,28 +16,27 @@ const factory = new InMemoryGraphFactory();
 const graph = factory.forGraph('default');
 const engine = new CypherEngine(graph);
 
-// Create categories
-const electronics = await graph.addNode('Category', { name: 'Electronics' });
-const clothing = await graph.addNode('Category', { name: 'Clothing' });
+// Build graph
+await engine.execute(`
+  CREATE (electronics:Category {name: 'Electronics'}),
+         (clothing:Category {name: 'Clothing'}),
+         (laptop:Product {name: 'Laptop', price: 999, inStock: true}),
+         (phone:Product {name: 'Phone', price: 699, inStock: true}),
+         (headphones:Product {name: 'Headphones', price: 149, inStock: false}),
+         (tshirt:Product {name: 'T-Shirt', price: 29, inStock: true}),
+         (jeans:Product {name: 'Jeans', price: 79, inStock: true})
+`);
 
-// Create products
-const products = [
-  { name: 'Laptop', price: 999, category: 'Electronics', inStock: true },
-  { name: 'Phone', price: 699, category: 'Electronics', inStock: true },
-  { name: 'Headphones', price: 149, category: 'Electronics', inStock: false },
-  { name: 'T-Shirt', price: 29, category: 'Clothing', inStock: true },
-  { name: 'Jeans', price: 79, category: 'Clothing', inStock: true },
-];
-
-for (const p of products) {
-  const productNode = await graph.addNode('Product', {
-    name: p.name,
-    price: p.price,
-    inStock: p.inStock,
-  });
-  const categoryNode = p.category === 'Electronics' ? electronics : clothing;
-  await graph.addEdge(categoryNode.id, productNode.id, 'CONTAINS');
-}
+await engine.execute(`
+  MATCH (e:Category {name: 'Electronics'}), (laptop:Product {name: 'Laptop'})
+  MATCH (p:Product {name: 'Phone'}), (h:Product {name: 'Headphones'})
+  MATCH (c:Category {name: 'Clothing'}), (t:Product {name: 'T-Shirt'}), (j:Product {name: 'Jeans'})
+  CREATE (e)-[:CONTAINS]->(laptop)
+  CREATE (e)-[:CONTAINS]->(p)
+  CREATE (e)-[:CONTAINS]->(h)
+  CREATE (c)-[:CONTAINS]->(t)
+  CREATE (c)-[:CONTAINS]->(j)
+`);
 ```
 
 ## Step 2: Filter by Single Condition

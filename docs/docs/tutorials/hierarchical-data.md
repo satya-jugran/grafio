@@ -6,49 +6,52 @@ Model hierarchical data structures like organization charts, file systems, and c
 
 A course hierarchy with authors, courses, chapters, and lessons.
 
-## Step 1: Create the Hierarchy
+## Step 1: Create the Graph
 
 ```typescript
 import { InMemoryGraphFactory } from 'grafio';
+import { CypherEngine } from 'grafio/cypher';
 
 const factory = new InMemoryGraphFactory();
 const graph = factory.forGraph('default');
-
-// Authors
-const author1 = await graph.addNode('Author', { name: 'Jane Smith' });
-const author2 = await graph.addNode('Author', { name: 'John Doe' });
-
-// Courses
-const course1 = await graph.addNode('Course', { 
-  title: 'TypeScript Fundamentals', 
-  duration: 600 
-});
-const course2 = await graph.addNode('Course', { 
-  title: 'Advanced TypeScript', 
-  duration: 480 
-});
-
-// Chapters
-const ch1 = await graph.addNode('Chapter', { title: 'Introduction', order: 1 });
-const ch2 = await graph.addNode('Chapter', { title: 'Types', order: 2 });
-const ch3 = await graph.addNode('Chapter', { title: 'Generics', order: 3 });
+const engine = new CypherEngine(graph);
 ```
 
-## Step 2: Link the Hierarchy
+## Step 2: Add Nodes
 
 ```typescript
-// Authors create courses
-await graph.addEdge(author1.id, course1.id, 'AUTHOR_OF');
-await graph.addEdge(author2.id, course2.id, 'AUTHOR_OF');
-
-// Courses contain chapters
-await graph.addEdge(course1.id, ch1.id, 'CONTAINS');
-await graph.addEdge(course1.id, ch2.id, 'CONTAINS');
-await graph.addEdge(course2.id, ch2.id, 'CONTAINS');
-await graph.addEdge(course2.id, ch3.id, 'CONTAINS');
+await engine.execute(`
+  CREATE (author1:Author {name: 'Jane Smith'}),
+         (author2:Author {name: 'John Doe'}),
+         (course1:Course {title: 'TypeScript Fundamentals', duration: 600}),
+         (course2:Course {title: 'Advanced TypeScript', duration: 480}),
+         (ch1:Chapter {title: 'Introduction', order: 1}),
+         (ch2:Chapter {title: 'Types', order: 2}),
+         (ch3:Chapter {title: 'Generics', order: 3})
+`);
 ```
 
-## Step 3: Query the Hierarchy
+## Step 3: Link the Hierarchy
+
+```typescript
+await engine.execute(`
+  MATCH (a1:Author {name: 'Jane Smith'}), (c1:Course {title: 'TypeScript Fundamentals'})
+  MATCH (a2:Author {name: 'John Doe'}), (c2:Course {title: 'Advanced TypeScript'})
+  CREATE (a1)-[:AUTHOR_OF]->(c1)
+  CREATE (a2)-[:AUTHOR_OF]->(c2)
+`);
+
+await engine.execute(`
+  MATCH (c1:Course {title: 'TypeScript Fundamentals'}), (ch1:Chapter {title: 'Introduction'}), (ch2:Chapter {title: 'Types'})
+  MATCH (c2:Course {title: 'Advanced TypeScript'}), (ch3:Chapter {title: 'Generics'})
+  CREATE (c1)-[:CONTAINS]->(ch1)
+  CREATE (c1)-[:CONTAINS]->(ch2)
+  CREATE (c2)-[:CONTAINS]->(ch2)
+  CREATE (c2)-[:CONTAINS]->(ch3)
+`);
+```
+
+## Step 4: Query the Hierarchy
 
 ### Get Chapters of a Course
 
@@ -86,14 +89,14 @@ const result = await engine.query(`
 `);
 ```
 
-## Step 4: Check for Cycles (DAG Validation)
+## Step 5: Check for Cycles (DAG Validation)
 
 ```typescript
 const isDag = await graph.isDAG();
 console.log(isDag); // true (course hierarchy should be acyclic)
 ```
 
-## Step 5: Topological Sort (Build Order)
+## Step 6: Topological Sort (Build Order)
 
 For dependency resolution:
 
@@ -127,18 +130,23 @@ async function main() {
   const graph = factory.forGraph();
   const engine = new CypherEngine(graph);
 
-  // Create nodes
-  const author = await graph.addNode('Author', { name: 'Jane Smith' });
-  const course = await graph.addNode('Course', { title: 'TypeScript Fundamentals' });
-  const ch1 = await graph.addNode('Chapter', { title: 'Introduction', order: 1 });
-  const ch2 = await graph.addNode('Chapter', { title: 'Types', order: 2 });
+  // Build graph
+  await engine.execute(`
+    CREATE (author:Author {name: 'Jane Smith'}),
+           (course:Course {title: 'TypeScript Fundamentals'}),
+           (ch1:Chapter {title: 'Introduction', order: 1}),
+           (ch2:Chapter {title: 'Types', order: 2})
+  `);
 
-  // Link hierarchy
-  await graph.addEdge(author.id, course.id, 'AUTHOR_OF');
-  await graph.addEdge(course.id, ch1.id, 'CONTAINS');
-  await graph.addEdge(course.id, ch2.id, 'CONTAINS');
+  await engine.execute(`
+    MATCH (a:Author), (c:Course)
+    MATCH (c2:Course), (c1:Chapter), (c2b:Chapter)
+    CREATE (a)-[:AUTHOR_OF]->(c)
+    CREATE (c)-[:CONTAINS]->(ch1)
+    CREATE (c)-[:CONTAINS]->(ch2)
+  `);
 
-  // Query using Cypher
+  // Query
   const chapters = await engine.query(`
     MATCH (course:Course)-[:CONTAINS]->(chapter:Chapter)
     RETURN chapter.title AS title, chapter.order AS order

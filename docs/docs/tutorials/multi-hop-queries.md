@@ -16,20 +16,22 @@ const factory = new InMemoryGraphFactory();
 const graph = factory.forGraph('default');
 const engine = new CypherEngine(graph);
 
-// Build a network
-const alice = await graph.addNode('Person', { name: 'Alice' });
-const bob = await graph.addNode('Person', { name: 'Bob' });
-const carol = await graph.addNode('Person', { name: 'Carol' });
-const dave = await graph.addNode('Person', { name: 'Dave' });
-const eve = await graph.addNode('Person', { name: 'Eve' });
+// Build graph
+await engine.execute(`
+  CREATE (alice:Person {name: 'Alice'}),
+         (bob:Person {name: 'Bob'}),
+         (carol:Person {name: 'Carol'}),
+         (dave:Person {name: 'Dave'}),
+         (eve:Person {name: 'Eve'})
+`);
 
-// Alice KNOWS Bob KNOWS Carol KNOWS Dave
-await graph.addEdge(alice.id, bob.id, 'KNOWS');
-await graph.addEdge(bob.id, carol.id, 'KNOWS');
-await graph.addEdge(carol.id, dave.id, 'KNOWS');
-
-// Alice also KNOWS Eve directly
-await graph.addEdge(alice.id, eve.id, 'KNOWS');
+await engine.execute(`
+  MATCH (a:Person {name: 'Alice'}), (b:Person {name: 'Bob'}), (c:Person {name: 'Carol'}), (d:Person {name: 'Dave'})
+  CREATE (a)-[:KNOWS]->(b)
+  CREATE (b)-[:KNOWS]->(c)
+  CREATE (c)-[:KNOWS]->(d)
+  CREATE (a)-[:KNOWS]->(eve)
+`);
 ```
 
 ## 1-Hop Queries (Direct Connections)
@@ -180,19 +182,22 @@ async function main() {
   const graph = factory.forGraph();
   const engine = new CypherEngine(graph);
 
-  // Build network
-  const [alice, bob, carol, dave, eve] = await Promise.all([
-    graph.addNode('Person', { name: 'Alice' }),
-    graph.addNode('Person', { name: 'Bob' }),
-    graph.addNode('Person', { name: 'Carol' }),
-    graph.addNode('Person', { name: 'Dave' }),
-    graph.addNode('Person', { name: 'Eve' }),
-  ]);
+  // Build graph
+  await engine.execute(`
+    CREATE (alice:Person {name: 'Alice'}),
+           (bob:Person {name: 'Bob'}),
+           (carol:Person {name: 'Carol'}),
+           (dave:Person {name: 'Dave'}),
+           (eve:Person {name: 'Eve'})
+  `);
 
-  await graph.addEdge(alice.id, bob.id, 'KNOWS');
-  await graph.addEdge(bob.id, carol.id, 'KNOWS');
-  await graph.addEdge(carol.id, dave.id, 'KNOWS');
-  await graph.addEdge(alice.id, eve.id, 'KNOWS');
+  await engine.execute(`
+    MATCH (a:Person {name: 'Alice'}), (b:Person {name: 'Bob'}), (c:Person {name: 'Carol'}), (d:Person {name: 'Dave'})
+    CREATE (a)-[:KNOWS]->(b)
+    CREATE (b)-[:KNOWS]->(c)
+    CREATE (c)-[:KNOWS]->(d)
+    CREATE (a)-[:KNOWS]->(eve)
+  `);
 
   // Multi-hop queries
   const foaf = await engine.query(`

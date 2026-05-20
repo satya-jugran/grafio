@@ -21,14 +21,22 @@ const graph = factory.forGraph('default');
 // Create Cypher engine
 const engine = new CypherEngine(graph);
 
-// Add nodes with types and properties
-const pythonCourse = await graph.addNode('Course', { name: 'Python', duration: 40 });
-const chapter1 = await graph.addNode('Chapter', { name: 'Basics', order: 1 });
-const author = await graph.addNode('Author', { name: 'John Doe' });
+// Build graph
+await engine.execute(`
+  CREATE (pythonCourse:Course {name: 'Python', duration: 40}),
+         (chapter1:Chapter {name: 'Basics', order: 1}),
+         (author:Author {name: 'John Doe'})
+`);
 
-// Connect nodes with directed edges
-await graph.addEdge(pythonCourse.id, chapter1.id, 'CONTAINS');
-await graph.addEdge(author.id, pythonCourse.id, 'AUTHOR_OF');
+await engine.execute(`
+  MATCH (course:Course), (chapter:Chapter)
+  CREATE (course)-[:CONTAINS]->(chapter)
+`);
+
+await engine.execute(`
+  MATCH (author:Author), (course:Course)
+  CREATE (author)-[:AUTHOR_OF]->(course)
+`);
 
 // Find all authors and their courses
 const result = await engine.query(`
