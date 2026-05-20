@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.2.0] - 2026-05-19
+
+### ✨ New Features
+
+1. **Cypher Data Modification Queries**
+   - Cypher now supports data modification queries including:
+     - `CREATE` — create nodes and relationships
+     - `SET` — update node and relationship properties
+     - `DELETE` — delete nodes and relationships
+     - `DETACH DELETE` — delete nodes and their connected relationships
+
+2. **Compound Indexes**
+   - Indexes can now be created as compound indexes with multiple properties
+
+3. **Cypher Index creation and deletion queries**
+   - Cypher now supports `CREATE INDEX`, `DROP INDEX`, `SHOW INDEXES`
+
+### 🚨 Breaking Changes
+
+1. **Indexes Now Created by Name**
+   - Indexes are now created and referenced by their assigned name
+   - Previous behavior used auto-generated identifiers
+
 ## [7.1.0] - 2026-05-17
 
 ### 🐛 Bug Fixes

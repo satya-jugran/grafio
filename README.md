@@ -24,15 +24,39 @@ npm install grafio
 ## Quick Start
 
 ```typescript
-import { Graph } from 'grafio';
+import { CypherEngine } from 'grafio';
+import { InMemoryGraphFactory } from 'grafio/storage';
 
-const graph = new Graph();
-graph.addNode('Person', { name: 'Alice', age: 30 });
-graph.addNode('City', { name: 'New York' });
-graph.addEdge('LIVES_IN', 'alice', 'nyc', { since: 2020 });
+// Create graph via factory
+const factory = new InMemoryGraphFactory();
+const graph = factory.forGraph('social-network');
+const cypher = new CypherEngine(graph);
 
-// Query with Cypher
-const result = await graph.query('MATCH (p:Person)-[:LIVES_IN]->(c:City) RETURN p.name, c.name');
+// Adding social network
+cypher.execute(`
+    CREATE (a:Person {id: 'alice', name: 'Alice', age: 30}),
+    CREATE (b:Person {id: 'bob', name: 'Bob', age: 25}),
+    CREATE (c:Person {id: 'charlie', name: 'Charlie', age: 35})
+`);
+// Adding relationships
+cypher.execute(`
+  MATCH (a:Person {id: 'alice'}), (b:Person {id: 'bob'})
+  CREATE (a)-[:KNOWS {since: 2020}]->(b)
+`);
+cypher.execute(`
+  MATCH (b:Person {id: 'bob'}), (c:Person {id: 'charlie'})
+  CREATE (b)-[:KNOWS {since: 2019}]->(c)
+`);
+
+// Querying the network
+const friends = cypher.execute('MATCH (p:Person)-[:KNOWS]->(friend:Person) RETURN p.name as name, friend.name as friend');
+
+/* Returns: 
+    [
+        {"name":"Alice","friend":"Bob"},
+        {"name":"Bob","friend":"Charlie"}
+    ]
+*/
 ```
 
 ## License
