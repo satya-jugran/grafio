@@ -1,6 +1,17 @@
 # Transactions
 
-Batch multiple operations into a single atomic unit.
+Batch multiple operations into a single atomic unit using Cypher.
+
+## Setup
+
+```typescript
+import { InMemoryGraphFactory } from 'grafio';
+import { CypherEngine } from 'grafio/cypher';
+
+const factory = new InMemoryGraphFactory();
+const graph = factory.forGraph('default');
+const engine = new CypherEngine(graph);
+```
 
 ## Transaction Lifecycle
 
@@ -19,18 +30,22 @@ stateDiagram-v2
 ## Basic Usage
 
 ```typescript
-import { InMemoryGraphFactory } from 'grafio';
-
-const factory = new InMemoryGraphFactory();
-const graph = factory.forGraph('default');
 const txn = graph.createTransaction();
 
 await txn.begin();
 
 try {
-  const alice = await graph.addNode('Person', { name: 'Alice' }, txn);
-  const bob = await graph.addNode('Person', { name: 'Bob' }, txn);
-  await graph.addEdge(alice.id, bob.id, 'KNOWS', {}, txn);
+await engine.execute(
+  `CREATE (p:Person {name: 'Alice', age: 30})`,
+  {},
+  { transaction: txn }
+);
+
+await engine.execute(
+  `CREATE (p:Person {name: 'Bob', age: 25})`,
+  {},
+  { transaction: txn }
+);
   
   await txn.commit();
 } catch (error) {
@@ -51,23 +66,25 @@ try {
 | `isActive()` | Check if transaction is active |
 | `isFailed()` | Check if transaction failed |
 
-## Transaction-Aware Queries
+## With Cypher Queries
 
-Use Cypher queries with transaction support for consistent reads:
+Pass the transaction via `CypherEngineOptions.transaction` for consistent reads:
 
 ```typescript
-import { CypherEngine } from 'grafio/cypher';
-
-const engine = new CypherEngine(graph);
 const txn = graph.createTransaction();
 await txn.begin();
 
-await graph.addNode('Person', { name: 'Alice' }, txn);
+await engine.execute(
+  `CREATE (p:Person {name: 'Alice'})`,
+  {},
+  { transaction: txn }
+);
 
-// Read uncommitted data via Cypher query with transaction
+// Read uncommitted data via Cypher query
 const result = await engine.execute(
-  'MATCH (p:Person) RETURN p.name AS name, p.id AS id',
-  { transaction: txn }  // Pass transaction via CypherEngineOptions
+  'MATCH (p:Person) RETURN p.name AS name',
+  {},
+  { transaction: txn }
 );
 console.log(result.rows);  // includes Alice
 ```
@@ -90,15 +107,42 @@ try {
 }
 ```
 
-## Nested Operations
+## Atomic Data Operations
 
-All Graph methods accept an optional transaction parameter:
+All data operations can be batched in a transaction:
 
 ```typescript
-await graph.addNode(type, properties, txn);
-await graph.addEdge(sourceId, targetId, type, properties, txn);
-await graph.getNodes(txn);
-await graph.traverse(sourceId, targetId, options, txn);
+async function createUserWithFriends(engine, graph, userName: string, friendNames: string[]) {
+  const txn = graph.createTransaction();
+  await txn.begin();
+  
+  try {
+    // Create user
+    await engine.execute(
+      `CREATE (u:User {name: $name})`,
+      { name: userName },
+      { transaction: txn }
+    );
+    
+    // Create friends and relationships
+    for (const friendName of friendNames) {
+      await engine.execute(
+        `MATCH (u:User {name: $userName})
+         CREATE (f:User {name: $friendName})
+         CREATE (u)-[:KNOWS]->(f)`,
+        { userName, friendName },
+        { transaction: txn }
+      );
+    }
+    
+    await txn.commit();
+  } catch (error) {
+    if (txn.isActive()) {
+      await txn.rollback();
+    }
+    throw error;
+  }
+}
 ```
 
 ## Best Practices
@@ -108,8 +152,8 @@ await graph.traverse(sourceId, targetId, options, txn);
 const txn = graph.createTransaction();
 await txn.begin();
 try {
-  // ... work ...
-  await txn.commit();
+await engine.execute(`CREATE (n:Test)`, {}, { transaction: txn });
+await txn.commit();
 } catch {
   if (txn.isActive()) await txn.rollback();
   throw;
@@ -128,4 +172,3 @@ try {
 
 - [Caching](./caching) — cache configuration
 - [API Reference](../api-reference/graph-transaction) — transaction API
-- [Graph Operations](./graph-operations) — CRUD operations

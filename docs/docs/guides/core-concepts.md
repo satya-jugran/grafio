@@ -2,6 +2,46 @@
 
 Understanding the fundamental building blocks of Grafio.
 
+## Graph Concepts
+
+A graph is a data structure consisting of **vertices** (also called nodes) connected by **edges** (also called links or relationships). Graphs model pairwise relationships between objects.
+
+### Key Terms
+
+- **Vertex (Node)** — An entity in the graph
+- **Edge** — A connection between two vertices
+- **Path** — A sequence of edges connecting two nodes
+
+```mermaid
+graph LR
+    Alice -->|"FRIENDS_WITH"| Bob
+    Alice -->|"KNOWS"| Carol
+    Bob -->|"FRIENDS_WITH"| Dave
+    Carol -->|"FRIENDS_WITH"| Eve
+    Bob -->|"KNOWS"| Carol
+    Dave -->|"KNOWS"| Carol
+    
+    style Alice fill:#e1f5fe
+    style Bob fill:#e1f5fe
+    style Carol fill:#e1f5fe
+    style Dave fill:#e1f5fe
+    style Eve fill:#e1f5fe
+```
+
+This social network shows how nodes (people) are connected through edges (relationships).
+
+## Graph Types
+
+### Directed Graph
+
+In a directed graph, edges have a specific direction. An edge from node A to node B is not the same as an edge from node B to node A.
+
+### Undirected Graph
+
+In an undirected graph, edges have no direction. The relationship between two nodes is symmetric.
+
+**Grafio uses a directed graph structure.**
+
 ## Graph Structure
 
 Grafio is a **directed graph** with:
@@ -24,11 +64,9 @@ graph LR
 
 Nodes are the primary entities in your graph.
 
-### Creating Nodes
+### Node Labels/Types
 
-```typescript
-const node = await graph.addNode('Person', { name: 'Alice', age: 30 });
-```
+Nodes are categorized by labels (e.g., `Person`, `Course`, `Author`). A node can have multiple labels.
 
 ### Node Properties
 
@@ -36,30 +74,22 @@ const node = await graph.addNode('Person', { name: 'Alice', age: 30 });
 - `type` — the type label (e.g., 'Person', 'Course')
 - `properties` — key-value pairs (primitives only)
 
-```typescript
-node.id;          // 'uuid-xxxx-xxxx'
-node.type;        // 'Person'
-node.properties;  // { name: 'Alice', age: 30 }
-```
-
 ### Supported Property Types
 
-| Type | Examples |
-|------|----------|
-| String | `'hello'`, `'world'` |
-| Number | `42`, `3.14` |
-| Boolean | `true`, `false` |
-| Null | `null`, `undefined` |
+| Type | Description |
+|------|-------------|
+| String | Text values |
+| Number | Integer or floating-point values |
+| Boolean | `true` or `false` |
+| Null | `null` or `undefined` |
 
 ## Edges
 
 Edges connect two nodes with a directed relationship.
 
-### Creating Edges
+### Edge Types
 
-```typescript
-const edge = await graph.addEdge(sourceId, targetId, 'KNOWS', { since: 2020 });
-```
+Edges are categorized by relationship types (e.g., `KNOWS`, `AUTHOR_OF`, `CONTAINS`). An edge type defines the nature of the relationship.
 
 ### Edge Properties
 
@@ -69,99 +99,16 @@ const edge = await graph.addEdge(sourceId, targetId, 'KNOWS', { since: 2020 });
 - `type` — relationship type (e.g., 'KNOWS', 'CONTAINS')
 - `properties` — optional metadata
 
-```typescript
-edge.id;        // 'uuid-xxxx-xxxx'
-edge.sourceId;  // source node id
-edge.targetId;  // target node id
-edge.type;      // 'KNOWS'
-edge.properties; // { since: 2020 }
-```
-
-## Types
-
-Types are string labels that categorize nodes and edges.
-
-### Filtering by Type
-
-Use `getNodes` with `filter` option or use Cypher queries:
-
-```typescript
-// Using GraphQueryOptions
-const people = await graph.getNodes({ filter: { nodeType: 'Person' } });
-```
-
-```cypher
-// Using Cypher
-MATCH (p:Person) RETURN p.name
-```
-
-## Navigation
-
-Use Cypher queries to navigate the graph.
-
-### Get Outgoing Edges from a Node
-
-```typescript
-const result = await engine.query(`
-  MATCH (source {id: $nodeId})-[r]->(target)
-  RETURN type(r) AS edgeType, target.id AS targetId
-`, { nodeId });
-```
-
-### Get Incoming Edges to a Node
-
-```typescript
-const result = await engine.query(`
-  MATCH (source)-[r]->(target {id: $nodeId})
-  RETURN type(r) AS edgeType, source.id AS sourceId
-`, { nodeId });
-```
-
-### Get Edges Between Two Nodes
-
-```typescript
-const result = await engine.query(`
-  MATCH (source {id: $sourceId})-[r]->(target {id: $targetId})
-  RETURN r.id AS edgeId, type(r) AS edgeType
-`, { sourceId, targetId });
-```
-
-### Filtering by Edge Type
-
-```typescript
-// Get only KNOWS edges from a node
-const result = await engine.query(`
-  MATCH (source {id: $nodeId})-[r:KNOWS]->(target)
-  RETURN target.id AS targetId
-`, { nodeId });
-```
-
 ## Type Safety
 
-Grafio uses TypeScript's type system for compile-time safety:
-
-```typescript
-import { InMemoryGraphFactory, Node, Edge } from 'grafio';
-
-const factory = new InMemoryGraphFactory();
-const graph = factory.forGraph('default');
-const node: Node = await graph.addNode('Person', { name: 'Alice' });
-
-// TypeScript knows node.id is a string
-const id: string = node.id;
-```
+Grafio uses TypeScript's type system for compile-time safety. All nodes and edges are strongly typed, and the API is designed to catch errors at compile time rather than runtime.
 
 ## Immutability
 
-Node and edge properties are **deep-frozen** to prevent accidental mutation:
-
-```typescript
-const node = await graph.addNode('Person', { name: 'Alice' });
-node.properties.name = 'Bob'; // TypeError: Cannot assign to read only property
-```
+Node and edge properties are **deep-frozen** to prevent accidental mutation. Once a node or edge is created, its properties cannot be modified.
 
 ## Next Steps
 
-- [Graph Operations](./graph-operations) — CRUD operations on nodes and edges
-- [Traversal](./traversal) — finding paths between nodes
-- [Filtering](./filtering) — filtering by type and properties
+- [Querying Graph](./querying-graph) — navigate and query the graph with Cypher
+- [Data Operations](./data-operations) — create and manipulate nodes and edges
+- [Filtering](./filtering) — filter by type and properties

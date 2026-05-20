@@ -61,5 +61,5 @@ const allNodes = await engine.query('MATCH (n) RETURN n');
 ## What's Next
 
 - [Core Concepts](../guides/core-concepts) — understand nodes, edges, and relationships
-- [Cypher Queries](../guides/cypher-queries) — learn the query language
+- [Cypher Language](../guides/cypher-language) — learn the query language
 - [API Reference](../api-reference/graph) — complete method reference

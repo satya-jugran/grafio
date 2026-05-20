@@ -147,5 +147,5 @@ main();
 ## Next Steps
 
 - [Multi-Hop Queries Tutorial](../tutorials/multi-hop-queries) — more traversal patterns
-- [Cypher Queries Guide](../guides/cypher-queries) — learn the query language
+- [Cypher Language Guide](../guides/cypher-language) — learn the query language
 - [Real-Time Filtering Tutorial](../tutorials/real-time-filtering) — dynamic filtering

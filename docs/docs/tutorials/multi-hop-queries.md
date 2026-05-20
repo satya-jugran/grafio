@@ -220,6 +220,6 @@ main();
 
 ## Next Steps
 
-- [Cypher Queries Guide](../guides/cypher-queries) — full Cypher reference
+- [Cypher Language Guide](../guides/cypher-language) — full Cypher reference
 - [Social Network Tutorial](../tutorials/social-network) — apply to real use case
 - [Traversal Guide](../guides/traversal) — non-Cypher traversal methods

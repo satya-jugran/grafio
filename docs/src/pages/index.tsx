@@ -7,6 +7,7 @@ import TabItem from '@theme/TabItem';
 import CodeBlock from '@theme/CodeBlock';
 
 import styles from './index.module.css';
+import { JSX } from 'react';
 
 function HomepageHeader() {
   const { siteConfig } = useDocusaurusContext();

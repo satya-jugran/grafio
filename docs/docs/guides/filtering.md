@@ -6,8 +6,8 @@ Filter nodes and edges by type and properties.
 
 ### Get Nodes with Type Filter
 
-```typescript
-const people = await graph.getNodes({ filter: { nodeType: 'Person' } });
+```cypher
+MATCH (p:Person) RETURN p.name, p.age
 ```
 
 ### Property Filtering with Cypher
@@ -40,12 +40,6 @@ RETURN p.name, p.age
 
 ## Edge Filtering
 
-### Get Edges by Type
-
-```typescript
-const knowsEdges = await graph.getEdges({ filter: { edgeType: 'KNOWS' } });
-```
-
 ### Filter by Source/Target Node
 
 ```cypher
@@ -63,45 +57,23 @@ WHERE NOT p.archived
 WHERE p.age > 18 AND (p.city = 'NYC' OR p.city = 'LA')
 ```
 
-## GraphQueryOptions
-
-```typescript
-interface GraphQueryOptions {
-  filter?: {
-    types?: string[];              // filter by node/edge types (OR within types)
-    properties?: FilterProperty[]; // property key-value pair filters
-  };
-  orderBy?: IOrderBy;             // sort results (field + direction)
-  limit?: number;                  // limit results
-  distinct?: boolean;              // deduplicate values for aggregation
-  transaction?: GraphTransaction;  // transaction context
-}
-
-// FilterProperty for property-based filtering
-interface FilterProperty {
-  key?: string;
-  value?: unknown;
-  op?: '=' | '<>' | '>' | '<' | '>=' | '<=' | 'CONTAINS' | 'STARTS_WITH' | 'ENDS_WITH' | 'IN' | 'NOT_IN' | 'IS_NULL' | 'IS_NOT_NULL';
-  AND?: FilterProperty[];
-  OR?: FilterProperty[];
-}
-```
-
 ## Creating Indexes
 
 For O(1) property lookups on large datasets:
 
-```typescript
-// Index on node property
-await graph.createIndex('node', 'email');
-await graph.createIndex('node', 'status');
+```cypher
+-- Node index
+CREATE INDEX email_idx FOR (n:Person) ON (n.email)
 
-// Index on edge property
-await graph.createIndex('edge', 'since');
+-- Compound index
+CREATE INDEX name_status_idx FOR (n:Person) ON (n.name, n.status)
+
+-- Edge index
+CREATE INDEX since_idx FOR ()-[r:KNOWS]-() ON (r.since)
 ```
 
 ## Next Steps
 
 - [Traversal](./traversal) — path finding
-- [Cypher Queries](./cypher-queries) — WHERE clause details
+- [Cypher Language](./cypher-language) — WHERE clause details
 - [API Reference](../api-reference/graph)

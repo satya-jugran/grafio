@@ -1,141 +1,96 @@
 # Aggregation
 
-Aggregate node and edge properties using SUM, AVG, MIN, MAX operations.
+Aggregate data using Cypher's aggregation functions.
 
-## Overview
-
-Grafio provides property aggregation functions that compute statistics across nodes or edges sharing a property key.
-
-## aggregateNodeProperty()
-
-```typescript
-async aggregateNodeProperty(
-  key: string,
-  options?: GraphQueryOptions
-): Promise<AggregateResult>
-```
-
-Computes aggregate statistics for a node property.
-
-### AggregateResult
-
-```typescript
-interface AggregateResult {
-  count: number;   // Count of non-null values (always present)
-  sum?: number;    // Sum of values (SUM operation)
-  avg?: number;    // Average of values (AVG operation)
-  min?: number;    // Minimum value (MIN operation)
-  max?: number;    // Maximum value (MAX operation)
-}
-```
-
-### Basic Example
+## Setup
 
 ```typescript
 import { InMemoryGraphFactory } from 'grafio';
+import { CypherEngine } from 'grafio/cypher';
 
 const factory = new InMemoryGraphFactory();
-const graph = factory.forGraph();
-
-// Add products with prices
-await graph.addNode('Product', { name: 'Laptop', price: 999 });
-await graph.addNode('Product', { name: 'Phone', price: 699 });
-await graph.addNode('Product', { name: 'Tablet', price: 449 });
-
-// Aggregate prices
-const result = await graph.aggregateNodeProperty('price');
-console.log(result);
-// { count: 3, sum: 2147, avg: 715.67, min: 449, max: 999 }
+const graph = factory.forGraph('default');
+const engine = new CypherEngine(graph);
 ```
 
-### With Type Filter
+## Aggregation Functions
 
-```typescript
-// Only aggregate prices for Product nodes
-const result = await graph.aggregateNodeProperty('price', {
-  filter: { types: ['Product'] }
-});
-```
+| Function | Description |
+|----------|-------------|
+| `COUNT(*)` | Count all rows |
+| `COUNT(expr)` | Count non-null values |
+| `COUNT(DISTINCT expr)` | Count unique values |
+| `AVG(expr)` | Average of numeric values |
+| `SUM(expr)` | Sum of numeric values |
+| `MIN(expr)` | Minimum value |
+| `MAX(expr)` | Maximum value |
+| `COLLECT(expr)` | Collect values into array |
 
-### Using Distinct
+## Basic Aggregation
 
-```typescript
-// Count unique prices (deduplicate values)
-const result = await graph.aggregateNodeProperty('price', {
-  distinct: true
-});
-```
-
-## aggregateEdgeProperty()
-
-```typescript
-async aggregateEdgeProperty(
-  key: string,
-  options?: GraphQueryOptions
-): Promise<AggregateResult>
-```
-
-Computes aggregate statistics for an edge property.
-
-### Example: Order Weights
-
-```typescript
-// Add shipping relationships with weights
-await graph.addEdge('warehouse1', 'store1', 'SHIPS', { weight: 150 });
-await graph.addEdge('warehouse1', 'store2', 'SHIPS', { weight: 200 });
-await graph.addEdge('warehouse1', 'store3', 'SHIPS', { weight: 175 });
-
-// Aggregate shipment weights
-const result = await graph.aggregateEdgeProperty('weight', {
-  filter: { types: ['SHIPS'] }
-});
-console.log(result);
-// { count: 3, sum: 525, avg: 175, min: 150, max: 200 }
-```
-
-## Common Use Cases
-
-### Average Rating
-
-```typescript
-// Products with customer ratings
-await graph.addNode('Product', { name: 'Widget', rating: 4.5 });
-await graph.addNode('Product', { name: 'Gadget', rating: 4.8 });
-await graph.addNode('Product', { name: 'Tool', rating: 4.2 });
-
-const result = await graph.aggregateNodeProperty('rating');
-console.log(`Average rating: ${result.avg?.toFixed(1)}`); // "Average rating: 4.5"
-```
-
-### Minimum/Maximum Values
-
-```typescript
-// Find temperature ranges in sensor data
-const tempResult = await graph.aggregateNodeProperty('temperature');
-console.log(`Range: ${tempResult.min}°C - ${tempResult.max}°C`);
-```
-
-### Count by Type
-
-```typescript
-// Count users by status
-const userCount = await graph.aggregateNodeProperty('status', {
-  filter: { types: ['User'] }
-});
-console.log(`Total users: ${userCount.count}`);
-```
-
-## With Cypher Queries
-
-Aggregation works seamlessly with Cypher:
+### Count All
 
 ```cypher
-MATCH (p:Product)
-RETURN count(p) AS count, avg(p.price) AS avgPrice, min(p.price) AS minPrice, max(p.price) AS maxPrice
+MATCH (p:Person) 
+RETURN COUNT(p) AS total
+```
+
+### Average
+
+```cypher
+MATCH (p:Person) 
+RETURN AVG(p.age) AS avgAge
+```
+
+### Sum
+
+```cypher
+MATCH (p:Person) 
+RETURN SUM(p.age) AS totalAge
+```
+
+### Min/Max
+
+```cypher
+MATCH (p:Person) 
+RETURN MIN(p.age) AS youngest, MAX(p.age) AS oldest
+```
+
+## With Type Filter
+
+```cypher
+MATCH (p:Product) 
+RETURN COUNT(p) AS count, AVG(p.price) AS avgPrice
+```
+
+## With GROUP BY
+
+```cypher
+MATCH (p:Person) 
+RETURN p.city, COUNT(p) AS count, AVG(p.age) AS avgAge
+ORDER BY count DESC
+```
+
+## Using DISTINCT
+
+```cypher
+MATCH (p:Person)-[:KNOWS]->(f:Person) 
+RETURN COUNT(DISTINCT f.city) AS uniqueCities
+```
+
+## Complex Example
+
+```cypher
+MATCH (p:Person) 
+RETURN p.city AS city,
+       COUNT(p) AS count,
+       AVG(p.age) AS avgAge,
+       MIN(p.age) AS youngest,
+       MAX(p.age) AS oldest
+ORDER BY count DESC
 ```
 
 ## Next Steps
 
 - [Graph Analysis](./graph-analysis) — DAG detection and topological sort
-- [Cypher Queries](./cypher-queries) — aggregation in Cypher
-- [API Reference](../api-reference/graph) — full method reference
+- [Cypher Language](./cypher-language) — aggregation in Cypher

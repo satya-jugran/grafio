@@ -254,5 +254,5 @@ const results = await filterProducts({
 ## Next Steps
 
 - [Filtering Guide](../guides/filtering) — full filtering reference
-- [Cypher Queries Guide](../guides/cypher-queries) — WHERE clause details
+- [Cypher Language Guide](../guides/cypher-language) — WHERE clause details
 - [Core Concepts Guide](../guides/core-concepts) — graph data model

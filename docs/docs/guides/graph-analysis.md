@@ -101,22 +101,6 @@ const dag = await graph.isDAG();
 // Time complexity: O(V + E) where V = vertices, E = edges
 ```
 
-## Visualization
-
-Combine with Mermaid for visual analysis:
-
-```typescript
-import { GraphToMermaid } from 'grafio';
-
-const mermaid = await GraphToMermaid.fromGraph(graph, {
-  showProperties: true,
-  direction: 'LR'
-});
-
-console.log(mermaid.toString());
-// Render in Mermaid live editor to visualize
-```
-
 ## Next Steps
 
 - [Traversal](./traversal) — find paths between nodes

@@ -89,7 +89,7 @@ const config: Config = {
         },
         {
           to: 'blog',
-          label: 'Blog', 
+          label: 'Blog',
           position: 'left'
         },
         {

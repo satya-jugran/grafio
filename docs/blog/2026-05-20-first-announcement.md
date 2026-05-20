@@ -4,7 +4,7 @@ description: "Introducing Grafio - TypeScript graph database with native Cypher 
 slug: welcome-grafio
 authors: [satya-jugran]
 tags: [announcement, release, grafio]
-date: 2026-05-18
+date: 2026-05-20
 ---
 
 We're thrilled to announce the release of **Grafio** - a high-performance, TypeScript-native graph database built for modern applications.
@@ -25,6 +25,14 @@ Grafio is a lightweight, embeddable graph database that brings the power of grap
 
 ## Getting Started
 
+Install Grafio:
+
+```bash
+npm install grafio
+```
+
+Then create your first graph:
+
 ```typescript
 import { CypherEngine } from 'grafio';
 import { InMemoryGraphFactory } from 'grafio/storage';
@@ -34,16 +42,31 @@ const factory = new InMemoryGraphFactory();
 const graph = factory.forGraph('social-network');
 const cypher = new CypherEngine(graph);
 
-// Add social network data
-graph.addNode({ id: 'alice', label: 'Person', properties: { name: 'Alice', age: 30 } });
-graph.addNode({ id: 'bob', label: 'Person', properties: { name: 'Bob', age: 25 } });
-graph.addNode({ id: 'charlie', label: 'Person', properties: { name: 'Charlie', age: 35 } });
-graph.addEdge({ from: 'alice', to: 'bob', label: 'KNOWS', properties: { since: 2020 } });
-graph.addEdge({ from: 'bob', to: 'charlie', label: 'KNOWS', properties: { since: 2019 } });
+// Adding social network
+cypher.execute(`
+    CREATE (a:Person {id: 'alice', name: 'Alice', age: 30}),
+    CREATE (b:Person {id: 'bob', name: 'Bob', age: 25}),
+    CREATE (c:Person {id: 'charlie', name: 'Charlie', age: 35})
+`);
+// Adding relationships
+cypher.execute(`
+  MATCH (a:Person {id: 'alice'}), (b:Person {id: 'bob'})
+  CREATE (a)-[:KNOWS {since: 2020}]->(b)
+`);
+cypher.execute(`
+  MATCH (b:Person {id: 'bob'}), (c:Person {id: 'charlie'})
+  CREATE (b)-[:KNOWS {since: 2019}]->(c)
+`);
 
-// Query with Cypher
+// Querying the network
 const friends = cypher.execute('MATCH (p:Person)-[:KNOWS]->(friend:Person) RETURN p.name as name, friend.name as friend');
-// Returns: [{"name":"Alice","friend":"Bob"},{"name":"Bob","friend":"Charlie"}]
+
+/* Returns: 
+    [
+        {"name":"Alice","friend":"Bob"},
+        {"name":"Bob","friend":"Charlie"}
+    ]
+*/
 ```
 
 ## What's Next?

@@ -89,5 +89,5 @@ Modify the code to:
 ## Next Steps
 
 - [Core Concepts](../guides/core-concepts) — deeper dive into the data model
-- [Cypher Queries](../guides/cypher-queries) — more query examples
+- [Cypher Language](../guides/cypher-language) — syntax tutorial
 - [Transactions](../guides/transactions) — batch multiple operations

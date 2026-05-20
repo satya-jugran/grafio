@@ -103,6 +103,6 @@ const isDag = await graph.isDAG();
 
 ## Next Steps
 
-- [Cypher Queries](./cypher-queries) — query with pattern matching
+- [Cypher Language](./cypher-language) — query with pattern matching
 - [Graph Analysis](./graph-analysis) — DAG and topological sort details
 - [API Reference](../api-reference/graph)

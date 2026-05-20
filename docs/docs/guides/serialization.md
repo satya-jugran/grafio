@@ -81,15 +81,19 @@ const graph = await Graph.importJSON(testData);
 ## Complete Example
 
 ```typescript
-import { InMemoryGraphFactory } from 'grafio';
+import { InMemoryGraphFactory, CypherEngine } from 'grafio';
 
 const factory = new InMemoryGraphFactory();
 const graph = factory.forGraph('default');
+const engine = new CypherEngine(graph);
 
-// Build graph
-const alice = await graph.addNode('Person', { name: 'Alice' });
-const bob = await graph.addNode('Person', { name: 'Bob' });
-await graph.addEdge(alice.id, bob.id, 'KNOWS');
+// Build graph using Cypher
+await engine.execute(`CREATE (a:Person {name: 'Alice'})`);
+await engine.execute(`CREATE (b:Person {name: 'Bob'})`);
+await engine.execute(`
+  MATCH (a:Person {name: 'Alice'}), (b:Person {name: 'Bob'})
+  CREATE (a)-[:KNOWS]->(b)
+`);
 
 // Export
 const json = await graph.exportJSON();
@@ -108,7 +112,8 @@ console.log(JSON.stringify(json, null, 2));
 
 // Import to new graph
 const newGraph = await Graph.importJSON(json);
-const count = await newGraph.getNodes().length;
+const result = await engine.execute(`MATCH (p:Person) RETURN count(p) AS count`);
+const count = result.records[0].get('count');
 console.log(count); // 2
 ```
 

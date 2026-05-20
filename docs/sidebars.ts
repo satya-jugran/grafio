@@ -21,15 +21,16 @@ const sidebars: SidebarsConfig = {
       collapsed: false,
       items: [
         'guides/core-concepts',
-        'guides/graph-operations',
-        'guides/traversal',
+        'guides/cypher-language',
+        'guides/querying-graph',
+        'guides/data-operations',
         'guides/filtering',
         'guides/aggregation',
-        'guides/cypher-queries',
         'guides/transactions',
+        'guides/exception-handling',
+        'guides/query-plans',
         'guides/caching',
         'guides/storage-providers',
-        'guides/mongodb-storage',
         'guides/serialization',
         'guides/graph-analysis',
         'guides/visualization',
@@ -105,7 +106,6 @@ const sidebars: SidebarsConfig = {
       ],
     },
   ],
-
   examples: [
     {
       type: 'category',
@@ -130,7 +130,6 @@ const sidebars: SidebarsConfig = {
       ],
     },
   ],
-  
 };
 
 export default sidebars;

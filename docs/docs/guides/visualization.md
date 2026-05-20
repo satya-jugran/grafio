@@ -74,58 +74,9 @@ const mermaid2 = new GraphToMermaid(json);
 
 Copy the output and paste into [Mermaid Live Editor](https://mermaid.live).
 
-### Docusaurus Integration
-
-Docusaurus supports Mermaid out of the box:
-
-````markdown
-```mermaid
-flowchart TD
-    A[Node A] --> B[Node B]
-```
-````
-
 ### VS Code Extension
 
 Install the [Mermaid Markdown Preview](https://marketplace.visualstudio.com/items?itemName=bierner.markdown-mermaid) extension.
-
-## Common Patterns
-
-### Social Network
-
-```typescript
-// People and their connections
-const alice = await graph.addNode('Person', { name: 'Alice' });
-const bob = await graph.addNode('Person', { name: 'Bob' });
-const carol = await graph.addNode('Person', { name: 'Carol' });
-
-await graph.addEdge(alice.id, bob.id, 'KNOWS');
-await graph.addEdge(bob.id, carol.id, 'KNOWS');
-await graph.addEdge(alice.id, carol.id, 'FRIEND_OF');
-```
-
-### Hierarchical Data
-
-```typescript
-// Organization chart
-const ceo = await graph.addNode('Employee', { name: 'CEO' });
-const vp1 = await graph.addNode('Employee', { name: 'VP Engineering' });
-const vp2 = await graph.addNode('Employee', { name: 'VP Sales' });
-
-await graph.addEdge(ceo.id, vp1.id, 'MANAGES');
-await graph.addEdge(ceo.id, vp2.id, 'MANAGES');
-```
-
-### Course Structure
-
-```typescript
-const course = await graph.addNode('Course', { title: 'CS101' });
-const ch1 = await graph.addNode('Chapter', { title: 'Intro' });
-const ch2 = await graph.addNode('Chapter', { title: 'Advanced' });
-
-await graph.addEdge(course.id, ch1.id, 'CONTAINS');
-await graph.addEdge(course.id, ch2.id, 'CONTAINS');
-```
 
 ## Next Steps
 

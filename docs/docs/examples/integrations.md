@@ -41,4 +41,4 @@ app.get('/nodes', async (req, res) => {
 });
 ```
 
-For more integrations, see the main [Guides](../guides/overview) section.
+For more integrations, see the main [Guides](../guides/core-concepts) section.
