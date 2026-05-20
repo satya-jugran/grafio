@@ -404,10 +404,14 @@ export class Parser {
   private _parseCreateIndex(): QueryAst {
     this._consume(TokenKind.CREATE, "Expected 'CREATE'");
     this._consume(TokenKind.INDEX, "Expected 'INDEX' after 'CREATE'");
-    let name = '';
-    while (!this._check(TokenKind.FOR) && !this._isAtEnd()) {
-      name += this._advance().value;
+    let name: string = '';
+    if (this._check(TokenKind.STRING)) {
+      name = this._consume(TokenKind.STRING, "Expected index name after 'INDEX'").value;
+    } else {
+      const nameToken = this._consume(TokenKind.IDENT, "Expected index name after 'INDEX'");
+      name = nameToken.value;
     }
+
     if (name === '') {
       const token = this._peek();
       throw new CypherSyntaxError(
@@ -493,10 +497,13 @@ export class Parser {
   private _parseDropIndex(): QueryAst {
     this._consume(TokenKind.DROP, "Expected 'DROP'");
     this._consume(TokenKind.INDEX, "Expected 'INDEX' after 'DROP'");
-    let name = '';
-    while (!this._isAtEnd()) {
-      name += this._advance().value;
+    let name: string = '';
+    if (this._check(TokenKind.STRING)) {
+      name = this._consume(TokenKind.STRING, "Expected index name after 'INDEX'").value;
+    } else {
+      name = this._consume(TokenKind.IDENT, "Expected index name after 'INDEX'").value;
     }
+
     if (name === '') {
       throw new CypherSyntaxError(
         "Expected index name after 'INDEX'",
@@ -505,12 +512,14 @@ export class Parser {
       );
     }
 
+    this._ensureAtEnd('DROP INDEX');
+
     return {
       kind: 'Query',
       match: { kind: 'Match', patterns: [] },
       dropIndex: {
         kind: 'DropIndex',
-        name: name.trim(),
+        name: name,
       },
       return: { kind: 'Return', distinct: false, items: [] },
     };

@@ -178,7 +178,9 @@ export class GraphIndex {
       transaction?.markFailed();
       throw error;
     }
-    return { result: true, cascadeDeletedEdgesCount };
+     return cascadeDeletedEdgesCount === undefined
+       ? { result: true }
+       : { result: true, cascadeDeletedEdgesCount };
   }
 
   /** Retrieves a node by id. */

@@ -1558,8 +1558,11 @@ export class Executor {
           const { result, cascadeDeletedEdgesCount } = await this._graph.removeNode(
             (entity as Node).id, step.detach, transaction,
           );
-          if (cascadeDeletedEdgesCount) {
-            this._edgesDeleted += cascadeDeletedEdgesCount;
+          if (result) {
+            this._nodesDeleted++;
+            if (cascadeDeletedEdgesCount) {
+              this._edgesDeleted += cascadeDeletedEdgesCount;
+            }
           }
         } catch (err) {
           if (err instanceof NodeHasEdgesError && !step.detach) {
@@ -1569,10 +1572,16 @@ export class Executor {
           }
           throw err;
         }
-        this._nodesDeleted++;
       } else {
-        await this._graph.removeEdge((entity as Edge).id, transaction);
-        this._edgesDeleted++;
+        try {
+          const result = await this._graph.removeEdge((entity as Edge).id, transaction);
+          if (result) {
+            this._edgesDeleted++;
+          }
+        } catch (err) {
+          throw err;
+        }
+
       }
     }
     return rows;
