@@ -775,21 +775,32 @@ export class Semantic {
 
   /**
    * Ensure variables introduced in CREATE patterns do not shadow existing
-   * MATCH variables within the same query.
+   * MATCH variables or re-bind the same variable across standalone CREATE
+   * patterns.
    *
    * openCypher rule: a variable that is already bound cannot be re-bound.
    *
    * Already-bound MATCH variables that appear in CREATE path patterns
    * (e.g. {@code MATCH (a) CREATE (a)-[:R]->(b)}) are treated as
    * *references* — they serve as endpoints for new relationships and are
-   * not re-bindings.  Only a standalone CREATE node whose variable is
-   * already bound in MATCH is flagged as a true re-binding error.
+   * not re-bindings.
+   *
+   * For standalone CREATE node patterns (no edges), the same variable name
+   * must not appear in more than one pattern — e.g.,
+   * {@code CREATE (n:Person), (n:Student)} is rejected because `n` is
+   * re-bound.
    *
    * @throws {CypherSemanticError} if a CREATE node variable is already
-   *         in MATCH scope and the pattern contains no edge segments.
+   *         in MATCH scope or was introduced by an earlier standalone
+   *         CREATE pattern.
    */
   private _checkCreateUniqueness(ast: QueryAst): QueryAst {
     if (!ast.create) return ast;
+
+    // Track variables introduced by standalone CREATE node patterns
+    // so that re-binding the same variable name across multiple
+    // standalone patterns (e.g., CREATE (n:X), (n:Y)) is detected.
+    const createScope = new Set<string>();
 
     for (const pattern of ast.create.patterns) {
       const segments = getPatternSegments(pattern);
@@ -800,17 +811,23 @@ export class Semantic {
       if (hasEdges) continue;
 
       // Standalone node pattern(s): any node variable already bound
-      // in MATCH is a true re-binding.
+      // in MATCH or in a previous CREATE standalone pattern is a
+      // true re-binding.
       for (const seg of segments) {
-        if (
-          seg.kind === 'NodePattern' &&
-          seg.variable &&
-          this._scope.has(seg.variable)
-        ) {
-          throw new CypherSemanticError(
-            `Variable '${seg.variable}' already bound in MATCH. ` +
-            `Cannot re-bind variables across MATCH and CREATE.`,
-          );
+        if (seg.kind === 'NodePattern' && seg.variable) {
+          if (this._scope.has(seg.variable)) {
+            throw new CypherSemanticError(
+              `Variable '${seg.variable}' already bound in MATCH. ` +
+              `Cannot re-bind variables across MATCH and CREATE.`,
+            );
+          }
+          if (createScope.has(seg.variable)) {
+            throw new CypherSemanticError(
+              `Variable '${seg.variable}' is bound multiple times in CREATE. ` +
+              `Each standalone node pattern must introduce a unique variable.`,
+            );
+          }
+          createScope.add(seg.variable);
         }
       }
     }

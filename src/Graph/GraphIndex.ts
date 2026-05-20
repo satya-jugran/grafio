@@ -150,10 +150,11 @@ export class GraphIndex {
    * @param transaction - Optional transaction to use for this operation
    * @throws NodeHasEdgesError if cascade is false and the node has incident edges
    */
-  async removeNode(id: string, cascade: boolean = false, transaction?: GraphTransaction): Promise<boolean> {
+  async removeNode(id: string, cascade: boolean = false, transaction?: GraphTransaction): Promise<{result: boolean; cascadeDeletedEdgesCount?: number}> {
     const handle = transaction?._getHandle();
+    let cascadeDeletedEdgesCount = cascade ? 0 : undefined;
     try {
-      if (!await this._store.hasNode(id, handle)) return false;
+      if (!await this._store.hasNode(id, handle)) return { result: false };
 
       const [outgoing, incoming] = await Promise.all([
         this._store.getEdgesBySource(id, { transaction: handle }),
@@ -164,6 +165,7 @@ export class GraphIndex {
         for (const edge of [...outgoing, ...incoming]) {
           await this._store.deleteEdge(edge.id, handle);
         }
+        cascadeDeletedEdgesCount = outgoing.length + incoming.length;
       } else {
         const incidentCount = outgoing.length + incoming.length;
         if (incidentCount > 0) {
@@ -176,7 +178,7 @@ export class GraphIndex {
       transaction?.markFailed();
       throw error;
     }
-    return true;
+    return { result: true, cascadeDeletedEdgesCount };
   }
 
   /** Retrieves a node by id. */

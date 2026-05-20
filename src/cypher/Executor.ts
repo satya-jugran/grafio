@@ -894,7 +894,7 @@ export class Executor {
     step: AggregateStep,
     transaction?: GraphTransaction,
   ): Promise<Row[]> {
-    
+
     // Defensive guard: this path is only semantically valid when there are
     // NO source/target node constraints. The planner (_isEdgeSimplePlan)
     // already ensures this, but we assert here as belt-and-suspenders.
@@ -1555,9 +1555,12 @@ export class Executor {
       if (!entity) continue;
       if (step.entityKind === 'node') {
         try {
-          await this._graph.removeNode(
+          const { result, cascadeDeletedEdgesCount } = await this._graph.removeNode(
             (entity as Node).id, step.detach, transaction,
           );
+          if (cascadeDeletedEdgesCount) {
+            this._edgesDeleted += cascadeDeletedEdgesCount;
+          }
         } catch (err) {
           if (err instanceof NodeHasEdgesError && !step.detach) {
             throw new CypherRuntimeError(

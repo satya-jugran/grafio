@@ -150,9 +150,9 @@ export class Graph {
    * @param id - Id of the node to remove
    * @param cascade - If true, also removes all incident edges (default: false)
    * @param transaction - Optional transaction to use for this operation
-   * @returns true if the node was removed, false if it didn't exist
+   * @returns An object containing the result and optionally the count of cascade-deleted edges
    */
-  async removeNode(id: string, cascade: boolean = false, transaction?: GraphTransaction): Promise<boolean> {
+  async removeNode(id: string, cascade: boolean = false, transaction?: GraphTransaction): Promise<{result: boolean; cascadeDeletedEdgesCount?: number}> {
     return this._index.removeNode(id, cascade, transaction);
   }
 
