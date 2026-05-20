@@ -12,67 +12,80 @@
  */
 import { describe, expect, it, beforeAll, beforeEach, afterEach, jest } from '@jest/globals';
 import { Graph } from '../../src/Graph';
-import { CypherEngine, CypherNotSupportedError, PlanFormat } from '../../src/cypher';
+import { CypherEngine, CypherNotSupportedError, CypherSemanticError, PlanFormat } from '../../src/cypher';
+import { Edge, Node } from '../../src';
 
-/** Build a social graph with people, posts, and relationships. */
+/** Build a social graph using Cypher CREATE queries. */
 async function buildSocialGraph(graph: Graph): Promise<void> {
-  // People
-  const alice = await graph.addNode('Person', { name: 'Alice', age: 28, city: 'NYC', occupation: 'Engineer' });
-  const bob = await graph.addNode('Person', { name: 'Bob', age: 25, city: 'LA', occupation: 'Designer' });
-  const charlie = await graph.addNode('Person', { name: 'Charlie', age: 32, city: 'Chicago', occupation: 'Manager' });
-  const david = await graph.addNode('Person', { name: 'David', age: 29, city: 'Seattle', occupation: 'Developer' });
-  const eve = await graph.addNode('Person', { name: 'Eve', age: 27, city: 'Boston', occupation: 'Data Scientist' });
-  const frank = await graph.addNode('Person', { name: 'Frank', age: 35, city: 'Austin', occupation: 'Director' });
-  const grace = await graph.addNode('Person', { name: 'Grace', age: 26, city: 'Denver', occupation: 'Designer' });
-  const henry = await graph.addNode('Person', { name: 'Henry', age: 31, city: 'Portland', occupation: 'Engineer' });
+  const engine = new CypherEngine(graph);
 
-  // KNOWS relationships
-  await graph.addEdge(alice.id, bob.id, 'KNOWS', { since: 2018 });
-  await graph.addEdge(bob.id, alice.id, 'KNOWS', { since: 2018 });
-  await graph.addEdge(alice.id, charlie.id, 'KNOWS', { since: 2019 });
-  await graph.addEdge(bob.id, david.id, 'KNOWS', { since: 2020 });
-  await graph.addEdge(charlie.id, eve.id, 'KNOWS', { since: 2021 });
-  await graph.addEdge(david.id, frank.id, 'KNOWS', { since: 2022 });
-  await graph.addEdge(eve.id, grace.id, 'KNOWS', { since: 2022 });
-  await graph.addEdge(henry.id, alice.id, 'KNOWS', { since: 2023 });
-  await graph.addEdge(alice.id, david.id, 'KNOWS', { since: 2019 });
+  // Create Person nodes via Cypher
+  await engine.execute(
+    "CREATE (a:Person {name: 'Alice', age: 28, city: 'NYC', occupation: 'Engineer'})," +
+    "(b:Person {name: 'Bob', age: 25, city: 'LA', occupation: 'Designer'})," +
+    "(c:Person {name: 'Charlie', age: 32, city: 'Chicago', occupation: 'Manager'})," +
+    "(d:Person {name: 'David', age: 29, city: 'Seattle', occupation: 'Developer'})," +
+    "(e:Person {name: 'Eve', age: 27, city: 'Boston', occupation: 'Data Scientist'})," +
+    "(f:Person {name: 'Frank', age: 35, city: 'Austin', occupation: 'Director'}), " +
+    "(g:Person {name: 'Grace', age: 26, city: 'Denver', occupation: 'Designer'})," +
+    "(h:Person {name: 'Henry', age: 31, city: 'Portland', occupation: 'Engineer'})"
+  );
 
-  await graph.createIndex('name-index', 'node', ['name']);
-  await graph.createIndex('age-index', 'node', ['age']);
-  await graph.createIndex('name-age-index', 'node', ['name', 'age']);
-  await graph.createIndex('city-index', 'node', ['city']);
-  await graph.createIndex('occupation-index', 'node', ['occupation']);
-  await graph.createIndex('since-index', 'edge', ['since']);
+  // Create KNOWS relationships via Cypher
+  await engine.execute("MATCH (a:Person {name: 'Alice'}), (b:Person {name: 'Bob'}) CREATE (a)-[:KNOWS {since: 2018}]->(b)");
+  await engine.execute("MATCH (a:Person {name: 'Bob'}), (b:Person {name: 'Alice'}) CREATE (a)-[:KNOWS {since: 2018}]->(b)");
+  await engine.execute("MATCH (a:Person {name: 'Alice'}), (b:Person {name: 'Charlie'}) CREATE (a)-[:KNOWS {since: 2019}]->(b)");
+  await engine.execute("MATCH (a:Person {name: 'Bob'}), (b:Person {name: 'David'}) CREATE (a)-[:KNOWS {since: 2020}]->(b)");
+  await engine.execute("MATCH (a:Person {name: 'Charlie'}), (b:Person {name: 'Eve'}) CREATE (a)-[:KNOWS {since: 2021}]->(b)");
+  await engine.execute("MATCH (a:Person {name: 'David'}), (b:Person {name: 'Frank'}) CREATE (a)-[:KNOWS {since: 2022}]->(b)");
+  await engine.execute("MATCH (a:Person {name: 'Eve'}), (b:Person {name: 'Grace'}) CREATE (a)-[:KNOWS {since: 2022}]->(b)");
+  await engine.execute("MATCH (a:Person {name: 'Henry'}), (b:Person {name: 'Alice'}) CREATE (a)-[:KNOWS {since: 2023}]->(b)");
+  await engine.execute("MATCH (a:Person {name: 'Alice'}), (b:Person {name: 'David'}) CREATE (a)-[:KNOWS {since: 2019}]->(b)");
+
+  // Create indexes via Cypher CREATE INDEX
+  await engine.execute('CREATE INDEX name_index FOR (n:Person) ON (n.name)');
+  await engine.execute('CREATE INDEX age_index FOR (n:Person) ON (n.age)');
+  await engine.execute('CREATE INDEX name_age_index FOR (n:Person) ON (n.name, n.age)');
+  await engine.execute('CREATE INDEX city_index FOR (n:Person) ON (n.city)');
+  await engine.execute('CREATE INDEX occupation_index FOR (n:Person) ON (n.occupation)');
+  await engine.execute('CREATE INDEX since_index FOR ()-[r:KNOWS]-() ON (r.since)');
 }
 
-/** Build an education graph with courses, students, and teachers. */
+/** Build an education graph using Cypher CREATE queries. */
 async function buildEducationGraph(graph: Graph): Promise<void> {
-  // Students
-  const studentAlice = await graph.addNode('Student', { name: 'Alice', year: 2024 });
-  const studentBob = await graph.addNode('Student', { name: 'Bob', year: 2024 });
-  const studentCharlie = await graph.addNode('Student', { name: 'Charlie', year: 2023 });
+  const engine = new CypherEngine(graph);
 
-  // Courses
-  const graphTheory = await graph.addNode('Course', { name: 'Graph Theory', credits: 3 });
-  const dbSystems = await graph.addNode('Course', { name: 'Database Systems', credits: 4 });
-  const algorithms = await graph.addNode('Course', { name: 'Algorithms', credits: 3 });
+  // Create Student nodes via Cypher
+  await engine.execute(
+    "CREATE (a:Student {name: 'Alice', year: 2024})," +
+    "(b:Student {name: 'Bob', year: 2024})," +
+    "(c:Student {name: 'Charlie', year: 2023})");
 
-  // Teachers
-  const drSmith = await graph.addNode('Teacher', { name: 'Dr. Smith', department: 'CS' });
-  const drJones = await graph.addNode('Teacher', { name: 'Dr. Jones', department: 'CS' });
+  // Create Course nodes via Cypher
+  await engine.execute(
+    "CREATE (a:Course {name: 'Graph Theory', credits: 3})," +
+    "(b:Course {name: 'Database Systems', credits: 4})," +
+    "(c:Course {name: 'Algorithms', credits: 3})"
+  );
 
-  // Enrollments
-  await graph.addEdge(studentAlice.id, graphTheory.id, 'ENROLLED', { semester: 'Fall' });
-  await graph.addEdge(studentBob.id, graphTheory.id, 'ENROLLED', { semester: 'Fall' });
-  await graph.addEdge(studentCharlie.id, graphTheory.id, 'ENROLLED', { semester: 'Fall' });
-  await graph.addEdge(studentAlice.id, dbSystems.id, 'ENROLLED', { semester: 'Spring' });
-  await graph.addEdge(studentBob.id, algorithms.id, 'ENROLLED', { semester: 'Spring' });
-  await graph.addEdge(studentCharlie.id, algorithms.id, 'ENROLLED', { semester: 'Spring' });
+  // Create Teacher nodes via Cypher
+  await engine.execute(
+    "CREATE (a:Teacher {name: 'Dr. Smith', department: 'CS'})," +
+    "(b:Teacher {name: 'Dr. Jones', department: 'CS'})"
+  );
 
-  // Teaching assignments
-  await graph.addEdge(drSmith.id, graphTheory.id, 'TEACHES', {});
-  await graph.addEdge(drJones.id, dbSystems.id, 'TEACHES', {});
-  await graph.addEdge(drSmith.id, algorithms.id, 'TEACHES', {});
+  // Create ENROLLED relationships via Cypher
+  await engine.execute("MATCH (s:Student {name: 'Alice'}), (c:Course {name: 'Graph Theory'}) CREATE (s)-[:ENROLLED {semester: 'Fall'}]->(c)");
+  await engine.execute("MATCH (s:Student {name: 'Bob'}), (c:Course {name: 'Graph Theory'}) CREATE (s)-[:ENROLLED {semester: 'Fall'}]->(c)");
+  await engine.execute("MATCH (s:Student {name: 'Charlie'}), (c:Course {name: 'Graph Theory'}) CREATE (s)-[:ENROLLED {semester: 'Fall'}]->(c)");
+  await engine.execute("MATCH (s:Student {name: 'Alice'}), (c:Course {name: 'Database Systems'}) CREATE (s)-[:ENROLLED {semester: 'Spring'}]->(c)");
+  await engine.execute("MATCH (s:Student {name: 'Bob'}), (c:Course {name: 'Algorithms'}) CREATE (s)-[:ENROLLED {semester: 'Spring'}]->(c)");
+  await engine.execute("MATCH (s:Student {name: 'Charlie'}), (c:Course {name: 'Algorithms'}) CREATE (s)-[:ENROLLED {semester: 'Spring'}]->(c)");
+
+  // Create TEACHES relationships via Cypher
+  await engine.execute("MATCH (t:Teacher {name: 'Dr. Smith'}), (c:Course {name: 'Graph Theory'}) CREATE (t)-[:TEACHES]->(c)");
+  await engine.execute("MATCH (t:Teacher {name: 'Dr. Jones'}), (c:Course {name: 'Database Systems'}) CREATE (t)-[:TEACHES]->(c)");
+  await engine.execute("MATCH (t:Teacher {name: 'Dr. Smith'}), (c:Course {name: 'Algorithms'}) CREATE (t)-[:TEACHES]->(c)");
 }
 
 describe('CypherEngine Integration', () => {
@@ -695,6 +708,263 @@ describe('CypherEngine Integration', () => {
       );
       expect(result.executionPlan).toContain('ms');
       expect(result.executionPlan).toContain('%');
+    });
+
+  });
+
+  describe('DML Queries', () => {
+    let graph: Graph;
+
+    beforeEach(async () => {
+      graph = new Graph();
+    });
+
+    it('creates a new node with CREATE and verifies properties', async () => {
+      const engine = new CypherEngine(graph);
+
+      const result = await engine.execute(
+        "CREATE (n:Person {name: 'Ivy', age: 24, city: 'Miami', occupation: 'Analyst'}) RETURN n",
+      );
+
+      expect(result.rows).toHaveLength(1);
+      const created = result.rows[0].n as Node;
+      expect(created.type).toContain('Person');
+      expect(created.properties.name).toBe('Ivy');
+      expect(created.properties.age).toBe(24);
+      expect(created.properties.city).toBe('Miami');
+      expect(created.properties.occupation).toBe('Analyst');
+    });
+
+    it('creates a new relationship with CREATE and verifies properties', async () => {
+      const engine = new CypherEngine(graph);
+
+      await engine.execute(
+        "CREATE (a:Person {name: 'Alice', age: 28, city: 'NYC', occupation: 'Engineer'}), " +
+        "(b:Person {name: 'Ivy', age: 24, city: 'Miami', occupation: 'Analyst'})",
+      );
+
+      const result = await engine.execute(
+        "MATCH (a:Person {name: 'Alice'}), (b:Person {name: 'Ivy'}) CREATE (a)-[r:KNOWS {since: 2021}]->(b) RETURN r",
+      );
+      
+      expect(result.rows).toHaveLength(1);
+      const created = result.rows[0].r as Edge;
+      expect(created.type).toBe('KNOWS');
+      expect(created.properties.since).toBe(2021);
+    });
+
+    it('deletes a node with DELETE and verifies removal', async () => {
+      const engine = new CypherEngine(graph);
+
+      await engine.execute(
+        "CREATE (n:Person {name: 'Ivy', age: 24, city: 'Miami', occupation: 'Analyst'})",
+      );
+
+      const result = await engine.execute(
+        "MATCH (n:Person {name: 'Ivy'}) DELETE n",
+      );
+
+      expect(result.summary.nodesDeleted).toBe(1);
+
+      const verify = await engine.execute(
+        "MATCH (n:Person {name: 'Ivy'}) RETURN n",
+      );
+      expect(verify.rows).toHaveLength(0);
+    });
+
+    it('deletes a relationship with DELETE and verifies removal', async () => {
+      const engine = new CypherEngine(graph);
+
+      await engine.execute(
+        "CREATE (a:Person {name: 'Ivy', age: 24, city: 'Miami', occupation: 'Analyst'})," +
+        "(b:Person {name: 'Bob'})",
+      );
+
+      await engine.execute(
+        "MATCH (a:Person {name: 'Ivy'}), (b:Person {name: 'Bob'}) CREATE (a)-[r:KNOWS]->(b) RETURN r",
+      );
+
+      const result = await engine.execute(
+        "MATCH (a:Person {name: 'Ivy'})-[r:KNOWS]->(b:Person {name: 'Bob'}) DELETE r",
+      );
+
+      expect(result.summary.edgesDeleted).toBe(1);
+
+      const verify = await engine.execute(
+        "MATCH (a:Person {name: 'Ivy'})-[r:KNOWS]->(b:Person {name: 'Bob'}) RETURN r",
+      );
+      expect(verify.rows).toHaveLength(0);
+    });
+
+    it('deletes a node with relationships using DETACH DELETE', async () => {
+      graph.clear();
+      const engine = new CypherEngine(graph);
+
+      await engine.execute(
+        "CREATE (n:Person {name: 'Ivy', age: 24, city: 'Miami', occupation: 'Analyst'})," +
+        "(b:Person {name: 'Bob'})",
+      );
+
+      await engine.execute(
+        "MATCH (n:Person {name: 'Ivy'}), (b:Person {name: 'Bob'}) CREATE (n)-[r:KNOWS]->(b) RETURN r",
+      );
+
+      const result = await engine.execute(
+        "MATCH (n:Person {name: 'Ivy'}) DETACH DELETE n",
+      );
+
+      expect(result.summary.nodesDeleted).toBe(1);
+      expect(result.summary.edgesDeleted).toBe(1);
+
+      const verifyNode = await engine.execute(
+        "MATCH (n:Person {name: 'Ivy'}) RETURN n",
+      );
+      expect(verifyNode.rows).toHaveLength(0);
+
+      const verifyEdge = await engine.execute(
+        "MATCH (n:Person {name: 'Ivy'})-[r]->() RETURN r",
+      );
+      expect(verifyEdge.rows).toHaveLength(0);
+    });
+  });
+
+  // ── Index DDL ────────────────────────────────────────────────────
+  describe('Index DDL', () => {
+
+    let graph: Graph;
+
+    beforeEach(async () => {
+      graph = new Graph();
+      await buildSocialGraph(graph);
+    });
+
+    it('creates a node index via Cypher and verifies with getIndexes', async () => {
+      const engine = new CypherEngine(graph);
+
+      const result = await engine.execute(
+        'CREATE INDEX email_idx FOR (n:Person) ON (n.email)',
+      );
+
+      expect(result.summary.indexesCreated).toBe(1);
+      expect(result.summary.indexesDeleted).toBe(0);
+
+      const indexes = await graph.getIndexes();
+      const created = indexes.find((idx) => idx.name === 'email_idx');
+      expect(created).toBeDefined();
+      expect(created!.target).toBe('node');
+      expect(created!.propertyKeys).toEqual(['email']);
+    });
+
+    it('creates a compound index via Cypher', async () => {
+      const engine = new CypherEngine(graph);
+
+      await engine.execute(
+        'CREATE INDEX ddl_compound_idx FOR (n:Person) ON (n.name, n.city)',
+      );
+
+      const indexes = await graph.getIndexes();
+      const created = indexes.find((idx) => idx.name === 'ddl_compound_idx');
+      expect(created).toBeDefined();
+      // propertyKeys may be sorted; accept both orders
+      expect(created!.propertyKeys).toEqual(expect.arrayContaining(['name', 'city']));
+      expect(created!.propertyKeys).toHaveLength(2);
+    });
+
+    it('creates an edge index via Cypher', async () => {
+      const engine = new CypherEngine(graph);
+
+      // Use a property not already indexed by buildSocialGraph
+      await engine.execute(
+        'CREATE INDEX ddl_edge_idx FOR ()-[r:KNOWS]-() ON (r.since, r.weight)',
+      );
+
+      const indexes = await graph.getIndexes();
+      const created = indexes.find((idx) => idx.name === 'ddl_edge_idx');
+      expect(created).toBeDefined();
+      expect(created!.target).toBe('edge');
+      expect(created!.propertyKeys).toHaveLength(2);
+    });
+
+    it('drops an index via Cypher and verifies removal', async () => {
+      // Create via Cypher first, then drop via Cypher
+      // Use a unique property not in buildSocialGraph indexes
+      const engine = new CypherEngine(graph);
+      await engine.execute('CREATE INDEX ddl_drop_idx FOR (n:Person) ON (n.phone)');
+
+      const result = await engine.execute('DROP INDEX ddl_drop_idx');
+
+      expect(result.summary.indexesDeleted).toBe(1);
+
+      const indexes = await graph.getIndexes();
+      expect(indexes.find((idx) => idx.name === 'ddl_drop_idx')).toBeUndefined();
+    });
+
+    it('SHOW INDEXES returns all indexes with correct columns', async () => {
+      const engine = new CypherEngine(graph);
+
+      // Pre-existing indexes from buildSocialGraph: name_index, age_index, name_age_index, city_index, occupation_index, since_index
+      const result = await engine.execute('SHOW INDEXES');
+
+      expect(result.columns).toEqual(['name', 'target', 'propertyKeys']);
+      // Must include the 6 pre-built indexes
+      expect(result.rows.length).toBeGreaterThanOrEqual(6);
+
+      const names = result.rows.map((r) => r.name);
+      expect(names).toContain('name_index');
+      expect(names).toContain('age_index');
+      expect(names).toContain('since_index');
+    });
+
+    it('SHOW INDEXES returns empty result when no indexes exist', async () => {
+      const emptyGraph = new Graph();
+      const engine = new CypherEngine(emptyGraph);
+
+      const result = await engine.execute('SHOW INDEXES');
+
+      expect(result.rows).toHaveLength(0);
+      expect(result.columns).toEqual(['name', 'target', 'propertyKeys']);
+    });
+
+    it('created index is functional for querying', async () => {
+      const engine = new CypherEngine(graph);
+
+      // Query by pre-existing indexed property to verify it still works
+      const result = await engine.execute(
+        "MATCH (p:Person) WHERE p.occupation = 'Engineer' RETURN p.name AS name",
+      );
+      expect(result.rows.length).toBeGreaterThanOrEqual(1);
+      const names = result.rows.map((r) => r.name);
+      expect(names).toContain('Alice');
+      expect(names).toContain('Henry');
+    });
+
+    it('duplicate index name produces error', async () => {
+      const engine = new CypherEngine(graph);
+
+      // First creation with a unique property name not in buildSocialGraph
+      await engine.execute('CREATE INDEX ddl_dup_test FOR (n:Person) ON (n.score)');
+
+      // Second creation with same name should fail
+      await expect(
+        engine.execute('CREATE INDEX ddl_dup_test FOR (n:Person) ON (n.score)'),
+      ).rejects.toThrow();
+    });
+
+    it('dropping non-existent index produces error', async () => {
+      const engine = new CypherEngine(graph);
+
+      await expect(
+        engine.execute('DROP INDEX nonexistent_ddl_idx'),
+      ).rejects.toThrow();
+    });
+
+    it('DDL cannot be combined with MATCH/RETURN', async () => {
+      const engine = new CypherEngine(graph);
+
+      // Parser rejects this hybrid syntax — DDL + MATCH
+      await expect(
+        engine.execute('MATCH (n) CREATE INDEX idx FOR (n:Person) ON (n.name) RETURN n'),
+      ).rejects.toThrow();
     });
   });
 });

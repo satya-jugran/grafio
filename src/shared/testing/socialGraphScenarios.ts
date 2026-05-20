@@ -660,7 +660,7 @@ export function runSocialGraphScenarios(provider?: IStorageProvider): void {
     // ========================================
     describe('J. Node and Edge Removal Operations', () => {
       it('should return false when removing non-existent node', async () => {
-        await expect(graph.removeNode('fake-id')).resolves.toBe(false);
+        await expect(graph.removeNode('fake-id')).resolves.toEqual({ result: false });
       });
 
       it('should return false when removing non-existent edge', async () => {
@@ -697,7 +697,7 @@ export function runSocialGraphScenarios(provider?: IStorageProvider): void {
         const aliceTotalEdges = aliceOutgoingEdges.length + aliceIncomingEdges.length;
 
         const result = await graph.removeNode(alice!.id, true);
-        expect(result).toBe(true);
+        expect(result).toEqual({ result: true, cascadeDeletedEdgesCount: aliceTotalEdges });
 
         expect(await graph.getNode(alice!.id)).toBeUndefined();
 

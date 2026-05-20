@@ -115,6 +115,7 @@ export class Semantic {
     this._checkSetTypes.bind(this),
     this._checkAggregateGrouping.bind(this),
     this._checkHavingClause.bind(this),
+    this._checkIndexDdlValidity.bind(this),
   ];
 
   /** Cached scope table populated by `_resolveScopes` and consumed by later passes. */
@@ -212,6 +213,10 @@ export class Semantic {
    * @throws {CypherSemanticError} if an undefined variable is referenced.
    */
   private _checkUnresolvedVars(ast: QueryAst): QueryAst {
+    // Skip unresolved-var check for DDL statements — the RETURN clause
+    // items for SHOW INDEXES are projection aliases, not variable references.
+    if (ast.createIndex || ast.dropIndex || ast.showIndexes) return ast;
+
     // Build the extra scope from CREATE patterns so variables introduced
     // by CREATE can be referenced in RETURN, WHERE, ORDER BY, etc.
     const extraScope = this._collectCreateScope(ast);
@@ -770,21 +775,32 @@ export class Semantic {
 
   /**
    * Ensure variables introduced in CREATE patterns do not shadow existing
-   * MATCH variables within the same query.
+   * MATCH variables or re-bind the same variable across standalone CREATE
+   * patterns.
    *
    * openCypher rule: a variable that is already bound cannot be re-bound.
    *
    * Already-bound MATCH variables that appear in CREATE path patterns
    * (e.g. {@code MATCH (a) CREATE (a)-[:R]->(b)}) are treated as
    * *references* — they serve as endpoints for new relationships and are
-   * not re-bindings.  Only a standalone CREATE node whose variable is
-   * already bound in MATCH is flagged as a true re-binding error.
+   * not re-bindings.
+   *
+   * For standalone CREATE node patterns (no edges), the same variable name
+   * must not appear in more than one pattern — e.g.,
+   * {@code CREATE (n:Person), (n:Student)} is rejected because `n` is
+   * re-bound.
    *
    * @throws {CypherSemanticError} if a CREATE node variable is already
-   *         in MATCH scope and the pattern contains no edge segments.
+   *         in MATCH scope or was introduced by an earlier standalone
+   *         CREATE pattern.
    */
   private _checkCreateUniqueness(ast: QueryAst): QueryAst {
     if (!ast.create) return ast;
+
+    // Track variables introduced by standalone CREATE node patterns
+    // so that re-binding the same variable name across multiple
+    // standalone patterns (e.g., CREATE (n:X), (n:Y)) is detected.
+    const createScope = new Set<string>();
 
     for (const pattern of ast.create.patterns) {
       const segments = getPatternSegments(pattern);
@@ -795,17 +811,23 @@ export class Semantic {
       if (hasEdges) continue;
 
       // Standalone node pattern(s): any node variable already bound
-      // in MATCH is a true re-binding.
+      // in MATCH or in a previous CREATE standalone pattern is a
+      // true re-binding.
       for (const seg of segments) {
-        if (
-          seg.kind === 'NodePattern' &&
-          seg.variable &&
-          this._scope.has(seg.variable)
-        ) {
-          throw new CypherSemanticError(
-            `Variable '${seg.variable}' already bound in MATCH. ` +
-            `Cannot re-bind variables across MATCH and CREATE.`,
-          );
+        if (seg.kind === 'NodePattern' && seg.variable) {
+          if (this._scope.has(seg.variable)) {
+            throw new CypherSemanticError(
+              `Variable '${seg.variable}' already bound in MATCH. ` +
+              `Cannot re-bind variables across MATCH and CREATE.`,
+            );
+          }
+          if (createScope.has(seg.variable)) {
+            throw new CypherSemanticError(
+              `Variable '${seg.variable}' is bound multiple times in CREATE. ` +
+              `Each standalone node pattern must introduce a unique variable.`,
+            );
+          }
+          createScope.add(seg.variable);
         }
       }
     }
@@ -1056,5 +1078,83 @@ export class Semantic {
     // Parameters, identifiers, property accesses, function calls, and binary
     // expressions may resolve to primitives at runtime — be lenient.
     return true;
+  }
+
+  // ── Pass 10: Index DDL validity ──────────────────────────────────
+
+  /**
+   * Validate index DDL statements.
+   *
+    * Rules enforced:
+    * 1. CREATE INDEX must have a non-empty name.
+    * 1b. CREATE INDEX name must match [a-zA-Z_][a-zA-Z0-9_]*.
+    * 2. CREATE INDEX must have at least one property key.
+    * 3. DROP INDEX must have a non-empty name.
+    * 3b. DROP INDEX name must match [a-zA-Z_][a-zA-Z0-9_]*.
+    * 4. DDL and DML cannot be combined in the same query.
+   *
+   * @throws {CypherSemanticError} if any rule is violated.
+   */
+  private _checkIndexDdlValidity(ast: QueryAst): QueryAst {
+    // ── Index name format pattern ──────────────────────────────────
+    const VALID_NAME = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+
+    const hasDdl = !!(ast.createIndex || ast.dropIndex || ast.showIndexes);
+    if (!hasDdl) return ast;
+
+    // ── Rule 1: CREATE INDEX name required ─────────────────────────
+    if (ast.createIndex && !ast.createIndex.name) {
+      throw new CypherSemanticError(
+        'Index name is required for CREATE INDEX',
+      );
+    }
+
+    // ── Rule 1b: CREATE INDEX name format ──────────────────────────
+    if (ast.createIndex && !VALID_NAME.test(ast.createIndex.name)) {
+      throw new CypherSemanticError(
+        `Invalid index name '${ast.createIndex.name}'. Index names must ` +
+        `start with a letter or underscore and contain only alphanumeric ` +
+        `characters and underscores.`,
+      );
+    }
+
+    // ── Rule 2: CREATE INDEX property keys non-empty ──────────────
+    if (ast.createIndex && ast.createIndex.propertyKeys.length === 0) {
+      throw new CypherSemanticError(
+        'At least one property key is required for CREATE INDEX',
+      );
+    }
+
+    // ── Rule 3: DROP INDEX name required ─────────────────────────
+    if (ast.dropIndex && !ast.dropIndex.name) {
+      throw new CypherSemanticError(
+        'Index name is required for DROP INDEX',
+      );
+    }
+
+    // ── Rule 3b: DROP INDEX name format ────────────────────────────
+    if (ast.dropIndex && !VALID_NAME.test(ast.dropIndex.name)) {
+      throw new CypherSemanticError(
+        `Invalid index name '${ast.dropIndex.name}'. Index names must ` +
+        `start with a letter or underscore and contain only alphanumeric ` +
+        `characters and underscores.`,
+      );
+    }
+
+    // ── Rule 4: DDL + DML mutual exclusion ─────────────────────────
+    const hasDml =
+      ast.match.patterns.length > 0 ||
+      !!ast.create ||
+      !!ast.set ||
+      !!ast.delete ||
+      !!ast.remove;
+
+    if (hasDml) {
+      throw new CypherSemanticError(
+        'DDL statements (CREATE INDEX, DROP INDEX, SHOW INDEXES) cannot be combined with MATCH/RETURN',
+      );
+    }
+
+    return ast;
   }
 }

@@ -111,12 +111,17 @@ export class Planner {
 
     // ── NEW: Emit CREATE steps ─────────────────────────────────────
     if (ast.create) {
-      // Build a set of MATCH-bound variable names so that nodes
-      // already in scope are treated as endpoints rather than
-      // being re-created.
-      const matchVarNames = new Set(varRegistry.keys());
+      // Build a mutable set of already-bound variable names so that
+      // nodes already in scope (from MATCH or earlier CREATE patterns)
+      // are treated as endpoints rather than being re-created.
+      // The set is mutated by _planCreatePath so that node variables
+      // introduced by one CREATE pattern are visible to subsequent
+      // patterns — preventing duplicate node creation when, e.g.,
+      // `CREATE (a), (b), (a)-[:R]->(b)` references 'a' and 'b'
+      // in a later path pattern.
+      const knownVars = new Set<string>(varRegistry.keys());
       for (const pattern of ast.create.patterns) {
-        this._planCreatePath(pattern, steps, matchVarNames);
+        this._planCreatePath(pattern, steps, knownVars);
       }
     }
 
@@ -162,6 +167,36 @@ export class Planner {
           property: item.property,
         });
       }
+    }
+
+    // ── NEW: Emit CREATE INDEX step ──────────────────────────────
+    if (ast.createIndex) {
+      steps.push({
+        kind: 'CreateIndexStep',
+        name: ast.createIndex.name,
+        target: ast.createIndex.target,
+        propertyKeys: ast.createIndex.propertyKeys,
+      });
+    }
+
+    // ── NEW: Emit DROP INDEX step ─────────────────────────────────
+    if (ast.dropIndex) {
+      steps.push({
+        kind: 'DropIndexStep',
+        name: ast.dropIndex.name,
+      });
+    }
+
+    // ── NEW: Emit SHOW INDEXES step ───────────────────────────────
+    if (ast.showIndexes) {
+      steps.push({
+        kind: 'ShowIndexesStep',
+        columns: [
+          { alias: 'name', source: 'name' },
+          { alias: 'target', source: 'target' },
+          { alias: 'propertyKeys', source: 'propertyKeys' },
+        ],
+      });
     }
 
     // ── 6. Post-scan clauses (aggregate path vs plain path) ───────
@@ -222,19 +257,21 @@ export class Planner {
    *
    * Walks the pattern's path elements:
    * - For each node pattern → emits a {@link CreateNodeStep} **unless**
-   *   the variable is already bound in MATCH (it is then treated as an
-   *   existing endpoint reference).
+   *   the variable is already bound in {@code knownVars} (i.e. from MATCH
+   *   or from a previous CREATE pattern), in which case it is treated as
+   *   an existing endpoint reference.
    * - For each edge pattern → emits a {@link CreateEdgeStep} with
    *   source = previous node variable, target = current node variable.
    *
-   * @param matchVarNames - Set of variable names already bound by the
-   *   MATCH clause.  Nodes whose variables appear in this set are
-   *   skipped (no {@code CreateNodeStep} emitted).
+   * @param knownVars - Mutable set of already-bound variable names.
+   *   When this method emits a {@code CreateNodeStep} it adds the
+   *   variable to the set so that downstream callers (subsequent
+   *   CREATE patterns in the same clause) see it as already-created.
    */
   private _planCreatePath(
     pattern: import('./ast/AstNode').MatchPattern,
     steps: PlanStep[],
-    matchVarNames: ReadonlySet<string>,
+    knownVars: Set<string>,
   ): void {
     const segments = getPatternSegments(pattern);
     if (segments.length === 0) return;
@@ -252,14 +289,20 @@ export class Planner {
           this._patternPlanner._syntheticVar('create_node', createIdx++);
 
         // Skip CreateNodeStep when the variable is already bound
-        // by MATCH — it refers to an existing node, not a new one.
-        if (!matchVarNames.has(variable)) {
+        // (by MATCH or by a previous CREATE pattern) — it refers
+        // to an existing node, not a new one.
+        if (!knownVars.has(variable)) {
           steps.push({
             kind: 'CreateNodeStep',
             variable,
             labels: node.labels,
             properties: node.properties,
           });
+          // Register so subsequent patterns see this variable as
+          // already-created.
+          if (node.variable) {
+            knownVars.add(node.variable);
+          }
         }
 
         prevNodeVar = variable;
@@ -283,14 +326,20 @@ export class Planner {
 
         // Emit the target node CREATE step BEFORE the edge so both
         // endpoints are bound in the row when the edge is created.
-        // Skip when the target variable is already MATCH-bound.
-        if (targetNode && !matchVarNames.has(targetVar)) {
+        // Skip when the target variable is already bound (MATCH or
+        // prior CREATE).
+        if (targetNode && !knownVars.has(targetVar)) {
           steps.push({
             kind: 'CreateNodeStep',
             variable: targetVar,
             labels: targetNode.labels,
             properties: targetNode.properties,
           });
+          // Register so subsequent patterns see this variable as
+          // already-created.
+          if (targetNode.variable) {
+            knownVars.add(targetNode.variable);
+          }
           prevNodeVar = targetVar;
           i++; // skip the already-processed target node
         } else if (targetNode) {

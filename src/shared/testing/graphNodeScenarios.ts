@@ -76,12 +76,12 @@ export function runGraphNodeScenarios(
 
     it('should remove a node', async () => {
       const node = await graph.addNode('Person', { name: 'Alice' });
-      await expect(graph.removeNode(node.id)).resolves.toBe(true);
+      await expect(graph.removeNode(node.id)).resolves.toEqual({ result: true });
       await expect(graph.hasNode(node.id)).resolves.toBe(false);
     });
 
     it('should return false when removing non-existent node', async () => {
-      await expect(graph.removeNode('non-existent-id')).resolves.toBe(false);
+      await expect(graph.removeNode('non-existent-id')).resolves.toEqual({ result: false });
     });
 
     it('should cascade remove incident edges when removing node', async () => {
@@ -110,7 +110,7 @@ export function runGraphNodeScenarios(
     it('should remove a node without edges (no cascade needed)', async () => {
       const alice = await graph.addNode('Person', { name: 'Alice' });
 
-      await expect(graph.removeNode(alice.id)).resolves.toBe(true);
+      await expect(graph.removeNode(alice.id)).resolves.toEqual({ result: true });
       await expect(graph.hasNode(alice.id)).resolves.toBe(false);
     });
 

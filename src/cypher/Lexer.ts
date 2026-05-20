@@ -62,6 +62,11 @@ const KEYWORDS: Record<string, TokenKind> = {
   optional: TokenKind.OPTIONAL,
   with: TokenKind.WITH,
   unwind: TokenKind.UNWIND,
+  // DDL keywords
+  index: TokenKind.INDEX,
+  drop: TokenKind.DROP,
+  for: TokenKind.FOR,
+  show: TokenKind.SHOW,
   // Boolean literals
   true: TokenKind.BOOLEAN,
   false: TokenKind.BOOLEAN,

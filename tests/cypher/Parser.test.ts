@@ -662,4 +662,86 @@ describe('Parser', () => {
       expect(ast.orderBy).toBeDefined();
     });
   });
+
+  // ── Index DDL statements ──────────────────────────────────────────
+  describe('index DDL statements', () => {
+    it('parses CREATE INDEX for node with single property', () => {
+      const ast = parse('CREATE INDEX email_idx FOR (n:Person) ON (n.email)');
+      expect(ast.createIndex).toBeDefined();
+      expect(ast.createIndex!.kind).toBe('CreateIndex');
+      expect(ast.createIndex!.name).toBe('email_idx');
+      expect(ast.createIndex!.variable).toBe('n');
+      expect(ast.createIndex!.target).toBe('node');
+      expect(ast.createIndex!.labelOrType).toBe('Person');
+      expect(ast.createIndex!.propertyKeys).toEqual(['email']);
+    });
+
+    it('parses CREATE INDEX for node with compound properties', () => {
+      const ast = parse('CREATE INDEX name_email_idx FOR (n:Person) ON (n.name, n.email)');
+      expect(ast.createIndex).toBeDefined();
+      expect(ast.createIndex!.name).toBe('name_email_idx');
+      expect(ast.createIndex!.target).toBe('node');
+      expect(ast.createIndex!.labelOrType).toBe('Person');
+      expect(ast.createIndex!.propertyKeys).toEqual(['name', 'email']);
+    });
+
+    it('parses CREATE INDEX for edge', () => {
+      const ast = parse('CREATE INDEX since_idx FOR ()-[r:KNOWS]-() ON (r.since)');
+      expect(ast.createIndex).toBeDefined();
+      expect(ast.createIndex!.kind).toBe('CreateIndex');
+      expect(ast.createIndex!.name).toBe('since_idx');
+      expect(ast.createIndex!.variable).toBe('r');
+      expect(ast.createIndex!.target).toBe('edge');
+      expect(ast.createIndex!.labelOrType).toBe('KNOWS');
+      expect(ast.createIndex!.propertyKeys).toEqual(['since']);
+    });
+
+    it('parses DROP INDEX', () => {
+      const ast = parse('DROP INDEX email_idx');
+      expect(ast.dropIndex).toBeDefined();
+      expect(ast.dropIndex!.kind).toBe('DropIndex');
+      expect(ast.dropIndex!.name).toBe('email_idx');
+    });
+
+    it('parses SHOW INDEXES', () => {
+      const ast = parse('SHOW INDEXES');
+      expect(ast.showIndexes).toBeDefined();
+      expect(ast.showIndexes!.kind).toBe('ShowIndexes');
+      expect(ast.return.items).toHaveLength(3);
+      expect(ast.return.items[0].alias).toBe('name');
+      expect(ast.return.items[1].alias).toBe('target');
+      expect(ast.return.items[2].alias).toBe('propertyKeys');
+    });
+
+    it('rejects CREATE INDEX with missing name', () => {
+      expect(() => parse('CREATE INDEX FOR (n:P) ON (n.name)'))
+        .toThrow(CypherSyntaxError);
+    });
+
+    it('rejects DROP INDEX with missing name', () => {
+      expect(() => parse('DROP INDEX'))
+        .toThrow(CypherSyntaxError);
+    });
+
+    it('rejects CREATE INDEX with missing ON clause', () => {
+      expect(() => parse('CREATE INDEX idx FOR (n:P)'))
+        .toThrow(CypherSyntaxError);
+    });
+
+    it('rejects CREATE INDEX with variable mismatch in ON', () => {
+      expect(() => parse('CREATE INDEX idx FOR (n:P) ON (x.name)'))
+        .toThrow(CypherSyntaxError);
+    });
+
+    it('rejects SHOW INDEXES with trailing tokens', () => {
+      expect(() => parse('SHOW INDEXES extra'))
+        .toThrow(CypherSyntaxError);
+    });
+
+    it('rejects CREATE INDEX with zero properties', () => {
+      // The parser requires at least one property; () is an empty paren pair, not a property list
+      expect(() => parse('CREATE INDEX idx FOR (n:P) ON ()'))
+        .toThrow(CypherSyntaxError);
+    });
+  });
 });
