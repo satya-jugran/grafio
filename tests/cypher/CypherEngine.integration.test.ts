@@ -902,7 +902,7 @@ describe('CypherEngine Integration', () => {
     it('SHOW INDEXES returns all indexes with correct columns', async () => {
       const engine = new CypherEngine(graph);
 
-      // Pre-existing indexes from buildSocialGraph: name-index, age-index, name-age-index, city-index, occupation-index, since-index
+      // Pre-existing indexes from buildSocialGraph: name_index, age_index, name_age_index, city_index, occupation_index, since_index
       const result = await engine.execute('SHOW INDEXES');
 
       expect(result.columns).toEqual(['name', 'target', 'propertyKeys']);
