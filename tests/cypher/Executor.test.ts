@@ -5,8 +5,10 @@ import { Lexer } from '../../src/cypher/Lexer';
 import { Parser } from '../../src/cypher/Parser';
 import { Semantic } from '../../src/cypher/Semantic';
 import { Planner } from '../../src/cypher/Planner';
-import { Executor } from '../../src/cypher/Executor';
+import { Executor } from '../../src/cypher/executor/Executor';
+import { ExpressionEvaluator } from '../../src/cypher/executor/ExpressionEvaluator';
 import { CypherRuntimeError, UnboundParameterError } from '../../src/cypher/errors';
+import { Edge } from '../../src';
 
 /** Helper: create a graph, run a query, return result. */
 async function executeQuery(
@@ -458,6 +460,8 @@ describe('Executor', () => {
       expect(result.rows).toHaveLength(1);
       expect(result.rows[0].name).toBe('Charlie');
     });
+
+    
   });
 
   // ── Parameters ─────────────────────────────────────────────────
@@ -520,25 +524,20 @@ describe('Executor', () => {
     });
 
     it('throws on FunctionCall evaluation', () => {
-      const graph = new Graph();
-      const executor = new Executor(graph);
       const fnExpr = { kind: 'FunctionCall' as const, name: 'COUNT', args: [] };
       expect(() =>
-        (executor as any)._evaluate(fnExpr, new Map(), {}),
+        new ExpressionEvaluator().evaluate(fnExpr, new Map(), {}),
       ).toThrow(/COUNT.*not yet supported/);
     });
 
     it('throws on unbound Identifier in row', () => {
-      const graph = new Graph();
-      const executor = new Executor(graph);
       const identExpr = { kind: 'Identifier' as const, name: 'missing' };
       expect(() =>
-        (executor as any)._evaluate(identExpr, new Map(), {}),
+        new ExpressionEvaluator().evaluate(identExpr, new Map(), {}),
       ).toThrow(/Variable 'missing' is not bound/);
     });
 
     it('throws TypeMismatchError on property access from non-object', () => {
-      const executor = new Executor(new Graph());
       // Access .foo on a string value — should throw
       const propAccess = {
         kind: 'PropertyAccess' as const,
@@ -546,7 +545,7 @@ describe('Executor', () => {
         property: 'foo',
       };
       expect(() =>
-        (executor as any)._evaluate(propAccess, new Map(), {}),
+        new ExpressionEvaluator().evaluate(propAccess, new Map(), {}),
       ).toThrow(/Cannot access property 'foo' on string/);
     });
 
@@ -565,25 +564,21 @@ describe('Executor', () => {
   // ── _eq (equality) helper coverage ─────────────────────────────
   describe('_eq helper', () => {
     it('returns true when both values are null', () => {
-      const executor = new Executor(new Graph());
-      expect((executor as any)._eq(null, null)).toBe(true);
+      expect(new ExpressionEvaluator().eq(null, null)).toBe(true);
     });
 
     it('returns true when both values are undefined', () => {
-      const executor = new Executor(new Graph());
-      expect((executor as any)._eq(undefined, undefined)).toBe(true);
+      expect(new ExpressionEvaluator().eq(undefined, undefined)).toBe(true);
     });
 
     it('returns false when only one value is null', () => {
-      const executor = new Executor(new Graph());
-      expect((executor as any)._eq(null, 'hello')).toBe(false);
-      expect((executor as any)._eq('hello', null)).toBe(false);
+      expect(new ExpressionEvaluator().eq(null, 'hello')).toBe(false);
+      expect(new ExpressionEvaluator().eq('hello', null)).toBe(false);
     });
 
     it('returns false when only one value is undefined', () => {
-      const executor = new Executor(new Graph());
-      expect((executor as any)._eq(undefined, 'hello')).toBe(false);
-      expect((executor as any)._eq('hello', undefined)).toBe(false);
+      expect(new ExpressionEvaluator().eq(undefined, 'hello')).toBe(false);
+      expect(new ExpressionEvaluator().eq('hello', undefined)).toBe(false);
     });
 
     it('compares objects by id property', async () => {
@@ -602,9 +597,8 @@ describe('Executor', () => {
     });
 
     it('returns false for objects with different ids', () => {
-      const executor = new Executor(new Graph());
       expect(
-        (executor as any)._eq(
+        new ExpressionEvaluator().eq(
           { id: 'n1', properties: {} },
           { id: 'n2', properties: {} },
         ),
@@ -689,10 +683,8 @@ describe('Executor', () => {
     });
 
     it('throws on unknown operator', () => {
-      const graph = new Graph();
-      const executor = new Executor(graph);
       expect(() =>
-        (executor as any)._applyBinaryOp('UNKNOWN', 1, 2),
+        new ExpressionEvaluator().applyBinaryOp('UNKNOWN', 1, 2),
       ).toThrow(/Unknown operator: UNKNOWN/);
     });
 
@@ -1190,14 +1182,14 @@ describe('Executor', () => {
     });
   });
 
-   // ── Write operation execution ──────────────────────────────────
+  // ── Write operation execution ──────────────────────────────────
   describe('write operation execution', () => {
     let graph: Graph;
 
     beforeEach(() => {
       graph = new Graph();
     });
-    
+
     it('CREATE single node and return it', async () => {
       const result = await executeQuery(
         "CREATE (n:Person {name: 'Alice'}) RETURN n",
@@ -1421,6 +1413,22 @@ describe('Executor', () => {
       const reFetched = await graph.getNode(node.id);
       expect(reFetched!.properties.age).toBe(30);
       expect(reFetched!.properties.city).toBe('Wonderland');
+    });
+
+    it('SET property and new property on edge', async () => {
+      const a = await graph.addNode('Person', { name: 'Alice' });
+      const b = await graph.addNode('Person', { name: 'Bob' });
+      const edge = await graph.addEdge(a.id, b.id, 'KNOWS', { since: 2020 });
+      const result = await executeQuery(
+        "MATCH ()-[r:KNOWS]->() SET r.since = 2024, r.status = 'active' RETURN r",
+        {},
+        graph,
+      );
+      expect(result.rows).toHaveLength(1);
+      const updatedEdge = result.rows[0].r as Edge;
+      expect(updatedEdge.properties.since).toBe(2024);
+      expect(updatedEdge.properties.status).toBe('active');
+      expect(result.summary.propertiesSet).toBeGreaterThanOrEqual(2);
     });
 
     it('write counters reflect operations on fresh graph', async () => {

@@ -25,7 +25,7 @@ import { Token, TokenKind } from './Token';
 import { Parser } from './Parser';
 import { Semantic } from './Semantic';
 import { Planner } from './Planner';
-import { Executor } from './Executor';
+import { Executor } from './executor/Executor';
 import { CypherResult } from './Result';
 import { CypherNotSupportedError, UnboundParameterError } from './errors';
 import { PlanFormatter, PlanFormat } from './plan/PlanFormatter';
