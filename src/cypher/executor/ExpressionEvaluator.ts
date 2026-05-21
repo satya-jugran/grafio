@@ -220,6 +220,11 @@ export class ExpressionEvaluator {
             );
         }
       }
+
+      default:
+        throw new CypherRuntimeError(
+          `Unsupported expression kind: '${(expr as Expression).kind}'`,
+        );
     }
   }
 
