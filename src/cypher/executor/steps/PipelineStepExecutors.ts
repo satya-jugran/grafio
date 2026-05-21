@@ -111,6 +111,8 @@ export class PipelineStepExecutor {
     rows: Row[],
     params: Record<string, unknown>,
   ): Row[] {
+    if (rows.length === 0) return [];
+
     const start = step.skipExpr
       ? Math.max(0, Number(this._evaluator.evaluate(step.skipExpr, rows[0], params)))
       : 0;
