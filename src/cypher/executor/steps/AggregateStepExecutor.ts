@@ -318,7 +318,7 @@ export class AggregateStepExecutor {
       .filter((v) => v !== null && v !== undefined);
 
     if (distinct) {
-      values = [...new Set(values)];
+      values = this._deduplicatedValues(values);
     }
 
     switch (spec.function) {
@@ -361,6 +361,34 @@ export class AggregateStepExecutor {
       return 1;
     }
     return this._evaluator.evaluate(expr, row, params);
+  }
+
+  /**
+   * Deduplicate values using identity-based comparison for graph entities
+   * (nodes / edges) and value equality for primitives.  Matches the
+   * established identity-key pattern used by {@link _serializeGroupKey} and
+   * {@link PipelineStepExecutor.executeProject} DISTINCT handling.
+   */
+  private _deduplicatedValues(values: unknown[]): unknown[] {
+    const seen = new Set<string>();
+    const result: unknown[] = [];
+    for (const v of values) {
+      let key: string;
+      if (v === null) {
+        key = '\x00null';
+      } else if (v === undefined) {
+        key = '\x00undef';
+      } else if (typeof v === 'object' && v !== null && 'id' in (v as object)) {
+        key = (v as { id: string }).id;
+      } else {
+        key = String(v);
+      }
+      if (!seen.has(key)) {
+        seen.add(key);
+        result.push(v);
+      }
+    }
+    return result;
   }
 
   private _serializeGroupKey(keyValues: unknown[]): string {
