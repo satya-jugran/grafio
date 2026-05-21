@@ -402,6 +402,13 @@ describe('CypherEngine Integration', () => {
       expect(result.rows[0].min).toBe(25);
       expect(result.rows[0].max).toBe(35);
     });
+
+    it('returns edges from a named path via relationships(path)', async () => {
+      const result = await engine.execute(
+        'MATCH path = (root)-[:KNOWS*1..10]-(p:Person) WHERE p.name = "Charlie" RETURN DISTINCT relationships(path) AS relationships',
+      );
+      expect(result.rows.length).toBeGreaterThan(0);
+    });
   });
 
   // ── HAVING, ORDER BY, Aggregate Expressions, DISTINCT ────────────
@@ -488,6 +495,24 @@ describe('CypherEngine Integration', () => {
         expect(row.cnt).toBeGreaterThan(1);
       }
     });
+    
+    it('returns nodes from a named path via nodes(path)', async () => {
+      const result = await engine.execute(
+        'MATCH path = (root)-[:KNOWS*1..10]-(p:Person) WHERE p.name = "Alice" RETURN DISTINCT nodes(path) AS nodes',
+      );
+      expect(result.rows.length).toBeGreaterThan(0);
+      const nodes = result.rows[0].nodes as unknown[];
+      expect(Array.isArray(nodes)).toBe(true);
+      // All entries in the result should be Node instances
+      for (const n of nodes) {
+        expect(n).toBeInstanceOf(Node);
+      }
+      // At least one of the nodes should be Alice
+      const aliceNode = nodes.find(
+        (n: any) => n.properties?.name === 'Alice',
+      );
+      expect(aliceNode).toBeDefined();
+    });
   });
 
   describe('id() function', () => {
@@ -555,6 +580,121 @@ describe('CypherEngine Integration', () => {
       const ids = result.rows.map((r) => r.nodeId as string);
       const uniqueIds = new Set(ids);
       expect(uniqueIds.size).toBe(8); // all distinct
+    });
+  });
+
+  describe('nodes() and relationships() functions', () => {
+    it('extracts nodes from a named path with nodes(path)', async () => {
+      const graph = new Graph();
+      await buildSocialGraph(graph);
+      const engine = new CypherEngine(graph);
+
+      const result = await engine.execute(
+        'MATCH path = (a:Person {name: "Alice"})-[:KNOWS]->(b:Person) RETURN nodes(path) AS nodes',
+      );
+      expect(result.rows.length).toBeGreaterThan(0);
+      expect(result.columns).toEqual(['nodes']);
+
+      const nodes = result.rows[0].nodes as unknown[];
+      expect(Array.isArray(nodes)).toBe(true);
+      expect(nodes.length).toBe(2); // source + target
+      for (const n of nodes) {
+        expect(n).toBeInstanceOf(Node);
+      }
+      // First node should be Alice, second should be the target
+      expect((nodes[0] as any).properties.name).toBe('Alice');
+    });
+
+    it('extracts relationships from a named path with relationships(path)', async () => {
+      const graph = new Graph();
+      await buildSocialGraph(graph);
+      const engine = new CypherEngine(graph);
+
+      const result = await engine.execute(
+        'MATCH path = (a:Person {name: "Alice"})-[:KNOWS]->(b:Person) RETURN relationships(path) AS rels',
+      );
+      expect(result.rows.length).toBeGreaterThan(0);
+      expect(result.columns).toEqual(['rels']);
+
+      const rels = result.rows[0].rels as unknown[];
+      expect(Array.isArray(rels)).toBe(true);
+      expect(rels.length).toBe(1); // one edge in a single-hop path
+      for (const r of rels) {
+        expect(r).toBeInstanceOf(Edge);
+        expect((r as any).type).toBe('KNOWS');
+      }
+    });
+
+    it('returns nodes and relationships together from the same path', async () => {
+      const graph = new Graph();
+      await buildSocialGraph(graph);
+      const engine = new CypherEngine(graph);
+
+      const result = await engine.execute(
+        'MATCH path = (a:Person {name: "Alice"})-[:KNOWS]->(b:Person) RETURN nodes(path) AS nodes, relationships(path) AS rels',
+      );
+      expect(result.rows.length).toBeGreaterThan(0);
+      expect(result.columns).toEqual(['nodes', 'rels']);
+
+      const nodes = result.rows[0].nodes as unknown[];
+      const rels = result.rows[0].rels as unknown[];
+      expect(Array.isArray(nodes)).toBe(true);
+      expect(Array.isArray(rels)).toBe(true);
+      // nodes = edges + 1 for a simple path
+      expect(nodes.length).toBe(rels.length + 1);
+    });
+
+    it('handles multi-hop variable-length named path with nodes(path)', async () => {
+      const graph = new Graph();
+      await buildSocialGraph(graph);
+      const engine = new CypherEngine(graph);
+
+      const result = await engine.execute(
+        'MATCH path = (root)-[:KNOWS*2..3]-(p:Person) WHERE p.name = "Alice" RETURN nodes(path) AS nodes',
+      );
+      expect(result.rows.length).toBeGreaterThan(0);
+      const nodes = result.rows[0].nodes as unknown[];
+      expect(Array.isArray(nodes)).toBe(true);
+      // multi-hop path with 2-3 hops means 3-4 nodes
+      expect(nodes.length).toBeGreaterThanOrEqual(3);
+      for (const n of nodes) {
+        expect(n).toBeInstanceOf(Node);
+      }
+      // Last node should be Alice
+      const lastNode = nodes[nodes.length - 1] as any;
+      expect(lastNode.properties.name).toBe('Alice');
+    });
+
+    it('returns null for nodes(null)', async () => {
+      const graph = new Graph();
+      await buildSocialGraph(graph);
+      const engine = new CypherEngine(graph);
+
+      const result = await engine.execute(
+        'MATCH (p:Person) RETURN nodes(null) AS result',
+      );
+      expect(result.rows.length).toBeGreaterThan(0);
+      expect(result.rows[0].result).toBeNull();
+    });
+
+    it('throws for nodes() with wrong number of args', async () => {
+      const graph = new Graph();
+      await buildSocialGraph(graph);
+      const engine = new CypherEngine(graph);
+
+      await expect(
+        engine.execute('MATCH (p:Person) RETURN nodes() AS result'),
+      ).rejects.toThrow(/nodes\(\) expects exactly 1 argument/);
+    });
+
+    it('throws for relationships() with wrong number of args', async () => {
+      const graph = new Graph();
+      await buildSocialGraph(graph);
+      const engine = new CypherEngine(graph);
+
+      await expect(
+        engine.execute('MATCH (p:Person) RETURN relationships(p, p) AS result'),
+      ).rejects.toThrow(/relationships\(\) expects exactly 1 argument/);
     });
   });
 
