@@ -8,6 +8,7 @@ import { Planner } from '../../src/cypher/Planner';
 import { Executor } from '../../src/cypher/executor/Executor';
 import { ExpressionEvaluator } from '../../src/cypher/executor/ExpressionEvaluator';
 import { CypherRuntimeError, UnboundParameterError } from '../../src/cypher/errors';
+import { Edge } from '../../src';
 
 /** Helper: create a graph, run a query, return result. */
 async function executeQuery(
@@ -459,6 +460,8 @@ describe('Executor', () => {
       expect(result.rows).toHaveLength(1);
       expect(result.rows[0].name).toBe('Charlie');
     });
+
+    
   });
 
   // ── Parameters ─────────────────────────────────────────────────
@@ -1179,14 +1182,14 @@ describe('Executor', () => {
     });
   });
 
-   // ── Write operation execution ──────────────────────────────────
+  // ── Write operation execution ──────────────────────────────────
   describe('write operation execution', () => {
     let graph: Graph;
 
     beforeEach(() => {
       graph = new Graph();
     });
-    
+
     it('CREATE single node and return it', async () => {
       const result = await executeQuery(
         "CREATE (n:Person {name: 'Alice'}) RETURN n",
@@ -1410,6 +1413,22 @@ describe('Executor', () => {
       const reFetched = await graph.getNode(node.id);
       expect(reFetched!.properties.age).toBe(30);
       expect(reFetched!.properties.city).toBe('Wonderland');
+    });
+
+    it('SET property and new property on edge', async () => {
+      const a = await graph.addNode('Person', { name: 'Alice' });
+      const b = await graph.addNode('Person', { name: 'Bob' });
+      const edge = await graph.addEdge(a.id, b.id, 'KNOWS', { since: 2020 });
+      const result = await executeQuery(
+        "MATCH ()-[r:KNOWS]->() SET r.since = 2024, r.status = 'active' RETURN r",
+        {},
+        graph,
+      );
+      expect(result.rows).toHaveLength(1);
+      const updatedEdge = result.rows[0].r as Edge;
+      expect(updatedEdge.properties.since).toBe(2024);
+      expect(updatedEdge.properties.status).toBe('active');
+      expect(result.summary.propertiesSet).toBeGreaterThanOrEqual(2);
     });
 
     it('write counters reflect operations on fresh graph', async () => {

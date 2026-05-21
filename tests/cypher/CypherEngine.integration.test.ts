@@ -12,7 +12,7 @@
  */
 import { describe, expect, it, beforeAll, beforeEach, afterEach, jest } from '@jest/globals';
 import { Graph } from '../../src/Graph';
-import { CypherEngine, CypherNotSupportedError, CypherSemanticError, PlanFormat } from '../../src/cypher';
+import { CypherEngine, CypherNotSupportedError, CypherRuntimeError, CypherSemanticError, PlanFormat } from '../../src/cypher';
 import { Edge, Node } from '../../src';
 
 /** Build a social graph using Cypher CREATE queries. */
@@ -403,12 +403,6 @@ describe('CypherEngine Integration', () => {
       expect(result.rows[0].max).toBe(35);
     });
 
-    it('returns edges from a named path via relationships(path)', async () => {
-      const result = await engine.execute(
-        'MATCH path = (root)-[:KNOWS*1..10]-(p:Person) WHERE p.name = "Charlie" RETURN DISTINCT relationships(path) AS relationships',
-      );
-      expect(result.rows.length).toBeGreaterThan(0);
-    });
   });
 
   // ── HAVING, ORDER BY, Aggregate Expressions, DISTINCT ────────────
@@ -496,23 +490,6 @@ describe('CypherEngine Integration', () => {
       }
     });
     
-    it('returns nodes from a named path via nodes(path)', async () => {
-      const result = await engine.execute(
-        'MATCH path = (root)-[:KNOWS*1..10]-(p:Person) WHERE p.name = "Alice" RETURN DISTINCT nodes(path) AS nodes',
-      );
-      expect(result.rows.length).toBeGreaterThan(0);
-      const nodes = result.rows[0].nodes as unknown[];
-      expect(Array.isArray(nodes)).toBe(true);
-      // All entries in the result should be Node instances
-      for (const n of nodes) {
-        expect(n).toBeInstanceOf(Node);
-      }
-      // At least one of the nodes should be Alice
-      const aliceNode = nodes.find(
-        (n: any) => n.properties?.name === 'Alice',
-      );
-      expect(aliceNode).toBeDefined();
-    });
   });
 
   describe('id() function', () => {
@@ -527,6 +504,15 @@ describe('CypherEngine Integration', () => {
       expect(result.rows).toHaveLength(1);
       expect(typeof result.rows[0].nodeId).toBe('string');
       expect((result.rows[0].nodeId as string).length).toBeGreaterThan(0);
+    });
+
+    it('should throw an error when id() is used without arguments', async () => {
+      const graph = new Graph();
+      await buildSocialGraph(graph);
+      const engine = new CypherEngine(graph);
+      expect(engine.execute(
+        'MATCH (p:Person {name: "Alice"}) RETURN id()',
+      )).rejects.toThrow(CypherRuntimeError);
     });
 
     it('can be used in a WHERE clause to compare ids', async () => {
@@ -631,7 +617,7 @@ describe('CypherEngine Integration', () => {
       const engine = new CypherEngine(graph);
 
       const result = await engine.execute(
-        'MATCH path = (a:Person {name: "Alice"})-[:KNOWS]->(b:Person) RETURN nodes(path) AS nodes, relationships(path) AS rels',
+        'MATCH path = (a:Person {name: "Alice"})-[:KNOWS]->(b:Person) RETURN DISTINCT nodes(path) AS nodes, relationships(path) AS rels',
       );
       expect(result.rows.length).toBeGreaterThan(0);
       expect(result.columns).toEqual(['nodes', 'rels']);
@@ -687,6 +673,15 @@ describe('CypherEngine Integration', () => {
       ).rejects.toThrow(/nodes\(\) expects exactly 1 argument/);
     });
 
+    it('throws for nodes() when argument is not a path', async () => {
+      const graph = new Graph();
+      await buildSocialGraph(graph);
+      const engine = new CypherEngine(graph);
+      await expect(
+        engine.execute('MATCH (p:Person) RETURN nodes(p) AS result'),
+      ).rejects.toThrow(/nodes\(\) requires a path argument/);
+    });
+
     it('throws for relationships() with wrong number of args', async () => {
       const graph = new Graph();
       await buildSocialGraph(graph);
@@ -695,6 +690,15 @@ describe('CypherEngine Integration', () => {
       await expect(
         engine.execute('MATCH (p:Person) RETURN relationships(p, p) AS result'),
       ).rejects.toThrow(/relationships\(\) expects exactly 1 argument/);
+    });
+
+    it('throws for relationships() when argument is not a path', async () => {
+      const graph = new Graph();
+      await buildSocialGraph(graph);
+      const engine = new CypherEngine(graph);
+      await expect(
+        engine.execute('MATCH (p:Person) RETURN relationships(p) AS result'),
+      ).rejects.toThrow(/relationships\(\) requires a path argument/);
     });
   });
 

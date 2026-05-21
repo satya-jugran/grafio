@@ -64,16 +64,7 @@ export class PipelineStepExecutor {
     for (const row of projected) {
       const keyParts: string[] = [];
       for (const col of step.columns) {
-        const value = row.get(col.alias);
-        if (value === null) {
-          keyParts.push('\x00null');
-        } else if (value === undefined) {
-          keyParts.push('\x00undef');
-        } else if (typeof value === 'object' && value !== null && 'id' in (value as object)) {
-          keyParts.push((value as { id: string }).id);
-        } else {
-          keyParts.push(String(value));
-        }
+        keyParts.push(this._distinctKey(row.get(col.alias)));
       }
       const key = keyParts.join('\x00');
 
@@ -84,6 +75,31 @@ export class PipelineStepExecutor {
     }
 
     return deduped;
+  }
+
+  /**
+   * Serialize a single value into a stable, collision-free string key
+   * for DISTINCT deduplication.
+   *
+   * Handles primitives, entities (nodes/edges with `.id`), arrays of
+   * entities (e.g. result of `nodes(path)` / `relationships(path)`),
+   * and arbitrary objects.
+   */
+  private _distinctKey(value: unknown): string {
+    if (value === null) return '\x00null';
+    if (value === undefined) return '\x00undef';
+
+    if (typeof value === 'object') {
+      if ('id' in (value as object)) {
+        return (value as { id: string }).id;
+      }
+
+      if (Array.isArray(value)) {
+        return value.map((el) => this._distinctKey(el)).join('\x1F');
+      }
+    }
+
+    return String(value);
   }
 
   // ── SortStep ───────────────────────────────────────────────────
