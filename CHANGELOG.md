@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.3.0] - 2026-05-22
+
+### ✨ New Features
+
+1. **Cypher Path Functions: `nodes()` and `relationships()`**
+   - `nodes(path)` — returns all nodes from a path expression as a list
+   - `relationships(path)` — returns all relationships (edges) from a path expression as a list
+   - Both functions operate on named path variables (e.g. `MATCH p = (a)-[:R]->(b) RETURN nodes(p)`)
+   - Paths are represented internally as `[node₀, edge₀, node₁, edge₁, ..., nodeₙ]`, where `nodes()` extracts even-index elements and `relationships()` extracts odd-index elements
+
+2. **Parallel Execution via `maxDegreeOfParallelism`**
+   - Introduced [`CypherEngineOptions.maxDegreeOfParallelism`](src/cypher/CypherEngine.ts:48) to control concurrent row processing
+   - Defaults to `1` (serial execution); values greater than `1` enable parallel execution for NodeScan, NodeSeek, EdgeExpand, Filter, and Project steps
+   - Enables non-serial computation to improve query performance on multi-core systems
+
 ## [7.2.0] - 2026-05-19
 
 ### ✨ New Features

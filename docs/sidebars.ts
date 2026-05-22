@@ -26,6 +26,7 @@ const sidebars: SidebarsConfig = {
         'guides/data-operations',
         'guides/filtering',
         'guides/aggregation',
+        'guides/functions',
         'guides/transactions',
         'guides/exception-handling',
         'guides/query-plans',
