@@ -39,7 +39,7 @@ Output:
 ```
 ├— ProjectStep [p.name, b.name]
 ├— EdgeExpandStep (→) r:KNOWS → b:Person
-├— NodeScanStep (p:Person)
+└— NodeScanStep (p:Person)
 ```
 
 ### JSON Format
@@ -80,7 +80,7 @@ console.log(result.executionPlan);
 Output:
 ```
 ├— ProjectStep [name] (1ms, 3.7%, 100 rows)
-├— NodeScanStep (p:Person) (25ms, 96.3%, 100 rows)
+└— NodeScanStep (p:Person) (25ms, 96.3%, 100 rows)
 ```
 
 ### Available Formats
@@ -102,7 +102,7 @@ For a query like:
 
 ```cypher
 MATCH (p:Person)-[r1:BOUGHT]->(t:Product)-[r2:IN_CATEGORY]->(c:Category)
-WHERE r1.weight > 5 AND p.score > 50
+WHERE r1.weight > 5 AND r1.weight < r2.weight AND p.score > 50
 RETURN p.label AS personLabel,
       t.label AS productLabel,
       c.label AS categoryLabel,

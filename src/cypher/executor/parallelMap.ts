@@ -12,13 +12,24 @@
 /**
  * Process items in parallel with bounded concurrency.
  *
+ * The array is split into chunks that are processed concurrently
+ * via {@link Promise.all}.  When parallelism is disabled or the
+ * input is too small to justify chunking overhead the function
+ * falls back to serial execution.
+ *
+ * Chunk size is derived from {@link maxConcurrency} but never
+ * drops below {@link minChunkSize} – effective concurrency is
+ * clamped to `⌊items.length / minChunkSize⌋` so each chunk
+ * contains at least that many items.
+ *
  * @param items          - The array to process in parallel.
  * @param fn             - Processing function that receives a chunk
  *                         and returns a promise of results.
  * @param maxConcurrency - Maximum number of concurrent chunks.
- * @param minChunkSize   - Minimum items per chunk before parallelizing
- *                         (default: 100). Arrays smaller than this are
- *                         processed serially.
+ * @param minChunkSize   - Minimum number of items guaranteed per
+ *                         chunk when parallelizing (default: 100).
+ *                         Inputs with fewer items than this threshold
+ *                         are processed serially in a single chunk.
  * @returns Flattened array of all processed results.
  *
  * @typeParam T - Input item type.
@@ -34,7 +45,13 @@ export async function parallelMap<T, R>(
     return fn(items);
   }
 
-  const chunkSize = Math.ceil(items.length / Math.min(maxConcurrency, items.length));
+  // Clamp effective concurrency so every chunk holds at least
+  // minChunkSize items, preventing unbounded chunk creation when
+  // maxConcurrency is set excessively high.
+  const maxChunks = Math.max(1, Math.floor(items.length / minChunkSize));
+  const effectiveConcurrency = Math.min(maxConcurrency, maxChunks);
+  const chunkSize = Math.ceil(items.length / effectiveConcurrency);
+
   const chunks: T[][] = [];
   for (let i = 0; i < items.length; i += chunkSize) {
     chunks.push(items.slice(i, i + chunkSize));
