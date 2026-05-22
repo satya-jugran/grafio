@@ -143,10 +143,11 @@ export class CypherEngine {
     // Handle overloaded signature where options may be passed as the second argument
     let _params: Record<string, unknown> = {};
     let _options: CypherQueryOptions | undefined = options;
-    if (typeof params === 'object' && !Array.isArray(params) && !('executionPlan' in params)) {
+    let _CypherQueryOptionsKeys: (keyof CypherQueryOptions)[] = ['transaction', 'executionPlan'];
+    if (typeof params === 'object' && !Array.isArray(params) && !_CypherQueryOptionsKeys.some(key => key in params)) {
       _params = params as Record<string, unknown>;
       _options = options;
-    } else if (typeof params === 'object' && !Array.isArray(params) && 'executionPlan' in params) {
+    } else if (typeof params === 'object' && !Array.isArray(params) && _CypherQueryOptionsKeys.some(key => key in params)) {
       _params = {};
       _options = params as CypherQueryOptions;
     }

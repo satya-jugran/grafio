@@ -69,7 +69,7 @@ describe('PlanFormatter', () => {
       };
 
       const result = formatter.format(plan, 'mermaid');
-      expect(result).toContain('flowchart TD');
+      expect(result).toContain('flowchart LR');
       expect(result).toContain('Step1[');
       expect(result).toContain('Step2[');
       expect(result).toContain('-->');
@@ -290,7 +290,7 @@ describe('PlanFormatter', () => {
       const result = formatter.format(plan, 'mermaid');
       const lines = result.split('\n');
 
-      expect(lines[0]).toBe('flowchart TD');
+      expect(lines[0]).toBe('flowchart LR');
       expect(lines[1]).toMatch(/^ Step1\[/);
       expect(lines[2]).toMatch(/^ Step2\[/);
       expect(lines[3]).toBe(' Step1 --> Step2');
@@ -403,7 +403,7 @@ describe('PlanFormatter', () => {
       const lines = result.split('\n');
 
       // Verify structure: 1 header + 7 nodes + 6 arrows = 14 lines
-      expect(lines[0]).toBe('flowchart TD');
+      expect(lines[0]).toBe('flowchart LR');
       expect(lines.length).toBe(14);
 
       // Verify all 7 steps are present as node definitions

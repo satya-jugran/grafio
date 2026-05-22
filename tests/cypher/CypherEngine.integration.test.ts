@@ -735,7 +735,7 @@ describe('CypherEngine Integration', () => {
     it('returns mermaid format', async () => {
       await buildSocialGraph(graph);
       const plan = await engine.getQueryPlan('MATCH (p:Person) RETURN p', {}, 'mermaid');
-      expect(plan).toContain('flowchart TD');
+      expect(plan).toContain('flowchart LR');
       expect(plan).toContain('-->');
     });
 
@@ -792,7 +792,7 @@ describe('CypherEngine Integration', () => {
       expect(result.executionPlan).toContain('NodeScanStep');
     });
 
-    it('returns execution plan in ascii format', async () => {
+    it('returns execution plan in text format', async () => {
       const result = await engine.execute(
         'MATCH (p:Person) RETURN p.name AS name',
         { executionPlan: { format: 'text' } },
@@ -808,7 +808,7 @@ describe('CypherEngine Integration', () => {
         { executionPlan: { format: 'mermaid' } },
       );
       expect(result.executionPlan).toBeDefined();
-      expect(result.executionPlan).toContain('flowchart TD');
+      expect(result.executionPlan).toContain('flowchart LR');
       expect(result.executionPlan).toContain('Step1');
       expect(result.executionPlan).toContain('-->');
     });
