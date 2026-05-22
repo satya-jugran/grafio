@@ -136,13 +136,6 @@ export interface EdgeExpandStep {
   /** Reserved for future DFS optimisation: optional cap on result rows. */
   maxResults?: number;
   /**
-   * Property filters for the edge itself, pushed from single-variable
-   * WHERE predicates on the edge variable (e.g. WHERE r1.weight > 5).
-   * Applied at the storage layer during getEdgesFrom / getEdgesTo so
-   * that ineligible edges are pruned before rows are materialised.
-   */
-  edgePropertyFilters?: PropertyFilter[];
-  /**
    * Named path variable — set when this expansion is part of a named path
    * (`MATCH p = (a)-[:REL]->(b)`). The executor binds this variable to the
    * reconstructed path value (array of alternating nodes and edges).

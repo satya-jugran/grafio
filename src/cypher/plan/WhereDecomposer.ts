@@ -14,7 +14,6 @@ import {
   NamedPath,
   getPatternSegments,
   NodePattern,
-  EdgePattern,
 } from '../ast/AstNode';
 import { PropertyFilter } from './QueryPlan';
 
@@ -27,16 +26,12 @@ export interface VarInfo {
   /** True if this variable is the first node in a pattern path (gets
    *  its own NodeScanStep and can have predicates pushed in). */
   isRoot: boolean;
-  /** Whether this variable refers to a node or an edge. */
-  entityKind: 'node' | 'edge';
 }
 
 /** Result of decomposing a WHERE expression. */
 export interface DecomposedWhere {
   /** Per-variable predicates pushable into NodeScanStep. */
   perVar: Map<string, PropertyFilter[]>;
-  /** Per-edge-variable predicates pushable into EdgeExpandStep. */
-  perEdgeVar: Map<string, PropertyFilter[]>;
   /** Cross-variable expressions retained as FilterStep. */
   crossVar: Expression[];
 }
@@ -65,33 +60,17 @@ export class WhereDecomposer {
           name: firstVar,
           labels: firstNode.labels,
           isRoot: true,
-          entityKind: 'node',
         });
       }
 
       // Walk alternating edge → node pairs for dependent variables.
       for (let i = 1; i < segments.length; i += 2) {
-        const edge = segments[i] as EdgePattern;
         const targetNode = segments[i + 1] as NodePattern;
-
-        // Register edge variables so that single-variable WHERE
-        // predicates on edges (e.g. WHERE r1.weight > 5) can be
-        // pushed down into EdgeExpandStep.edgePropertyFilters.
-        if (edge.variable && !vars.has(edge.variable)) {
-          vars.set(edge.variable, {
-            name: edge.variable,
-            labels: edge.types,
-            isRoot: false,
-            entityKind: 'edge',
-          });
-        }
-
         if (targetNode.variable && !vars.has(targetNode.variable)) {
           vars.set(targetNode.variable, {
             name: targetNode.variable,
             labels: targetNode.labels,
             isRoot: false,
-            entityKind: 'node',
           });
         }
       }
@@ -112,12 +91,11 @@ export class WhereDecomposer {
     vars: Map<string, VarInfo>,
   ): DecomposedWhere {
     const perVar = new Map<string, PropertyFilter[]>();
-    const perEdgeVar = new Map<string, PropertyFilter[]>();
     const crossVar: Expression[] = [];
 
-    this._classify(expr, vars, perVar, perEdgeVar, crossVar);
+    this._classify(expr, vars, perVar, crossVar);
 
-    return { perVar, perEdgeVar, crossVar };
+    return { perVar, crossVar };
   }
 
   /**
@@ -128,7 +106,6 @@ export class WhereDecomposer {
     expr: Expression,
     vars: Map<string, VarInfo>,
     perVar: Map<string, PropertyFilter[]>,
-    perEdgeVar: Map<string, PropertyFilter[]>,
     crossVar: Expression[],
   ): void {
     // ── AND: always split — each operand is classified independently.
@@ -136,8 +113,8 @@ export class WhereDecomposer {
     //     (single variable, but mixed translatable/non-translatable
     //     operands) is decomposed correctly.
     if (expr.kind === 'Binary' && expr.op === 'AND') {
-      this._classify(expr.left, vars, perVar, perEdgeVar, crossVar);
-      this._classify(expr.right, vars, perVar, perEdgeVar, crossVar);
+      this._classify(expr.left, vars, perVar, crossVar);
+      this._classify(expr.right, vars, perVar, crossVar);
       return;
     }
 
@@ -155,14 +132,12 @@ export class WhereDecomposer {
       const varInfo = vars.get(varName);
       const filter = this._toPropertyFilter(expr);
 
-      // Push predicates for root node variables into NodeScanStep.
-      if (filter && varInfo?.isRoot && varInfo?.entityKind === 'node') {
+      // Only push predicates for root variables that have their own
+      // NodeScanStep.  Dependent variables (edge expansion targets)
+      // have no scan to push into, so their predicates stay as
+      // crossVar / FilterStep.
+      if (filter && varInfo?.isRoot) {
         this._add(perVar, varName, filter);
-      } else if (filter && varInfo?.entityKind === 'edge') {
-        // Push edge-variable predicates (e.g. r1.weight > 5) into
-        // EdgeExpandStep.edgePropertyFilters so they can be applied
-        // at the storage layer during _expandSingleHop / _expandMultiHop.
-        this._add(perEdgeVar, varName, filter);
       } else {
         crossVar.push(expr);
       }

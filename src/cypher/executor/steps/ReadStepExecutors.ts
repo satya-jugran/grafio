@@ -220,7 +220,9 @@ export class ReadStepExecutor {
     sourceNode: Node,
     transaction?: GraphTransaction,
   ): Promise<Row[]> {
-    const filterArg = this._buildEdgeFilterArg(step);
+    const filterArg = step.types.length > 0
+      ? { filter: { types: step.types } }
+      : undefined;
 
     const edges =
       step.direction === 'out'
@@ -299,7 +301,9 @@ export class ReadStepExecutor {
 
       if (hops >= step.maxHops) continue;
 
-      const filterArg = this._buildEdgeFilterArg(step);
+      const filterArg = step.types.length > 0
+        ? { filter: { types: step.types } }
+        : undefined;
 
       const edges =
         step.direction === 'out'
@@ -362,27 +366,5 @@ export class ReadStepExecutor {
       }
     }
     return result;
-  }
-
-  /**
-   * Build the filter argument for getEdgesFrom / getEdgesTo.
-   * Merges edge type restrictions from the pattern with property-level
-   * filters from single-variable WHERE predicates on the edge variable
-   * (e.g. WHERE r1.weight > 5).
-   */
-  private _buildEdgeFilterArg(
-    step: EdgeExpandStep,
-  ): { filter: Record<string, unknown> } | undefined {
-    const filter: Record<string, unknown> = {};
-
-    if (step.types.length > 0) {
-      filter.types = step.types;
-    }
-
-    if (step.edgePropertyFilters && step.edgePropertyFilters.length > 0) {
-      filter.properties = step.edgePropertyFilters;
-    }
-
-    return Object.keys(filter).length > 0 ? { filter } : undefined;
   }
 }
