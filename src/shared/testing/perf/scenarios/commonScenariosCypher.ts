@@ -324,7 +324,7 @@ export function buildCommonScenariosCypher(
         const engine = (meta as GraphMeta & { _engine?: CypherEngine })._engine!;
         const result = await engine.execute(
           `MATCH (p:Person)-[r1:BOUGHT]->(t:Product)-[r2:IN_CATEGORY]->(c:Category)
-           WHERE r1.weight > 5 AND p.score > 50
+           WHERE r1.weight > 5 AND p.score > 50 and r1.weight < r2.weight
            RETURN p.label AS personLabel,
                   t.label AS productLabel,
                   c.label AS categoryLabel,

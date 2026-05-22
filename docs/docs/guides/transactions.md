@@ -68,7 +68,7 @@ await engine.execute(
 
 ## With Cypher Queries
 
-Pass the transaction via `CypherEngineOptions.transaction` for consistent reads:
+Pass the transaction via `CypherQueryOptions.transaction` for consistent reads:
 
 ```typescript
 const txn = graph.createTransaction();

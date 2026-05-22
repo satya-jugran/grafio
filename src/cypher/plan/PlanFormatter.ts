@@ -88,7 +88,7 @@ export class PlanFormatter {
    * Convert plan to Mermaid flowchart syntax.
    */
   private toMermaid(plan: QueryPlan, executionStats?: PlanExecutionStats, params?: Record<string, unknown>): string {
-    const lines: string[] = ['flowchart TD'];
+    const lines: string[] = ['flowchart LR'];
     const steps = plan.steps;
 
     for (let i = 0; i < steps.length; i++) {
