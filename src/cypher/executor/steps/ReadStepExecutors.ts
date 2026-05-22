@@ -18,6 +18,7 @@ import {
 } from '../../plan/QueryPlan';
 import { UnboundParameterError } from '../../errors';
 import { Row, ExpressionEvaluator } from '../ExpressionEvaluator';
+import { parallelMap } from '../parallelMap';
 
 /**
  * Executes read-only plan steps (NodeScan, NodeSeek, EdgeExpand)
@@ -26,10 +27,16 @@ import { Row, ExpressionEvaluator } from '../ExpressionEvaluator';
 export class ReadStepExecutor {
   private readonly _graph: Graph;
   private readonly _evaluator: ExpressionEvaluator;
+  private readonly _maxDegreeOfParallelism: number;
 
-  constructor(graph: Graph, evaluator: ExpressionEvaluator) {
+  constructor(
+    graph: Graph,
+    evaluator: ExpressionEvaluator,
+    maxDegreeOfParallelism: number = 1,
+  ) {
     this._graph = graph;
     this._evaluator = evaluator;
+    this._maxDegreeOfParallelism = Math.max(1, maxDegreeOfParallelism);
   }
 
   // ── NodeScanStep ───────────────────────────────────────────────
@@ -64,15 +71,17 @@ export class ReadStepExecutor {
       ? await this._graph.getNodes({ filter: filter as any, transaction } as any) as unknown as Node[]
       : await this._graph.getNodes({ transaction } as any);
 
-    const result: Row[] = [];
-    for (const row of rows) {
-      for (const node of nodes) {
-        const newRow = new Map(row);
-        newRow.set(step.variable, node);
-        result.push(newRow);
+    return parallelMap(rows, (rowChunk) => {
+      const chunkResult: Row[] = [];
+      for (const row of rowChunk) {
+        for (const node of nodes) {
+          const newRow = new Map(row);
+          newRow.set(step.variable, node);
+          chunkResult.push(newRow);
+        }
       }
-    }
-    return result;
+      return Promise.resolve(chunkResult);
+    }, this._maxDegreeOfParallelism);
   }
 
   /**
@@ -156,15 +165,17 @@ export class ReadStepExecutor {
         nodes = [];
     }
 
-    const result: Row[] = [];
-    for (const row of rows) {
-      for (const node of nodes) {
-        const newRow = new Map(row);
-        newRow.set(step.variable, node);
-        result.push(newRow);
+    return parallelMap(rows, async (rowChunk) => {
+      const chunkResult: Row[] = [];
+      for (const row of rowChunk) {
+        for (const node of nodes) {
+          const newRow = new Map(row);
+          newRow.set(step.variable, node);
+          chunkResult.push(newRow);
+        }
       }
-    }
-    return result;
+      return chunkResult;
+    }, this._maxDegreeOfParallelism);
   }
 
   // ── EdgeExpandStep ─────────────────────────────────────────────
@@ -179,14 +190,16 @@ export class ReadStepExecutor {
     params: Record<string, unknown>,
     transaction?: GraphTransaction,
   ): Promise<Row[]> {
-    const result: Row[] = [];
-    for (const row of rows) {
-      const sourceNode = row.get(step.source) as Node | undefined;
-      if (!sourceNode) continue;
-      const expanded = await this._expandFromNode(step, row, sourceNode, transaction);
-      result.push(...expanded);
-    }
-    return result;
+    return parallelMap(rows, async (rowChunk) => {
+      const chunkResult: Row[] = [];
+      for (const row of rowChunk) {
+        const sourceNode = row.get(step.source) as Node | undefined;
+        if (!sourceNode) continue;
+        const expanded = await this._expandFromNode(step, row, sourceNode, transaction);
+        chunkResult.push(...expanded);
+      }
+      return chunkResult;
+    }, this._maxDegreeOfParallelism);
   }
 
   private async _expandFromNode(

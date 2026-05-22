@@ -11,7 +11,7 @@
  * while the internal pipeline remains permissive and extensible.
  *
  * ### Transaction support
- * Transactions can be passed via {@link CypherEngineOptions.transaction}.
+ * Transactions can be passed via {@link CypherQueryOptions.transaction}.
  * When provided, all graph operations within the query execution will use
  * that transaction, enabling consistent reads within a transaction context.
  *
@@ -32,9 +32,28 @@ import { PlanFormatter, PlanFormat } from './plan/PlanFormatter';
 import { QueryAst } from './ast/AstNode';
 
 /**
- * Options for controlling query execution behavior.
+ * Options for configuring the {@link CypherEngine} instance itself.
+ *
+ * These are set once at construction time and apply to all queries
+ * executed through the engine.
  */
 export interface CypherEngineOptions {
+  /**
+   * Maximum number of row chunks to process concurrently.
+   *
+   * Default: `1` (serial execution). Values greater than `1` enable
+   * parallel row processing for NodeScan, NodeSeek, EdgeExpand,
+   * Filter, and Project steps.
+   */
+  maxDegreeOfParallelism?: number;
+}
+
+/**
+ * Options for controlling per-query execution behavior.
+ *
+ * Passed to {@link CypherEngine.execute} to influence a single query.
+ */
+export interface CypherQueryOptions {
   /**
    * If provided, the query will be executed within this transaction,
    * enabling consistent reads within a transaction context.
@@ -88,13 +107,19 @@ const GATED_TOKENS: ReadonlySet<TokenKind> = new Set([
  */
 export class CypherEngine {
   private readonly _graph: Graph;
+  private readonly _maxDegreeOfParallelism: number;
 
-  constructor(graph: Graph) {
+  /**
+   * @param graph   - The Graph instance to query against.
+   * @param options - Engine-level configuration options.
+   */
+  constructor(graph: Graph, options?: CypherEngineOptions) {
     this._graph = graph;
+    this._maxDegreeOfParallelism = Math.max(1, options?.maxDegreeOfParallelism ?? 1);
   }
 
-  public async execute(query: string, options?: CypherEngineOptions): Promise<CypherResult & { executionPlan?: string }>;
-  public async execute(query: string, params: Record<string, unknown>, options?: CypherEngineOptions): Promise<CypherResult & { executionPlan?: string }>;
+  public async execute(query: string, options?: CypherQueryOptions): Promise<CypherResult & { executionPlan?: string }>;
+  public async execute(query: string, params: Record<string, unknown>, options?: CypherQueryOptions): Promise<CypherResult & { executionPlan?: string }>;
 
   /**
    * Parse, plan, and execute a read-only Cypher query string.
@@ -111,19 +136,20 @@ export class CypherEngine {
    */
   public async execute(
     query: string,
-    params: Record<string, unknown> | CypherEngineOptions,
-    options?: CypherEngineOptions,
+    params: Record<string, unknown> | CypherQueryOptions,
+    options?: CypherQueryOptions,
   ): Promise<CypherResult & { executionPlan?: string }> {
 
     // Handle overloaded signature where options may be passed as the second argument
     let _params: Record<string, unknown> = {};
-    let _options: CypherEngineOptions | undefined = options;
-    if (typeof params === 'object' && !Array.isArray(params) && !('executionPlan' in params)) {
+    let _options: CypherQueryOptions | undefined = options;
+    let _CypherQueryOptionsKeys: (keyof CypherQueryOptions)[] = ['transaction', 'executionPlan'];
+    if (typeof params === 'object' && !Array.isArray(params) && !_CypherQueryOptionsKeys.some(key => key in params)) {
       _params = params as Record<string, unknown>;
       _options = options;
-    } else if (typeof params === 'object' && !Array.isArray(params) && 'executionPlan' in params) {
+    } else if (typeof params === 'object' && !Array.isArray(params) && _CypherQueryOptionsKeys.some(key => key in params)) {
       _params = {};
-      _options = params as CypherEngineOptions;
+      _options = params as CypherQueryOptions;
     }
 
 
@@ -147,7 +173,7 @@ export class CypherEngine {
     const plan = await planner.plan(rawAst);
 
     // ── 6. Execute ────────────────────────────────────────────────
-    const executor = new Executor(this._graph);
+    const executor = new Executor(this._graph, this._maxDegreeOfParallelism);
     const result = await executor.execute(plan, _params, _options?.transaction);
 
     // ── 7. Format execution plan if requested ───────────────────

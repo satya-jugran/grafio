@@ -14,6 +14,7 @@ import {
   LimitStep,
 } from '../../plan/QueryPlan';
 import { Row, ExpressionEvaluator } from '../ExpressionEvaluator';
+import { parallelMap } from '../parallelMap';
 
 /**
  * Executes pure pipeline (row-transformation) steps.
@@ -23,38 +24,49 @@ import { Row, ExpressionEvaluator } from '../ExpressionEvaluator';
  */
 export class PipelineStepExecutor {
   private readonly _evaluator: ExpressionEvaluator;
+  private readonly _maxDegreeOfParallelism: number;
 
-  constructor(evaluator: ExpressionEvaluator) {
+  constructor(
+    evaluator: ExpressionEvaluator,
+    maxDegreeOfParallelism: number = 1,
+  ) {
     this._evaluator = evaluator;
+    this._maxDegreeOfParallelism = Math.max(1, maxDegreeOfParallelism);
   }
 
   // ── FilterStep ─────────────────────────────────────────────────
 
-  executeFilter(
+  async executeFilter(
     step: FilterStep,
     rows: Row[],
     params: Record<string, unknown>,
-  ): Row[] {
-    return rows.filter((row) => {
-      const result = this._evaluator.evaluate(step.predicate, row, params);
-      return Boolean(result);
-    });
+  ): Promise<Row[]> {
+    return parallelMap(rows, (chunk) => {
+      const filtered = chunk.filter((row) => {
+        const result = this._evaluator.evaluate(step.predicate, row, params);
+        return Boolean(result);
+      });
+      return Promise.resolve(filtered);
+    }, this._maxDegreeOfParallelism);
   }
 
   // ── ProjectStep ────────────────────────────────────────────────
 
-  executeProject(
+  async executeProject(
     step: ProjectStep,
     rows: Row[],
     params: Record<string, unknown>,
-  ): Row[] {
-    const projected = rows.map((row) => {
-      const newRow = new Map<string, unknown>();
-      for (const col of step.columns) {
-        newRow.set(col.alias, this._evaluator.evaluate(col.expression, row, params));
-      }
-      return newRow;
-    });
+  ): Promise<Row[]> {
+    const projected = await parallelMap(rows, (chunk) => {
+      const mapped = chunk.map((row) => {
+        const newRow = new Map<string, unknown>();
+        for (const col of step.columns) {
+          newRow.set(col.alias, this._evaluator.evaluate(col.expression, row, params));
+        }
+        return newRow;
+      });
+      return Promise.resolve(mapped);
+    }, this._maxDegreeOfParallelism);
 
     if (!step.distinct) return projected;
 

@@ -186,6 +186,17 @@ describe('Executor', () => {
       expect(names).toContain('Charlie');
     });
 
+    it('follow [rel*1..2] with edge variable', async () => {
+      const graph = await buildSocialGraph();
+      const result = await executeQuery(
+        "MATCH (a:Person)-[rel*1..2]->(b:Person) WHERE a.name = 'Alice' RETURN b.name AS name, rel.since as since ORDER BY b.name ASC",
+        {},
+        graph,
+      );
+      expect(result.rows.filter((r) => r.name === 'Bob')[0].since).toBe(2019);
+      expect(result.rows.filter((r) => r.name === 'Charlie')[0].since).toBe(2020);
+    });
+
     it('follows [*2] exact 2-hop', async () => {
       const graph = await buildSocialGraph();
       const result = await executeQuery(
