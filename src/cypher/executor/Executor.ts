@@ -51,6 +51,7 @@ import { IndexStepExecutor } from './steps/IndexStepExecutors';
  */
 export class Executor {
   private readonly _graph: Graph;
+  private readonly _maxDegreeOfParallelism: number;
 
   // ── Sub-executors ──────────────────────────────────────────────
 
@@ -72,11 +73,12 @@ export class Executor {
   private _indexesCreated = 0;
   private _indexesDeleted = 0;
 
-  constructor(graph: Graph) {
+  constructor(graph: Graph, maxDegreeOfParallelism: number = 1) {
     this._graph = graph;
+    this._maxDegreeOfParallelism = Math.max(1, maxDegreeOfParallelism);
     this._evaluator = new ExpressionEvaluator();
-    this._readExecutor = new ReadStepExecutor(graph, this._evaluator);
-    this._pipelineExecutor = new PipelineStepExecutor(this._evaluator);
+    this._readExecutor = new ReadStepExecutor(graph, this._evaluator, this._maxDegreeOfParallelism);
+    this._pipelineExecutor = new PipelineStepExecutor(this._evaluator, this._maxDegreeOfParallelism);
     this._aggregateExecutor = new AggregateStepExecutor(graph, this._evaluator);
     this._writeExecutor = new WriteStepExecutor(graph, this._evaluator);
     this._deleteExecutor = new DeleteStepExecutor(graph);
