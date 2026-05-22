@@ -43,6 +43,7 @@ export class PatternPlanner {
     steps: PlanStep[],
     ast: QueryAst,
     perVar: Map<string, PropertyFilter[]>,
+    perEdgeVar?: Map<string, PropertyFilter[]>,
     idLookups?: Map<string, unknown>,
     consumed?: Set<string>,
   ): void {
@@ -65,7 +66,7 @@ export class PatternPlanner {
         variable: firstVar,
       });
       consumed?.add(firstNode.variable);
-      this._planTrailingSegments(segments, steps, ast, pattern);
+      this._planTrailingSegments(segments, steps, ast, pattern, perEdgeVar);
       this._emitPerVarFilters(firstNode.variable, perVar, steps);
       return;
     }
@@ -96,13 +97,13 @@ export class PatternPlanner {
           direction: revDirection,
         };
 
-        this.planEdgeExpand(reversedEdge, firstNode, steps, ast, pathVar);
+        this.planEdgeExpand(reversedEdge, firstNode, steps, ast, pathVar, perEdgeVar);
 
         // Handle any remaining segments after the first edge→node pair
         for (let i = 3; i < segments.length; i += 2) {
           const edge = segments[i] as EdgePattern;
           const nextNode = segments[i + 1] as NodePattern;
-          this.planEdgeExpand(edge, nextNode, steps, ast, pathVar);
+          this.planEdgeExpand(edge, nextNode, steps, ast, pathVar, perEdgeVar);
         }
         this._emitPerVarFilters(firstNode.variable, perVar, steps);
         return;
@@ -116,7 +117,7 @@ export class PatternPlanner {
     for (let i = 1; i < segments.length; i += 2) {
       const edge = segments[i] as EdgePattern;
       const targetNode = segments[i + 1] as NodePattern;
-      this.planEdgeExpand(edge, targetNode, steps, ast, pathVar);
+      this.planEdgeExpand(edge, targetNode, steps, ast, pathVar, perEdgeVar);
     }
   }
 
@@ -163,6 +164,7 @@ export class PatternPlanner {
     steps: PlanStep[],
     ast: QueryAst,
     pathVar?: string,
+    perEdgeVar?: Map<string, PropertyFilter[]>,
   ): void {
     const source = this._findLastNodeVar(steps);
     const target =
@@ -201,6 +203,16 @@ export class PatternPlanner {
       expandStep.targetTypes = targetNode.labels;
     }
 
+    // Apply per-edge-variable WHERE predicates (e.g. r1.weight > 5)
+    // to EdgeExpandStep.edgePropertyFilters so the executor can push
+    // them into the storage-layer getEdgesFrom / getEdgesTo call.
+    if (edgeVar && perEdgeVar) {
+      const edgeFilters = perEdgeVar.get(edgeVar);
+      if (edgeFilters && edgeFilters.length > 0) {
+        expandStep.edgePropertyFilters = edgeFilters;
+      }
+    }
+
     steps.push(expandStep);
 
     // Emit FilterStep for inline properties on the edge pattern.
@@ -225,12 +237,13 @@ export class PatternPlanner {
     steps: PlanStep[],
     ast: QueryAst,
     pattern: PatternPath | NamedPath,
+    perEdgeVar?: Map<string, PropertyFilter[]>,
   ): void {
     const pathVar = pattern.kind === 'NamedPath' ? pattern.name : undefined;
     for (let i = 1; i < segments.length; i += 2) {
       const edge = segments[i] as EdgePattern;
       const targetNode = segments[i + 1] as NodePattern;
-      this.planEdgeExpand(edge, targetNode, steps, ast, pathVar);
+      this.planEdgeExpand(edge, targetNode, steps, ast, pathVar, perEdgeVar);
     }
   }
 

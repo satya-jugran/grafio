@@ -69,9 +69,9 @@ export class Planner {
       ast.match.patterns,
     );
 
-    const { perVar, crossVar } = ast.where
+    const { perVar, perEdgeVar, crossVar } = ast.where
       ? this._whereDecomposer.decompose(ast.where.expression, varRegistry)
-      : { perVar: new Map(), crossVar: [] as Expression[] };
+      : { perVar: new Map(), perEdgeVar: new Map(), crossVar: [] as Expression[] };
 
     // ── 2. Detect id(n)=value for NodeSeekStep ────────────────────
     const idLookups = this._reorderer.detectIdLookups(crossVar, varRegistry);
@@ -91,7 +91,7 @@ export class Planner {
     // crossVar and become a FilterStep.
     const consumed = new Set<string>();
     for (const pattern of orderedPatterns) {
-      this._patternPlanner.planPath(pattern, steps, ast, perVar, idLookups, consumed);
+      this._patternPlanner.planPath(pattern, steps, ast, perVar, perEdgeVar, idLookups, consumed);
     }
 
     // ── 5. Remove consumed id-lookups from crossVar ────────────────
