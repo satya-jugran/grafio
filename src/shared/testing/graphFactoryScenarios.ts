@@ -120,8 +120,8 @@ export function runGraphFactoryScenarios(
 
         const data = {
           nodes: [
-            { id: 'node-1', type: 'Person', properties: { name: 'Alice' } },
-            { id: 'node-2', type: 'Person', properties: { name: 'Bob' } },
+            { id: 'node-1', labels: ['Person'], properties: { name: 'Alice' } },
+            { id: 'node-2', labels: ['Person'], properties: { name: 'Bob' } },
           ],
           edges: [
             { id: 'edge-1', type: 'KNOWS', sourceId: 'node-1', targetId: 'node-2', properties: {} },
@@ -143,7 +143,7 @@ export function runGraphFactoryScenarios(
       it('should use default graphId when not provided', async () => {
         const data = {
           nodes: [
-            { id: 'node-1', type: 'Thing', properties: { value: 42 } },
+            { id: 'node-1', labels: ['Thing'], properties: { value: 42 } },
           ],
           edges: [],
         };

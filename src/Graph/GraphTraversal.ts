@@ -37,7 +37,7 @@ export class GraphTraversal {
       const targetNode = await this._store.getNode(edge.targetId);
       if (!targetNode) continue;
       const shouldFilterNode = nodeTypes.length > 0 && !nodeTypes.includes('*');
-      if (shouldFilterNode && !nodeTypes.includes(targetNode.type)) {
+      if (shouldFilterNode && !targetNode.labels.some(l => nodeTypes.includes(l))) {
         continue;
       }
 

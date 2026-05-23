@@ -503,10 +503,10 @@ export function runSocialGraphScenarios(provider?: IStorageProvider): void {
       it('should preserve all node types during serialization', async () => {
         const json = await graph.exportJSON();
 
-        const personNodes = json.nodes.filter(n => n.type === 'Person');
-        const postNodes = json.nodes.filter(n => n.type === 'Post');
-        const photoNodes = json.nodes.filter(n => n.type === 'Photo');
-        const commentNodes = json.nodes.filter(n => n.type === 'Comment');
+        const personNodes = json.nodes.filter(n => n.labels.includes('Person'));
+        const postNodes = json.nodes.filter(n => n.labels.includes('Post'));
+        const photoNodes = json.nodes.filter(n => n.labels.includes('Photo'));
+        const commentNodes = json.nodes.filter(n => n.labels.includes('Comment'));
 
         expect(personNodes).toHaveLength(10);
         expect(postNodes).toHaveLength(7);

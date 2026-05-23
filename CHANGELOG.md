@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.4.0]
+
+### 💥 Breaking Changes
+
+1. **Multi-label support for nodes — `Node.type` replaced with `Node.labels`**
+   - `Node.type` (singular `string`) removed in favor of `Node.labels` (plural `readonly string[]`)
+   - `new Node(labels, properties)` now accepts `string | readonly string[]` for labels
+   - `Graph.addNode(labels, properties)` now accepts `string | string[]` for labels
+   - `NodeData.type` replaced with `NodeData.labels: string[]`
+   - Storage filter semantics: `filter.types` matches if ANY node label matches ANY filter type (openCypher OR semantics)
+   - All storage providers index each label separately for efficient label-based filtering
+   - `GraphToMermaid` renders multi-label nodes as `Label1:Label2`
+   - Cypher `labels(n)` function already returns `string[]`; `CREATE (n:Person|Employee)` now stores both labels
+
+### ✨ New Features
+
+1. **Multi-label nodes**
+   - Nodes can now have multiple labels: `await graph.addNode(['Person', 'Employee'], { name: 'Alice' })`
+   - Filtering supports multi-label matching: `graph.getNodes({ filter: { types: ['Person'] } })` matches nodes with ANY of their labels in the filter
+2. **labels() and type() functions**
+   - Two new functions node labels() and edge type() are now supported.
+
 ## [7.3.0] - 2026-05-22
 
 ### ✨ New Features

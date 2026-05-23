@@ -18,13 +18,13 @@ readonly id: string
 
 Unique identifier (auto-generated UUID).
 
-### type
+### labels
 
 ```typescript
-readonly type: string
+readonly labels: readonly string[]
 ```
 
-The node type label (e.g., 'Person', 'Course').
+The node's labels (e.g., `['Person']` or `['Person', 'Employee']`).
 
 ### properties
 
@@ -49,7 +49,9 @@ Converts the node to a JSON-serializable object.
 ```typescript
 interface NodeData {
   id: string;
-  type: string;
+  labels: string[];
+  createdOn?: number;
+  updatedOn?: number;
   properties: Record<string, Primitive>;
 }
 ```
@@ -57,18 +59,26 @@ interface NodeData {
 ## Example
 
 ```typescript
+// Single-label node
 const node = await graph.addNode('Person', { name: 'Alice', age: 30 });
 
 console.log(node.id);         // 'uuid-xxxx-xxxx'
-console.log(node.type);       // 'Person'
+console.log(node.labels);     // ['Person']
 console.log(node.properties); // { name: 'Alice', age: 30 }
+
+// Multi-label node
+const multiLabel = await graph.addNode(['Person', 'Employee'], { name: 'Bob' });
+
+console.log(multiLabel.labels); // ['Person', 'Employee']
 
 // Serialize
 const json = node.toJSON();
 /*
 {
   id: 'uuid-xxxx-xxxx',
-  type: 'Person',
+  labels: ['Person'],
+  createdOn: 1700000000000,
+  updatedOn: 1700000000000,
   properties: { name: 'Alice', age: 30 }
 }
 */

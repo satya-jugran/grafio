@@ -159,7 +159,7 @@ export function runGraphPropertiesScenarios(
 
         const results = await graph.getNodes({ filter: { types: ['Person'], properties: [{ key: 'email', value: 'alice@example.com' }] } });
         expect(results).toHaveLength(1);
-        expect(results[0].type).toBe('Person');
+        expect(results[0].labels).toEqual(['Person']);
       });
 
       it('should create simple index with type=*', async () => {
@@ -171,7 +171,7 @@ export function runGraphPropertiesScenarios(
 
         const results = await graph.getNodes({ filter: { properties: [{ key: 'email', value: 'math@example.com' }] } });
         expect(results).toHaveLength(1);
-        expect(results[0].type).toBe('Course');
+        expect(results[0].labels).toEqual(['Course']);
       });
     });
 

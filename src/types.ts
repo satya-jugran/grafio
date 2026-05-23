@@ -91,7 +91,7 @@ export interface StorageQueryOptions extends QueryOptions {
  */
 export interface NodeData {
   id: string;
-  type: string;
+  labels: string[];
   createdOn?: number;
   updatedOn?: number;
   properties: Record<string, unknown>;

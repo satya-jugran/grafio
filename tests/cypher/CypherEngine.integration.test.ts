@@ -489,7 +489,7 @@ describe('CypherEngine Integration', () => {
         expect(row.cnt).toBeGreaterThan(1);
       }
     });
-    
+
   });
 
   describe('id() function', () => {
@@ -702,6 +702,191 @@ describe('CypherEngine Integration', () => {
     });
   });
 
+  describe('labels() function', () => {
+    it('returns the label of a node as a single-element array', async () => {
+      const graph = new Graph();
+      await buildSocialGraph(graph);
+      const engine = new CypherEngine(graph);
+
+      const result = await engine.execute(
+        'MATCH (p:Person {name: "Alice"}) RETURN labels(p) AS label',
+      );
+      expect(result.rows).toHaveLength(1);
+      expect(Array.isArray(result.rows[0].label)).toBe(true);
+      expect(result.rows[0].label).toEqual(['Person']);
+    });
+
+    it('returns labels for all matched nodes', async () => {
+      const graph = new Graph();
+      await buildSocialGraph(graph);
+      const engine = new CypherEngine(graph);
+
+      const result = await engine.execute(
+        'MATCH (p:Person) RETURN labels(p) AS label ORDER BY p.name ASC',
+      );
+      expect(result.rows).toHaveLength(8);
+      for (const row of result.rows) {
+        expect(row.label).toEqual(['Person']);
+      }
+    });
+
+    it('can use labels() in a WHERE clause with IN', async () => {
+      const graph = new Graph();
+      await buildSocialGraph(graph);
+      const engine = new CypherEngine(graph);
+
+      const result = await engine.execute(
+        "MATCH (p) WHERE 'Person' IN labels(p) RETURN p.name AS name ORDER BY p.name ASC",
+      );
+      expect(result.rows.length).toBeGreaterThan(0);
+      // All 8 Person nodes should match
+      expect(result.rows).toHaveLength(8);
+    });
+
+    it('returns null for labels(null)', async () => {
+      const graph = new Graph();
+      await buildSocialGraph(graph);
+      const engine = new CypherEngine(graph);
+
+      const result = await engine.execute(
+        'MATCH (p:Person) RETURN labels(null) AS result',
+      );
+      expect(result.rows.length).toBeGreaterThan(0);
+      expect(result.rows[0].result).toBeNull();
+    });
+
+    it('throws for labels() with wrong number of args', async () => {
+      const graph = new Graph();
+      await buildSocialGraph(graph);
+      const engine = new CypherEngine(graph);
+
+      await expect(
+        engine.execute('MATCH (p:Person) RETURN labels() AS result'),
+      ).rejects.toThrow(/labels\(\) expects exactly 1 argument/);
+    });
+
+    it('throws for labels() when argument is not a node', async () => {
+      const graph = new Graph();
+      await buildSocialGraph(graph);
+      const engine = new CypherEngine(graph);
+
+      await expect(
+        engine.execute('MATCH (p:Person) RETURN labels(42) AS result'),
+      ).rejects.toThrow(/labels\(\) requires a node argument/);
+    });
+
+    it('works with education graph multi-type nodes', async () => {
+      const graph = new Graph();
+      await buildEducationGraph(graph);
+      const engine = new CypherEngine(graph);
+
+      // Student nodes
+      const studentResult = await engine.execute(
+        "MATCH (s:Student {name: 'Alice'}) RETURN labels(s) AS label",
+      );
+      expect(studentResult.rows[0].label).toEqual(['Student']);
+
+      // Course nodes
+      const courseResult = await engine.execute(
+        "MATCH (c:Course {name: 'Graph Theory'}) RETURN labels(c) AS label",
+      );
+      expect(courseResult.rows[0].label).toEqual(['Course']);
+
+      // Teacher nodes
+      const teacherResult = await engine.execute(
+        "MATCH (t:Teacher {name: 'Dr. Smith'}) RETURN labels(t) AS label",
+      );
+      expect(teacherResult.rows[0].label).toEqual(['Teacher']);
+    });
+  });
+
+  describe('type() function', () => {
+    it('returns the type of a relationship', async () => {
+      const graph = new Graph();
+      await buildSocialGraph(graph);
+      const engine = new CypherEngine(graph);
+
+      const result = await engine.execute(
+        "MATCH (a:Person {name: 'Alice'})-[r]->(b:Person) RETURN type(r) AS relType",
+      );
+      expect(result.rows.length).toBeGreaterThan(0);
+      for (const row of result.rows) {
+        expect(row.relType).toBe('KNOWS');
+      }
+    });
+
+    it('can use type() in a WHERE clause', async () => {
+      const graph = new Graph();
+      await buildSocialGraph(graph);
+      const engine = new CypherEngine(graph);
+
+      const result = await engine.execute(
+        "MATCH (a:Person)-[r]->(b:Person) WHERE type(r) = 'KNOWS' RETURN a.name AS name ORDER BY a.name ASC",
+      );
+      expect(result.rows.length).toBeGreaterThan(0);
+      // Each name appears once per relationship
+      expect(result.rows.map((r) => r.name)).toContain('Alice');
+      expect(result.rows.map((r) => r.name)).toContain('Bob');
+    });
+
+    it('returns null for type(null)', async () => {
+      const graph = new Graph();
+      await buildSocialGraph(graph);
+      const engine = new CypherEngine(graph);
+
+      const result = await engine.execute(
+        'MATCH (p:Person) RETURN type(null) AS result',
+      );
+      expect(result.rows.length).toBeGreaterThan(0);
+      expect(result.rows[0].result).toBeNull();
+    });
+
+    it('throws for type() with wrong number of args', async () => {
+      const graph = new Graph();
+      await buildSocialGraph(graph);
+      const engine = new CypherEngine(graph);
+
+      await expect(
+        engine.execute('MATCH (a)-[r]->(b) RETURN type(r, a) AS result'),
+      ).rejects.toThrow(/type\(\) expects exactly 1 argument/);
+    });
+
+    it('throws for type() when argument is not a relationship', async () => {
+      const graph = new Graph();
+      await buildSocialGraph(graph);
+      const engine = new CypherEngine(graph);
+
+      await expect(
+        engine.execute('MATCH (p:Person) RETURN type(p) AS result'),
+      ).rejects.toThrow(/type\(\) requires a relationship argument/);
+    });
+
+    it('works with different relationship types in education graph', async () => {
+      const graph = new Graph();
+      await buildEducationGraph(graph);
+      const engine = new CypherEngine(graph);
+
+      // ENROLLED relationships
+      const enrolledResult = await engine.execute(
+        "MATCH (s:Student {name: 'Alice'})-[r]->(c:Course) RETURN type(r) AS relType",
+      );
+      expect(enrolledResult.rows.length).toBeGreaterThan(0);
+      for (const row of enrolledResult.rows) {
+        expect(row.relType).toBe('ENROLLED');
+      }
+
+      // TEACHES relationships
+      const teachesResult = await engine.execute(
+        "MATCH (t:Teacher {name: 'Dr. Smith'})-[r]->(c:Course) RETURN type(r) AS relType",
+      );
+      expect(teachesResult.rows.length).toBeGreaterThan(0);
+      for (const row of teachesResult.rows) {
+        expect(row.relType).toBe('TEACHES');
+      }
+    });
+  });
+
+
   describe('getQueryPlan', () => {
     let graph: Graph;
     let engine: CypherEngine;
@@ -872,7 +1057,7 @@ describe('CypherEngine Integration', () => {
 
       expect(result.rows).toHaveLength(1);
       const created = result.rows[0].n as Node;
-      expect(created.type).toContain('Person');
+      expect(created.labels).toContain('Person');
       expect(created.properties.name).toBe('Ivy');
       expect(created.properties.age).toBe(24);
       expect(created.properties.city).toBe('Miami');
@@ -890,7 +1075,7 @@ describe('CypherEngine Integration', () => {
       const result = await engine.execute(
         "MATCH (a:Person {name: 'Alice'}), (b:Person {name: 'Ivy'}) CREATE (a)-[r:KNOWS {since: 2021}]->(b) RETURN r",
       );
-      
+
       expect(result.rows).toHaveLength(1);
       const created = result.rows[0].r as Edge;
       expect(created.type).toBe('KNOWS');

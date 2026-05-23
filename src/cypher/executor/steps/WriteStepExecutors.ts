@@ -158,7 +158,7 @@ export class WriteStepExecutor {
       if (step.entityKind === 'node') {
         const n = entity as Node;
         updatedEntity = new Node(
-          n.type, updatedProperties, n.id, n.createdOn, updatedOn,
+          n.labels, updatedProperties, n.id, n.createdOn, updatedOn,
         );
       } else {
         const e = entity as Edge;

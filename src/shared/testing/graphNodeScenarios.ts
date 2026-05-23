@@ -42,7 +42,7 @@ export function runGraphNodeScenarios(
     it('should add a node without properties', async () => {
       const node = await graph.addNode('Person', { name: 'Alice' });
       expect(node.id).toBeDefined();
-      expect(node.type).toBe('Person');
+      expect(node.labels).toEqual(['Person']);
       expect(node.properties.name).toBe('Alice');
       expect(node.properties).toEqual({ name: 'Alice' });
     });
@@ -51,7 +51,7 @@ export function runGraphNodeScenarios(
       const properties = { name: 'Alice', age: 30, city: 'NYC' };
       const node = await graph.addNode('Person', properties);
       expect(node.id).toBeDefined();
-      expect(node.type).toBe('Person');
+      expect(node.labels).toEqual(['Person']);
       expect(node.properties).toEqual({ name: 'Alice', age: 30, city: 'NYC' });
     });
 

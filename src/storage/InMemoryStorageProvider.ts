@@ -357,7 +357,9 @@ export class InMemoryStorageProvider implements IStorageProvider {
       // Transaction active: write to overlay
       overlay.nodes.set(nodeToInsert.id, nodeToInsert);
       // Update overlay indexes
-      this._overlayAddToIndex(overlay.nodesByType, nodeToInsert.type, nodeToInsert.id);
+      for (const label of nodeToInsert.labels) {
+        this._overlayAddToIndex(overlay.nodesByType, label, nodeToInsert.id);
+      }
       this._overlayIndexNodeProperties(overlay, nodeToInsert);
     } else {
       // No transaction: modify live state directly
@@ -373,11 +375,13 @@ export class InMemoryStorageProvider implements IStorageProvider {
     const stored = skipClone ? node : deepClone(node);
     this._nodes.set(node.id, stored);
 
-    // Type index
-    if (!this._nodesByType.has(node.type)) {
-      this._nodesByType.set(node.type, new Set());
+    // Label index (index each label separately for multi-label nodes)
+    for (const label of node.labels) {
+      if (!this._nodesByType.has(label)) {
+        this._nodesByType.set(label, new Set());
+      }
+      this._nodesByType.get(label)!.add(node.id);
     }
-    this._nodesByType.get(node.type)!.add(node.id);
 
     // Property value index
     this._indexNodeProperties(stored);
@@ -395,11 +399,13 @@ export class InMemoryStorageProvider implements IStorageProvider {
       const node = this._nodes.get(id);
       if (!node) return;
 
-      // Type index
-      const typeSet = this._nodesByType.get(node.type);
-      if (typeSet) {
-        typeSet.delete(id);
-        if (typeSet.size === 0) this._nodesByType.delete(node.type);
+      // Label index (unindex each label)
+      for (const label of node.labels) {
+        const typeSet = this._nodesByType.get(label);
+        if (typeSet) {
+          typeSet.delete(id);
+          if (typeSet.size === 0) this._nodesByType.delete(label);
+        }
       }
 
       // Property value index
@@ -978,8 +984,11 @@ export class InMemoryStorageProvider implements IStorageProvider {
     record.updatedOn = Date.now();
 
     if (isOverlay && overlay) {
-      const map = target === 'node' ? overlay.nodes : overlay.edges;
-      map.set(id, record);
+      if (target === 'node') {
+        overlay.nodes.set(id, record as NodeData);
+      } else {
+        overlay.edges.set(id, record as EdgeData);
+      }
       const serialized = this._propKey(value);
       const propIndex = target === 'node' ? overlay.nodesByProperty : overlay.edgesByProperty;
       let keyMap = propIndex.get(key);
@@ -1060,8 +1069,11 @@ export class InMemoryStorageProvider implements IStorageProvider {
     record.updatedOn = Date.now();
 
     if (isOverlay && overlay) {
-      const map = target === 'node' ? overlay.nodes : overlay.edges;
-      map.set(id, record);
+      if (target === 'node') {
+        overlay.nodes.set(id, record as NodeData);
+      } else {
+        overlay.edges.set(id, record as EdgeData);
+      }
       // Update overlay property index: remove from old, add to new
       const propIndex = target === 'node' ? overlay.nodesByProperty : overlay.edgesByProperty;
       const serialized = this._propKey(oldValue);
@@ -1145,8 +1157,11 @@ export class InMemoryStorageProvider implements IStorageProvider {
     record.updatedOn = Date.now();
 
     if (isOverlay && overlay) {
-      const map = target === 'node' ? overlay.nodes : overlay.edges;
-      map.set(id, record);
+      if (target === 'node') {
+        overlay.nodes.set(id, record as NodeData);
+      } else {
+        overlay.edges.set(id, record as EdgeData);
+      }
       const propIndex = target === 'node' ? overlay.nodesByProperty : overlay.edgesByProperty;
       const serialized = this._propKey(oldValue);
       const keyMap = propIndex.get(key);
@@ -1230,8 +1245,11 @@ export class InMemoryStorageProvider implements IStorageProvider {
     record.properties = {};
 
     if (isOverlay && overlay) {
-      const map = target === 'node' ? overlay.nodes : overlay.edges;
-      map.set(id, record);
+      if (target === 'node') {
+        overlay.nodes.set(id, record as NodeData);
+      } else {
+        overlay.edges.set(id, record as EdgeData);
+      }
     }
   }
 
@@ -1419,9 +1437,10 @@ export class InMemoryStorageProvider implements IStorageProvider {
 
     const { filter } = options;
 
-    // Check type filter (OR within types)
+    // Check type filter (OR within types — node matches if ANY of its labels is in filter.types)
     if (filter.types && filter.types.length > 0) {
-      if (!filter.types.includes(node.type)) {
+      const hasMatchingLabel = node.labels.some((label) => filter.types!.includes(label));
+      if (!hasMatchingLabel) {
         return false;
       }
     }

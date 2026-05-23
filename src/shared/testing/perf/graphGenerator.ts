@@ -50,14 +50,14 @@ export async function buildGraph(
   const heapBefore = process.memoryUsage().heapUsed;
 
   // ── Collect nodes and edges ───────────────────────────────────────────────
-  const nodes: Array<{ id: string; type: string; properties: Record<string, unknown> }> = [];
+  const nodes: Array<{ id: string; labels: string[]; properties: Record<string, unknown> }> = [];
   const edges: Array<{ id: string; sourceId: string; targetId: string; type: string; properties: Record<string, unknown> }> = [];
 
   for (let i = 0; i < nodeCount; i++) {
     const type = NODE_TYPES[i % NODE_TYPES.length];
     nodes.push({
       id: `n${i}`,
-      type,
+      labels: [type],
       properties: {
         index: i,
         label: `${type}-${i}`,
@@ -129,11 +129,11 @@ async function buildDag(
   rng: () => number,
   graphId = 'default'
 ): Promise<{ graph: Graph; nodeIds: string[] }> {
-  const dagNodes: Array<{ id: string; type: string; properties: Record<string, unknown> }> = [];
+  const dagNodes: Array<{ id: string; labels: string[]; properties: Record<string, unknown> }> = [];
   const dagEdges: Array<{ id: string; sourceId: string; targetId: string; type: string; properties: Record<string, unknown> }> = [];
 
   for (let i = 0; i < nodeCount; i++) {
-    dagNodes.push({ id: `dag${i}`, type: 'DAGNode', properties: { index: i } });
+    dagNodes.push({ id: `dag${i}`, labels: ['DAGNode'], properties: { index: i } });
   }
 
   let edgeCount = 0;

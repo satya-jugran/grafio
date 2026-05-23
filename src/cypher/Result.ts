@@ -3,7 +3,7 @@
  *
  * Returned `Node` and `Edge` objects are the same classes from
  * {@link src/Node.ts} and {@link src/Edge.ts}, so consumers can call
- * `.id`, `.type`, `.properties` directly on result values.
+ * `.id`, `.labels`, `.properties` directly on result values.
  *
  * @module cypher/Result
  */

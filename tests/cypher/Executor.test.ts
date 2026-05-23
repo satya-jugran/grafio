@@ -116,7 +116,7 @@ describe('Executor', () => {
 
       const node = result.rows[0].p as unknown as Node;
       expect(node).toBeInstanceOf(Node);
-      expect(node.type).toBe('Person');
+      expect(node.labels).toEqual(['Person']);
     });
   });
 
@@ -1209,7 +1209,7 @@ describe('Executor', () => {
       );
       expect(result.rows).toHaveLength(1);
       const node = result.rows[0].n as Node;
-      expect(node.type).toBe('Person');
+      expect(node.labels).toEqual(['Person']);
       expect(node.properties).toEqual({ name: 'Alice' });
       expect(result.summary.nodesCreated).toBe(1);
     });
@@ -1223,14 +1223,14 @@ describe('Executor', () => {
 
       expect(result.rows).toHaveLength(1);
       const node = result.rows[0].n as Node;
-      expect(node.type).toBe('Person');
+      expect(node.labels).toEqual(['Person']);
       expect(node.properties).toEqual({ name: 'Alice' });
       expect(result.summary.nodesCreated).toBe(1);
 
       // Verify node was persisted to the graph
       const nodes = await graph.getNodes();
       expect(nodes).toHaveLength(1);
-      expect(nodes[0].type).toBe('Person');
+      expect(nodes[0].labels).toEqual(['Person']);
       expect(nodes[0].properties).toEqual({ name: 'Alice' });
     });
 
@@ -1243,7 +1243,7 @@ describe('Executor', () => {
 
       const nodes = result.rows.map((r) => r.n as Node);
       expect(nodes).toHaveLength(1);
-      expect(nodes[0].type).toBe('Person');
+      expect(nodes[0].labels).toEqual(['Person']);
       expect(nodes[0].properties.name).toBe('Bob');
       expect(nodes[0].properties.age).toBe(30);
     });
@@ -1276,11 +1276,11 @@ describe('Executor', () => {
       expect(result.rows).toHaveLength(1);
 
       const a = result.rows[0].a as Node;
-      expect(a.type).toBe('Person');
+      expect(a.labels).toEqual(['Person']);
       expect(a.properties).toEqual({ name: 'Alice' });
 
       const b = result.rows[0].b as Node;
-      expect(b.type).toBe('Person');
+      expect(b.labels).toEqual(['Person']);
       expect(b.properties).toEqual({ name: 'Bob' });
 
       expect(result.summary.nodesCreated).toBe(2);
@@ -1307,7 +1307,7 @@ describe('Executor', () => {
         graph,
       );
       const deletedNode = result.rows[0].n as Node;
-      expect(deletedNode.type).toBe('Person');
+      expect(deletedNode.labels).toEqual(['Person']);
       expect(deletedNode.properties).toEqual({ name: 'Alice' });
 
       expect(result.summary.nodesDeleted).toBeGreaterThanOrEqual(1);
