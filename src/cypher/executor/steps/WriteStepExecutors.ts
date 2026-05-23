@@ -47,7 +47,7 @@ export class WriteStepExecutor {
 
     for (const row of rows) {
       const node = await this._graph.addNode(
-        step.labels[0] ?? 'Node',
+        step.labels,
         resolvedProps,
         transaction,
       );
@@ -83,10 +83,15 @@ export class WriteStepExecutor {
           `Cannot create edge: source or target node not bound`,
         );
       }
+      if (step.types.length === 0) {
+        throw new CypherRuntimeError(
+          `Cannot create edge: relationship type is required`,
+        );
+      }
       const edge = await this._graph.addEdge(
         srcNode.id,
         tgtNode.id,
-        step.types[0] ?? 'RELATIONSHIP',
+        step.types[0],
         resolvedProps,
         transaction,
       );
