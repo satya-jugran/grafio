@@ -133,7 +133,7 @@ export class GraphToMermaid {
    */
   private _buildNodeLabel(node: NodeData): string {
     const parts: string[] = [
-      this._escapeMermaidText(node.type),
+      this._escapeMermaidText(node.labels.join(':')),
       this._escapeMermaidText(node.id),
     ];
 

@@ -242,7 +242,7 @@ export class ReadStepExecutor {
       if (
         step.targetTypes &&
         step.targetTypes.length > 0 &&
-        !step.targetTypes.includes(targetNode.type)
+        !targetNode.labels.some(l => step.targetTypes!.includes(l))
       ) {
         continue;
       }
@@ -322,7 +322,7 @@ export class ReadStepExecutor {
         if (
           step.targetTypes &&
           step.targetTypes.length > 0 &&
-          !step.targetTypes.includes(targetNode.type)
+          !targetNode.labels.some(l => step.targetTypes!.includes(l))
         ) {
           continue;
         }

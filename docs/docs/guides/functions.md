@@ -20,6 +20,32 @@ MATCH (a)-[r:KNOWS]->(b)
 RETURN ID(r)
 ```
 
+### labels(node)
+
+Returns the labels of a node as an array of strings. This corresponds to the node type(s) assigned when the node was created. A node can have multiple labels.
+
+```cypher
+MATCH (p:Person {name: 'Alice'})
+RETURN labels(p) AS nodeLabels
+```
+
+**Example:**
+
+A node created with `await graph.addNode('Person', { name: 'Alice' })` will have `labels(p)` return `['Person']`.
+
+### type(relationship)
+
+Returns the relationship type of an edge/relationship as a string.
+
+```cypher
+MATCH (a)-[r:KNOWS]->(b)
+RETURN type(r) AS relationshipType
+```
+
+**Example:**
+
+An edge created with `await graph.addEdge(from, to, 'KNOWS')` will have `type(r)` return `'KNOWS'`.
+
 ## Path Functions
 
 Path functions are used to extract nodes or relationships from a path variable obtained via variable-length matches. When you use a named path in a `MATCH` clause (e.g., `MATCH p = (a)-[:R]->(b)`), the path variable contains an alternating sequence:

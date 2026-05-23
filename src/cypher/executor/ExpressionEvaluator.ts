@@ -12,6 +12,8 @@
  */
 
 import { Expression } from '../ast/AstNode';
+import { Node } from '../../Node';
+import { Edge } from '../../Edge';
 import { CypherRuntimeError, UnboundParameterError, TypeMismatchError } from '../errors';
 
 /**
@@ -118,7 +120,7 @@ export class ExpressionEvaluator {
             return props[expr.property];
           }
           // Property not in user-defined properties — fall through to
-          // top-level access for built-in fields like `type` and `id`.
+          // top-level access for built-in fields like `labels` and `id`.
         }
         if (typeof obj === 'object' && obj !== null) {
           return (obj as Record<string, unknown>)[expr.property];
@@ -212,6 +214,40 @@ export class ExpressionEvaluator {
             // Path is [node₀, edge₀, node₁, edge₁, ..., nodeₙ].
             // Return elements at odd indices (the edges).
             return (arg as unknown[]).filter((_, i) => i % 2 === 1);
+          }
+
+          // ── labels(node) → list of node labels ─────────────
+          case 'LABELS': {
+            if (expr.args.length !== 1) {
+              throw new CypherRuntimeError(
+                `labels() expects exactly 1 argument, got ${expr.args.length}`,
+              );
+            }
+            const arg = this.evaluate(expr.args[0], row, params);
+            if (arg === null || arg === undefined) return null;
+            if (arg instanceof Node) {
+              return arg.labels;
+            }
+            throw new CypherRuntimeError(
+              `labels() requires a node argument, got ${typeof arg}`,
+            );
+          }
+
+          // ── type(relationship) → relationship type string ──
+          case 'TYPE': {
+            if (expr.args.length !== 1) {
+              throw new CypherRuntimeError(
+                `type() expects exactly 1 argument, got ${expr.args.length}`,
+              );
+            }
+            const arg = this.evaluate(expr.args[0], row, params);
+            if (arg === null || arg === undefined) return null;
+            if (arg instanceof Edge) {
+              return arg.type;
+            }
+            throw new CypherRuntimeError(
+              `type() requires a relationship argument, got ${typeof arg}`,
+            );
           }
 
           default:

@@ -17,9 +17,9 @@ describe('InMemoryStorageProvider', () => {
   describe('getNodes with orderBy on custom property', () => {
     it('should order nodes by a custom property (ascending)', async () => {
       // Insert in reverse order to verify sorting works
-      await provider.insertNode({ id: 'node-3', type: 'Item', properties: { priority: 30 } });
-      await provider.insertNode({ id: 'node-1', type: 'Item', properties: { priority: 10 } });
-      await provider.insertNode({ id: 'node-2', type: 'Item', properties: { priority: 20 } });
+      await provider.insertNode({ id: 'node-3', labels: ['Item'], properties: { priority: 30 } });
+      await provider.insertNode({ id: 'node-1', labels: ['Item'], properties: { priority: 10 } });
+      await provider.insertNode({ id: 'node-2', labels: ['Item'], properties: { priority: 20 } });
 
       const nodes = await provider.getNodes({ orderBy: { field: 'priority', direction: 'asc' } });
 
@@ -30,9 +30,9 @@ describe('InMemoryStorageProvider', () => {
     });
 
     it('should order nodes by a custom property (descending)', async () => {
-      await provider.insertNode({ id: 'node-1', type: 'Item', properties: { priority: 10 } });
-      await provider.insertNode({ id: 'node-2', type: 'Item', properties: { priority: 20 } });
-      await provider.insertNode({ id: 'node-3', type: 'Item', properties: { priority: 30 } });
+      await provider.insertNode({ id: 'node-1', labels: ['Item'], properties: { priority: 10 } });
+      await provider.insertNode({ id: 'node-2', labels: ['Item'], properties: { priority: 20 } });
+      await provider.insertNode({ id: 'node-3', labels: ['Item'], properties: { priority: 30 } });
 
       const nodes = await provider.getNodes({ orderBy: { field: 'priority', direction: 'desc' } });
 
@@ -44,9 +44,9 @@ describe('InMemoryStorageProvider', () => {
 
     it('should order nodes by createdOn (direct field)', async () => {
       // Insert in reverse order
-      await provider.insertNode({ id: 'node-3', type: 'Item', properties: { name: 'third' } });
-      await provider.insertNode({ id: 'node-1', type: 'Item', properties: { name: 'first' } });
-      await provider.insertNode({ id: 'node-2', type: 'Item', properties: { name: 'second' } });
+      await provider.insertNode({ id: 'node-3', labels: ['Item'], properties: { name: 'third' } });
+      await provider.insertNode({ id: 'node-1', labels: ['Item'], properties: { name: 'first' } });
+      await provider.insertNode({ id: 'node-2', labels: ['Item'], properties: { name: 'second' } });
 
       const nodes = await provider.getNodes({ orderBy: { field: 'createdOn', direction: 'asc' } });
 
@@ -59,8 +59,8 @@ describe('InMemoryStorageProvider', () => {
 
   describe('getEdges with orderBy on custom property', () => {
     it('should order edges by a custom property (ascending)', async () => {
-      await provider.insertNode({ id: 'n1', type: 'Test', properties: {} });
-      await provider.insertNode({ id: 'n2', type: 'Test', properties: {} });
+      await provider.insertNode({ id: 'n1', labels: ['Test'], properties: {} });
+      await provider.insertNode({ id: 'n2', labels: ['Test'], properties: {} });
 
       // Insert in reverse order
       await provider.insertEdge({ id: 'edge-3', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: { cost: 30 } });
@@ -76,8 +76,8 @@ describe('InMemoryStorageProvider', () => {
     });
 
     it('should order edges by a custom property (descending)', async () => {
-      await provider.insertNode({ id: 'n1', type: 'Test', properties: {} });
-      await provider.insertNode({ id: 'n2', type: 'Test', properties: {} });
+      await provider.insertNode({ id: 'n1', labels: ['Test'], properties: {} });
+      await provider.insertNode({ id: 'n2', labels: ['Test'], properties: {} });
 
       await provider.insertEdge({ id: 'edge-1', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: { cost: 10 } });
       await provider.insertEdge({ id: 'edge-2', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: { cost: 20 } });
@@ -94,7 +94,7 @@ describe('InMemoryStorageProvider', () => {
 
   describe('updateProperty with transaction overlay', () => {
     it('should enter the overlayRecord branch when updating within transaction', async () => {
-      await provider.insertNode({ id: 'node-1', type: 'Test', properties: { name: 'Original' } });
+      await provider.insertNode({ id: 'node-1', labels: ['Test'], properties: { name: 'Original' } });
 
       const txn = await provider.beginTransaction();
 
@@ -116,7 +116,7 @@ describe('InMemoryStorageProvider', () => {
     });
 
     it('should rollback updateProperty changes on rollback', async () => {
-      await provider.insertNode({ id: 'node-1', type: 'Test', properties: { name: 'Original' } });
+      await provider.insertNode({ id: 'node-1', labels: ['Test'], properties: { name: 'Original' } });
 
       const txn = await provider.beginTransaction();
 
@@ -134,7 +134,7 @@ describe('InMemoryStorageProvider', () => {
 
   describe('deleteProperty with transaction overlay', () => {
     it('should enter the overlayRecord branch when deleting within transaction', async () => {
-      await provider.insertNode({ id: 'node-1', type: 'Test', properties: { name: 'Alice', age: '30' } });
+      await provider.insertNode({ id: 'node-1', labels: ['Test'], properties: { name: 'Alice', age: '30' } });
 
       const txn = await provider.beginTransaction();
 
@@ -160,7 +160,7 @@ describe('InMemoryStorageProvider', () => {
 
   describe('clearProperties with transaction overlay', () => {
     it('should enter the overlayRecord branch when clearing within transaction', async () => {
-      await provider.insertNode({ id: 'node-1', type: 'Test', properties: { name: 'Alice', age: '30' } });
+      await provider.insertNode({ id: 'node-1', labels: ['Test'], properties: { name: 'Alice', age: '30' } });
 
       const txn = await provider.beginTransaction();
 
@@ -189,7 +189,7 @@ describe('InMemoryStorageProvider', () => {
     // Trying to modify properties on a tombstoned entity should throw NodeNotFoundError/EdgeNotFoundError
 
     it('should throw NodeNotFoundError when addProperty targets a tombstoned node', async () => {
-      await provider.insertNode({ id: 'node-1', type: 'Test', properties: { name: 'Alice' } });
+      await provider.insertNode({ id: 'node-1', labels: ['Test'], properties: { name: 'Alice' } });
 
       const txn = await provider.beginTransaction();
 
@@ -205,7 +205,7 @@ describe('InMemoryStorageProvider', () => {
     });
 
     it('should throw NodeNotFoundError when updateProperty targets a tombstoned node', async () => {
-      await provider.insertNode({ id: 'node-1', type: 'Test', properties: { name: 'Alice' } });
+      await provider.insertNode({ id: 'node-1', labels: ['Test'], properties: { name: 'Alice' } });
 
       const txn = await provider.beginTransaction();
 
@@ -221,7 +221,7 @@ describe('InMemoryStorageProvider', () => {
     });
 
     it('should throw NodeNotFoundError when deleteProperty targets a tombstoned node', async () => {
-      await provider.insertNode({ id: 'node-1', type: 'Test', properties: { name: 'Alice' } });
+      await provider.insertNode({ id: 'node-1', labels: ['Test'], properties: { name: 'Alice' } });
 
       const txn = await provider.beginTransaction();
 
@@ -237,7 +237,7 @@ describe('InMemoryStorageProvider', () => {
     });
 
     it('should throw NodeNotFoundError when clearProperties targets a tombstoned node', async () => {
-      await provider.insertNode({ id: 'node-1', type: 'Test', properties: { name: 'Alice', age: '30' } });
+      await provider.insertNode({ id: 'node-1', labels: ['Test'], properties: { name: 'Alice', age: '30' } });
 
       const txn = await provider.beginTransaction();
 
@@ -253,8 +253,8 @@ describe('InMemoryStorageProvider', () => {
     });
 
     it('should throw EdgeNotFoundError when addProperty targets a tombstoned edge', async () => {
-      await provider.insertNode({ id: 'n1', type: 'Test', properties: {} });
-      await provider.insertNode({ id: 'n2', type: 'Test', properties: {} });
+      await provider.insertNode({ id: 'n1', labels: ['Test'], properties: {} });
+      await provider.insertNode({ id: 'n2', labels: ['Test'], properties: {} });
       await provider.insertEdge({ id: 'edge-1', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: { weight: 1 } });
 
       const txn = await provider.beginTransaction();
@@ -271,8 +271,8 @@ describe('InMemoryStorageProvider', () => {
     });
 
     it('should throw EdgeNotFoundError when updateProperty targets a tombstoned edge', async () => {
-      await provider.insertNode({ id: 'n1', type: 'Test', properties: {} });
-      await provider.insertNode({ id: 'n2', type: 'Test', properties: {} });
+      await provider.insertNode({ id: 'n1', labels: ['Test'], properties: {} });
+      await provider.insertNode({ id: 'n2', labels: ['Test'], properties: {} });
       await provider.insertEdge({ id: 'edge-1', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: { weight: 1 } });
 
       const txn = await provider.beginTransaction();
@@ -289,8 +289,8 @@ describe('InMemoryStorageProvider', () => {
     });
 
     it('should throw EdgeNotFoundError when deleteProperty targets a tombstoned edge', async () => {
-      await provider.insertNode({ id: 'n1', type: 'Test', properties: {} });
-      await provider.insertNode({ id: 'n2', type: 'Test', properties: {} });
+      await provider.insertNode({ id: 'n1', labels: ['Test'], properties: {} });
+      await provider.insertNode({ id: 'n2', labels: ['Test'], properties: {} });
       await provider.insertEdge({ id: 'edge-1', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: { weight: 1 } });
 
       const txn = await provider.beginTransaction();
@@ -307,8 +307,8 @@ describe('InMemoryStorageProvider', () => {
     });
 
     it('should throw EdgeNotFoundError when clearProperties targets a tombstoned edge', async () => {
-      await provider.insertNode({ id: 'n1', type: 'Test', properties: {} });
-      await provider.insertNode({ id: 'n2', type: 'Test', properties: {} });
+      await provider.insertNode({ id: 'n1', labels: ['Test'], properties: {} });
+      await provider.insertNode({ id: 'n2', labels: ['Test'], properties: {} });
       await provider.insertEdge({ id: 'edge-1', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: { weight: 1 } });
 
       const txn = await provider.beginTransaction();
@@ -332,27 +332,27 @@ describe('InMemoryStorageProvider', () => {
     });
 
     it('should return correct count after inserting nodes', async () => {
-      await provider.insertNode({ id: 'n1', type: 'Test', properties: {} });
-      await provider.insertNode({ id: 'n2', type: 'Test', properties: {} });
-      await provider.insertNode({ id: 'n3', type: 'Test', properties: {} });
+      await provider.insertNode({ id: 'n1', labels: ['Test'], properties: {} });
+      await provider.insertNode({ id: 'n2', labels: ['Test'], properties: {} });
+      await provider.insertNode({ id: 'n3', labels: ['Test'], properties: {} });
 
       const count = await provider.getNodeCount();
       expect(count).toBe(3);
     });
 
     it('should return count with type filter', async () => {
-      await provider.insertNode({ id: 'n1', type: 'User', properties: {} });
-      await provider.insertNode({ id: 'n2', type: 'Admin', properties: {} });
-      await provider.insertNode({ id: 'n3', type: 'User', properties: {} });
+      await provider.insertNode({ id: 'n1', labels: ['User'], properties: {} });
+      await provider.insertNode({ id: 'n2', labels: ['Admin'], properties: {} });
+      await provider.insertNode({ id: 'n3', labels: ['User'], properties: {} });
 
       const count = await provider.getNodeCount({ filter: { types: ['User'] } });
       expect(count).toBe(2);
     });
 
     it('should return count with property filter', async () => {
-      await provider.insertNode({ id: 'n1', type: 'Item', properties: { active: true } });
-      await provider.insertNode({ id: 'n2', type: 'Item', properties: { active: false } });
-      await provider.insertNode({ id: 'n3', type: 'Item', properties: { active: true } });
+      await provider.insertNode({ id: 'n1', labels: ['Item'], properties: { active: true } });
+      await provider.insertNode({ id: 'n2', labels: ['Item'], properties: { active: false } });
+      await provider.insertNode({ id: 'n3', labels: ['Item'], properties: { active: true } });
 
       const count = await provider.getNodeCount({
         filter: { properties: [{ key: 'active', value: true }] }
@@ -368,9 +368,9 @@ describe('InMemoryStorageProvider', () => {
     });
 
     it('should return correct count after inserting edges', async () => {
-      await provider.insertNode({ id: 'n1', type: 'Test', properties: {} });
-      await provider.insertNode({ id: 'n2', type: 'Test', properties: {} });
-      await provider.insertNode({ id: 'n3', type: 'Test', properties: {} });
+      await provider.insertNode({ id: 'n1', labels: ['Test'], properties: {} });
+      await provider.insertNode({ id: 'n2', labels: ['Test'], properties: {} });
+      await provider.insertNode({ id: 'n3', labels: ['Test'], properties: {} });
       await provider.insertEdge({ id: 'e1', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: {} });
       await provider.insertEdge({ id: 'e2', type: 'Link', sourceId: 'n2', targetId: 'n3', properties: {} });
 
@@ -379,9 +379,9 @@ describe('InMemoryStorageProvider', () => {
     });
 
     it('should return count with type filter', async () => {
-      await provider.insertNode({ id: 'n1', type: 'Test', properties: {} });
-      await provider.insertNode({ id: 'n2', type: 'Test', properties: {} });
-      await provider.insertNode({ id: 'n3', type: 'Test', properties: {} });
+      await provider.insertNode({ id: 'n1', labels: ['Test'], properties: {} });
+      await provider.insertNode({ id: 'n2', labels: ['Test'], properties: {} });
+      await provider.insertNode({ id: 'n3', labels: ['Test'], properties: {} });
       await provider.insertEdge({ id: 'e1', type: 'KNOWS', sourceId: 'n1', targetId: 'n2', properties: {} });
       await provider.insertEdge({ id: 'e2', type: 'LIKES', sourceId: 'n1', targetId: 'n3', properties: {} });
       await provider.insertEdge({ id: 'e3', type: 'KNOWS', sourceId: 'n2', targetId: 'n3', properties: {} });
@@ -391,9 +391,9 @@ describe('InMemoryStorageProvider', () => {
     });
 
     it('should return count with property filter', async () => {
-      await provider.insertNode({ id: 'n1', type: 'Test', properties: {} });
-      await provider.insertNode({ id: 'n2', type: 'Test', properties: {} });
-      await provider.insertNode({ id: 'n3', type: 'Test', properties: {} });
+      await provider.insertNode({ id: 'n1', labels: ['Test'], properties: {} });
+      await provider.insertNode({ id: 'n2', labels: ['Test'], properties: {} });
+      await provider.insertNode({ id: 'n3', labels: ['Test'], properties: {} });
       await provider.insertEdge({ id: 'e1', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: { weight: 5 } });
       await provider.insertEdge({ id: 'e2', type: 'Link', sourceId: 'n2', targetId: 'n3', properties: { weight: 10 } });
       await provider.insertEdge({ id: 'e3', type: 'Link', sourceId: 'n1', targetId: 'n3', properties: { weight: 5 } });
@@ -416,9 +416,9 @@ describe('InMemoryStorageProvider', () => {
     });
 
     it('should aggregate numeric property values', async () => {
-      await provider.insertNode({ id: 'n1', type: 'Item', properties: { price: 10 } });
-      await provider.insertNode({ id: 'n2', type: 'Item', properties: { price: 20 } });
-      await provider.insertNode({ id: 'n3', type: 'Item', properties: { price: 30 } });
+      await provider.insertNode({ id: 'n1', labels: ['Item'], properties: { price: 10 } });
+      await provider.insertNode({ id: 'n2', labels: ['Item'], properties: { price: 20 } });
+      await provider.insertNode({ id: 'n3', labels: ['Item'], properties: { price: 30 } });
 
       const result = await provider.aggregateNodeProperty('price');
 
@@ -430,10 +430,10 @@ describe('InMemoryStorageProvider', () => {
     });
 
     it('should ignore non-numeric property values', async () => {
-      await provider.insertNode({ id: 'n1', type: 'Item', properties: { price: 10 } });
-      await provider.insertNode({ id: 'n2', type: 'Item', properties: { price: 'twenty' } }); // string
-      await provider.insertNode({ id: 'n3', type: 'Item', properties: { price: null } }); // null
-      await provider.insertNode({ id: 'n4', type: 'Item', properties: { price: 30 } });
+      await provider.insertNode({ id: 'n1', labels: ['Item'], properties: { price: 10 } });
+      await provider.insertNode({ id: 'n2', labels: ['Item'], properties: { price: 'twenty' } }); // string
+      await provider.insertNode({ id: 'n3', labels: ['Item'], properties: { price: null } }); // null
+      await provider.insertNode({ id: 'n4', labels: ['Item'], properties: { price: 30 } });
 
       const result = await provider.aggregateNodeProperty('price');
 
@@ -444,9 +444,9 @@ describe('InMemoryStorageProvider', () => {
     });
 
     it('should aggregate with type filter', async () => {
-      await provider.insertNode({ id: 'n1', type: 'Book', properties: { pages: 100 } });
-      await provider.insertNode({ id: 'n2', type: 'Magazine', properties: { pages: 50 } });
-      await provider.insertNode({ id: 'n3', type: 'Book', properties: { pages: 200 } });
+      await provider.insertNode({ id: 'n1', labels: ['Book'], properties: { pages: 100 } });
+      await provider.insertNode({ id: 'n2', labels: ['Magazine'], properties: { pages: 50 } });
+      await provider.insertNode({ id: 'n3', labels: ['Book'], properties: { pages: 200 } });
 
       const result = await provider.aggregateNodeProperty('pages', { filter: { types: ['Book'] } });
 
@@ -457,9 +457,9 @@ describe('InMemoryStorageProvider', () => {
     });
 
     it('should aggregate with property filter', async () => {
-      await provider.insertNode({ id: 'n1', type: 'Product', properties: { price: 100, active: true } });
-      await provider.insertNode({ id: 'n2', type: 'Product', properties: { price: 200, active: false } });
-      await provider.insertNode({ id: 'n3', type: 'Product', properties: { price: 300, active: true } });
+      await provider.insertNode({ id: 'n1', labels: ['Product'], properties: { price: 100, active: true } });
+      await provider.insertNode({ id: 'n2', labels: ['Product'], properties: { price: 200, active: false } });
+      await provider.insertNode({ id: 'n3', labels: ['Product'], properties: { price: 300, active: true } });
 
       const result = await provider.aggregateNodeProperty('price', {
         filter: { properties: [{ key: 'active', value: true }] }
@@ -471,11 +471,11 @@ describe('InMemoryStorageProvider', () => {
 
     it('should deduplicate property values when distinct is true', async () => {
       // Insert nodes with duplicate price values
-      await provider.insertNode({ id: 'n1', type: 'Item', properties: { price: 100 } });
-      await provider.insertNode({ id: 'n2', type: 'Item', properties: { price: 200 } });
-      await provider.insertNode({ id: 'n3', type: 'Item', properties: { price: 100 } }); // duplicate of n1
-      await provider.insertNode({ id: 'n4', type: 'Item', properties: { price: 300 } });
-      await provider.insertNode({ id: 'n5', type: 'Item', properties: { price: 200 } }); // duplicate of n2
+      await provider.insertNode({ id: 'n1', labels: ['Item'], properties: { price: 100 } });
+      await provider.insertNode({ id: 'n2', labels: ['Item'], properties: { price: 200 } });
+      await provider.insertNode({ id: 'n3', labels: ['Item'], properties: { price: 100 } }); // duplicate of n1
+      await provider.insertNode({ id: 'n4', labels: ['Item'], properties: { price: 300 } });
+      await provider.insertNode({ id: 'n5', labels: ['Item'], properties: { price: 200 } }); // duplicate of n2
 
       const result = await provider.aggregateNodeProperty('price', { distinct: true });
 
@@ -488,10 +488,10 @@ describe('InMemoryStorageProvider', () => {
     });
 
     it('should not deduplicate when distinct is false', async () => {
-      await provider.insertNode({ id: 'n1', type: 'Item', properties: { price: 100 } });
-      await provider.insertNode({ id: 'n2', type: 'Item', properties: { price: 200 } });
-      await provider.insertNode({ id: 'n3', type: 'Item', properties: { price: 100 } }); // duplicate of n1
-      await provider.insertNode({ id: 'n4', type: 'Item', properties: { price: 300 } });
+      await provider.insertNode({ id: 'n1', labels: ['Item'], properties: { price: 100 } });
+      await provider.insertNode({ id: 'n2', labels: ['Item'], properties: { price: 200 } });
+      await provider.insertNode({ id: 'n3', labels: ['Item'], properties: { price: 100 } }); // duplicate of n1
+      await provider.insertNode({ id: 'n4', labels: ['Item'], properties: { price: 300 } });
 
       const result = await provider.aggregateNodeProperty('price', { distinct: false });
 
@@ -510,8 +510,8 @@ describe('InMemoryStorageProvider', () => {
     });
 
     it('should aggregate numeric property values', async () => {
-      await provider.insertNode({ id: 'n1', type: 'Test', properties: {} });
-      await provider.insertNode({ id: 'n2', type: 'Test', properties: {} });
+      await provider.insertNode({ id: 'n1', labels: ['Test'], properties: {} });
+      await provider.insertNode({ id: 'n2', labels: ['Test'], properties: {} });
       await provider.insertEdge({ id: 'e1', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: { weight: 5 } });
       await provider.insertEdge({ id: 'e2', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: { weight: 15 } });
 
@@ -525,8 +525,8 @@ describe('InMemoryStorageProvider', () => {
     });
 
     it('should ignore non-numeric property values', async () => {
-      await provider.insertNode({ id: 'n1', type: 'Test', properties: {} });
-      await provider.insertNode({ id: 'n2', type: 'Test', properties: {} });
+      await provider.insertNode({ id: 'n1', labels: ['Test'], properties: {} });
+      await provider.insertNode({ id: 'n2', labels: ['Test'], properties: {} });
       await provider.insertEdge({ id: 'e1', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: { weight: 10 } });
       await provider.insertEdge({ id: 'e2', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: { weight: 'ten' } });
 
@@ -537,8 +537,8 @@ describe('InMemoryStorageProvider', () => {
     });
 
     it('should aggregate with type filter', async () => {
-      await provider.insertNode({ id: 'n1', type: 'Test', properties: {} });
-      await provider.insertNode({ id: 'n2', type: 'Test', properties: {} });
+      await provider.insertNode({ id: 'n1', labels: ['Test'], properties: {} });
+      await provider.insertNode({ id: 'n2', labels: ['Test'], properties: {} });
       await provider.insertEdge({ id: 'e1', type: 'FRIEND', sourceId: 'n1', targetId: 'n2', properties: { strength: 80 } });
       await provider.insertEdge({ id: 'e2', type: 'COLLEAGUE', sourceId: 'n1', targetId: 'n2', properties: { strength: 50 } });
 
@@ -549,9 +549,9 @@ describe('InMemoryStorageProvider', () => {
     });
 
     it('should deduplicate property values when distinct is true', async () => {
-      await provider.insertNode({ id: 'n1', type: 'Test', properties: {} });
-      await provider.insertNode({ id: 'n2', type: 'Test', properties: {} });
-      await provider.insertNode({ id: 'n3', type: 'Test', properties: {} });
+      await provider.insertNode({ id: 'n1', labels: ['Test'], properties: {} });
+      await provider.insertNode({ id: 'n2', labels: ['Test'], properties: {} });
+      await provider.insertNode({ id: 'n3', labels: ['Test'], properties: {} });
 
       // Insert edges with duplicate weight values
       await provider.insertEdge({ id: 'e1', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: { weight: 10 } });
@@ -571,9 +571,9 @@ describe('InMemoryStorageProvider', () => {
     });
 
     it('should not deduplicate when distinct is false', async () => {
-      await provider.insertNode({ id: 'n1', type: 'Test', properties: {} });
-      await provider.insertNode({ id: 'n2', type: 'Test', properties: {} });
-      await provider.insertNode({ id: 'n3', type: 'Test', properties: {} });
+      await provider.insertNode({ id: 'n1', labels: ['Test'], properties: {} });
+      await provider.insertNode({ id: 'n2', labels: ['Test'], properties: {} });
+      await provider.insertNode({ id: 'n3', labels: ['Test'], properties: {} });
 
       await provider.insertEdge({ id: 'e1', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: { weight: 10 } });
       await provider.insertEdge({ id: 'e2', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: { weight: 20 } });
@@ -592,9 +592,9 @@ describe('InMemoryStorageProvider', () => {
   describe('_applyOrderAndLimit sorting branches', () => {
     describe('getNodes with orderBy on custom property with undefined values', () => {
       it('should handle when both values are undefined', async () => {
-        await provider.insertNode({ id: 'n1', type: 'Test', properties: {} });
-        await provider.insertNode({ id: 'n2', type: 'Test', properties: {} });
-        await provider.insertNode({ id: 'n3', type: 'Test', properties: { weight: 50 } });
+        await provider.insertNode({ id: 'n1', labels: ['Test'], properties: {} });
+        await provider.insertNode({ id: 'n2', labels: ['Test'], properties: {} });
+        await provider.insertNode({ id: 'n3', labels: ['Test'], properties: { weight: 50 } });
 
         const nodes = await provider.getNodes({ orderBy: { field: 'weight', direction: 'asc' } });
 
@@ -606,9 +606,9 @@ describe('InMemoryStorageProvider', () => {
       });
 
       it('should handle when aVal is undefined but bVal is not', async () => {
-        await provider.insertNode({ id: 'n1', type: 'Test', properties: {} });
-        await provider.insertNode({ id: 'n2', type: 'Test', properties: { weight: 100 } });
-        await provider.insertNode({ id: 'n3', type: 'Test', properties: { weight: 50 } });
+        await provider.insertNode({ id: 'n1', labels: ['Test'], properties: {} });
+        await provider.insertNode({ id: 'n2', labels: ['Test'], properties: { weight: 100 } });
+        await provider.insertNode({ id: 'n3', labels: ['Test'], properties: { weight: 50 } });
 
         const nodes = await provider.getNodes({ orderBy: { field: 'weight', direction: 'asc' } });
 
@@ -620,9 +620,9 @@ describe('InMemoryStorageProvider', () => {
       });
 
       it('should handle when bVal is undefined but aVal is not', async () => {
-        await provider.insertNode({ id: 'n1', type: 'Test', properties: { weight: 50 } });
-        await provider.insertNode({ id: 'n2', type: 'Test', properties: {} });
-        await provider.insertNode({ id: 'n3', type: 'Test', properties: { weight: 100 } });
+        await provider.insertNode({ id: 'n1', labels: ['Test'], properties: { weight: 50 } });
+        await provider.insertNode({ id: 'n2', labels: ['Test'], properties: {} });
+        await provider.insertNode({ id: 'n3', labels: ['Test'], properties: { weight: 100 } });
 
         const nodes = await provider.getNodes({ orderBy: { field: 'weight', direction: 'asc' } });
 
@@ -636,8 +636,8 @@ describe('InMemoryStorageProvider', () => {
 
     describe('getEdges with orderBy on custom property with undefined values', () => {
       it('should handle when both values are undefined', async () => {
-        await provider.insertNode({ id: 'n1', type: 'Test', properties: {} });
-        await provider.insertNode({ id: 'n2', type: 'Test', properties: {} });
+        await provider.insertNode({ id: 'n1', labels: ['Test'], properties: {} });
+        await provider.insertNode({ id: 'n2', labels: ['Test'], properties: {} });
         await provider.insertEdge({ id: 'e1', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: {} });
         await provider.insertEdge({ id: 'e2', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: {} });
         await provider.insertEdge({ id: 'e3', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: { weight: 50 } });
@@ -652,8 +652,8 @@ describe('InMemoryStorageProvider', () => {
       });
 
       it('should handle when aVal is undefined but bVal is not', async () => {
-        await provider.insertNode({ id: 'n1', type: 'Test', properties: {} });
-        await provider.insertNode({ id: 'n2', type: 'Test', properties: {} });
+        await provider.insertNode({ id: 'n1', labels: ['Test'], properties: {} });
+        await provider.insertNode({ id: 'n2', labels: ['Test'], properties: {} });
         await provider.insertEdge({ id: 'e1', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: {} });
         await provider.insertEdge({ id: 'e2', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: { weight: 100 } });
         await provider.insertEdge({ id: 'e3', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: { weight: 50 } });
@@ -668,8 +668,8 @@ describe('InMemoryStorageProvider', () => {
       });
 
       it('should handle when bVal is undefined but aVal is not', async () => {
-        await provider.insertNode({ id: 'n1', type: 'Test', properties: {} });
-        await provider.insertNode({ id: 'n2', type: 'Test', properties: {} });
+        await provider.insertNode({ id: 'n1', labels: ['Test'], properties: {} });
+        await provider.insertNode({ id: 'n2', labels: ['Test'], properties: {} });
         await provider.insertEdge({ id: 'e1', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: { weight: 50 } });
         await provider.insertEdge({ id: 'e2', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: {} });
         await provider.insertEdge({ id: 'e3', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: { weight: 100 } });

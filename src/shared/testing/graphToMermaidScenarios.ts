@@ -53,7 +53,7 @@ export function runGraphToMermaidScenarios(
       it('should create from a JSON string', () => {
         const jsonData = JSON.stringify({
           nodes: [
-            { id: 'node1', type: 'Course', properties: { name: 'Test' } },
+            { id: 'node1', labels: ['Course'], properties: { name: 'Test' } },
           ],
           edges: [],
         });
@@ -168,8 +168,8 @@ export function runGraphToMermaidScenarios(
       it('should handle special characters in node ids via JSON constructor', () => {
         const jsonData = JSON.stringify({
           nodes: [
-            { id: 'node-with-dashes', type: 'Course', properties: { name: 'Test' } },
-            { id: 'node.with.dots', type: 'Chapter', properties: { name: 'Ch1' } },
+            { id: 'node-with-dashes', labels: ['Course'], properties: { name: 'Test' } },
+            { id: 'node.with.dots', labels: ['Chapter'], properties: { name: 'Ch1' } },
           ],
           edges: [
             { id: 'e1', sourceId: 'node-with-dashes', targetId: 'node.with.dots', type: 'CONTAINS', properties: {} },
@@ -186,7 +186,7 @@ export function runGraphToMermaidScenarios(
       it('should escape spaces and special characters via JSON constructor', () => {
         const jsonData = JSON.stringify({
           nodes: [
-            { id: 'node with spaces', type: 'Course', properties: { name: 'Test' } },
+            { id: 'node with spaces', labels: ['Course'], properties: { name: 'Test' } },
           ],
           edges: [],
         });

@@ -32,7 +32,7 @@ describe('CachedStorageProvider', () => {
   describe('transaction bypass — insertNode/insertEdge', () => {
     it('should NOT populate cache when inserting inside a transaction', async () => {
       const txn = await provider.beginTransaction();
-      await provider.insertNode({ id: 'node-1', type: 'Test', properties: {} }, txn);
+      await provider.insertNode({ id: 'node-1', labels: ['Test'], properties: {} }, txn);
 
       // Cache should NOT have the node
       const cached = await cacheManager.getNode('graph-test', 'node-1');
@@ -44,7 +44,7 @@ describe('CachedStorageProvider', () => {
 
     it('should populate cache after commit when insert was in transaction', async () => {
       const txn = await provider.beginTransaction();
-      await provider.insertNode({ id: 'node-1', type: 'Test', properties: {} }, txn);
+      await provider.insertNode({ id: 'node-1', labels: ['Test'], properties: {} }, txn);
       await provider.commitTransaction(txn);
 
       // After commit, cache should be populated on next read (not during commit)
@@ -64,9 +64,9 @@ describe('CachedStorageProvider', () => {
   describe('transaction bypass — hasNode/getNode', () => {
     it('should bypass cache on hasNode when inside transaction', async () => {
       // Insert node without transaction first
-      await provider.insertNode({ id: 'node-1', type: 'Test', properties: {} });
+      await provider.insertNode({ id: 'node-1', labels: ['Test'], properties: {} });
       // Cache it
-      await cacheManager.setNode('graph-test', 'node-1', { id: 'node-1', type: 'Test', properties: {} });
+      await cacheManager.setNode('graph-test', 'node-1', { id: 'node-1', labels: ['Test'], properties: {} });
 
       // Now query inside transaction — should hit underlying (which knows about the node)
       const txn = await provider.beginTransaction();
@@ -80,7 +80,7 @@ describe('CachedStorageProvider', () => {
     });
 
     it('should bypass cache on getNode when inside transaction', async () => {
-      await provider.insertNode({ id: 'node-1', type: 'Test', properties: {} });
+      await provider.insertNode({ id: 'node-1', labels: ['Test'], properties: {} });
 
       const txn = await provider.beginTransaction();
       const cacheHitCountBefore = (await cacheManager.getStats()).hitCount;
@@ -94,7 +94,7 @@ describe('CachedStorageProvider', () => {
 
   describe('write-through cache population (no transaction)', () => {
     it('should populate cache after insertNode without transaction', async () => {
-      await provider.insertNode({ id: 'node-1', type: 'Test', properties: {} });
+      await provider.insertNode({ id: 'node-1', labels: ['Test'], properties: {} });
 
       const cached = await cacheManager.getNode('graph-test', 'node-1');
       expect(cached).not.toBeUndefined();
@@ -115,12 +115,12 @@ describe('CachedStorageProvider', () => {
       const tinyProvider = new CachedStorageProvider(mockProvider as any, 'graph-test', tinyCacheManager, tinyConfig);
 
       // Insert first node (should be cached)
-      await tinyProvider.insertNode({ id: 'node-1', type: 'Test', properties: {} });
+      await tinyProvider.insertNode({ id: 'node-1', labels: ['Test'], properties: {} });
       const cached1 = await tinyCacheManager.getNode('graph-test', 'node-1');
       expect(cached1).not.toBeUndefined();
 
       // Insert second node - budget exceeded, should NOT be cached
-      await tinyProvider.insertNode({ id: 'node-2', type: 'Test', properties: {} });
+      await tinyProvider.insertNode({ id: 'node-2', labels: ['Test'], properties: {} });
       const cached2 = await tinyCacheManager.getNode('graph-test', 'node-2');
       expect(cached2).toBeUndefined(); // Budget exceeded, not cached
 
@@ -150,7 +150,7 @@ describe('CachedStorageProvider', () => {
   describe('cache hit branches — getNode', () => {
     it('should return cached node without calling underlying when cache hit', async () => {
       // Pre-populate cache directly
-      await cacheManager.setNode('graph-test', 'node-cached', { id: 'node-cached', type: 'Test', properties: {} });
+      await cacheManager.setNode('graph-test', 'node-cached', { id: 'node-cached', labels: ['Test'], properties: {} });
 
       const cacheHitCountBefore = (await cacheManager.getStats()).hitCount;
       const node = await provider.getNode('node-cached');
@@ -171,7 +171,7 @@ describe('CachedStorageProvider', () => {
       const p = new CachedStorageProvider(mockProvider as any, 'graph-test', freshCacheManager, config);
 
       // Add some data to underlying via insert (which write-through caches)
-      await p.insertNode({ id: 'node-1', type: 'Test', properties: {} });
+      await p.insertNode({ id: 'node-1', labels: ['Test'], properties: {} });
 
       // warmCache with 'none' should not add more
       await p.warmCache();
@@ -187,8 +187,8 @@ describe('CachedStorageProvider', () => {
       const config: CacheConfig = { ...defaultConfig, preloadStrategy: 'all' };
       const p = new CachedStorageProvider(mockProvider as any, 'graph-test', cacheManager, config);
 
-      await p.insertNode({ id: 'node-1', type: 'Test', properties: {} });
-      await p.insertNode({ id: 'node-2', type: 'Test', properties: {} });
+      await p.insertNode({ id: 'node-1', labels: ['Test'], properties: {} });
+      await p.insertNode({ id: 'node-2', labels: ['Test'], properties: {} });
       await p.insertEdge({ id: 'edge-1', type: 'Test', sourceId: 'n1', targetId: 'n2', properties: {} });
 
       await p.warmCache();
@@ -207,9 +207,9 @@ describe('CachedStorageProvider', () => {
       const p = new CachedStorageProvider(mockProvider as any, 'graph-test', cacheManager, config);
 
       // Insert nodes with different updatedOn timestamps
-      await p.insertNode({ id: 'node-old', type: 'Test', properties: {}, updatedOn: 100 });
-      await p.insertNode({ id: 'node-new', type: 'Test', properties: {}, updatedOn: 200 });
-      await p.insertNode({ id: 'node-mid', type: 'Test', properties: {}, updatedOn: 150 });
+      await p.insertNode({ id: 'node-old', labels: ['Test'], properties: {}, updatedOn: 100 });
+      await p.insertNode({ id: 'node-new', labels: ['Test'], properties: {}, updatedOn: 200 });
+      await p.insertNode({ id: 'node-mid', labels: ['Test'], properties: {}, updatedOn: 150 });
 
       // Insert edges to test adjacency index population
       await p.insertEdge({ id: 'edge-1', type: 'KNOWS', sourceId: 'node-old', targetId: 'node-new', properties: {} });
@@ -240,7 +240,7 @@ describe('CachedStorageProvider', () => {
 
       // Insert 5 nodes
       for (let i = 1; i <= 5; i++) {
-        await p.insertNode({ id: `node-${i}`, type: 'Test', properties: {} });
+        await p.insertNode({ id: `node-${i}`, labels: ['Test'], properties: {} });
       }
 
       // Insert edges to test adjacency index population
@@ -268,7 +268,7 @@ describe('CachedStorageProvider', () => {
 
   describe('cache invalidation', () => {
     it('should invalidate node from cache on deleteNode', async () => {
-      await provider.insertNode({ id: 'node-1', type: 'Test', properties: {} });
+      await provider.insertNode({ id: 'node-1', labels: ['Test'], properties: {} });
 
       const cached = await cacheManager.getNode('graph-test', 'node-1');
       expect(cached).not.toBeUndefined();
@@ -292,7 +292,7 @@ describe('CachedStorageProvider', () => {
     });
 
     it('should invalidate all for graph on clear()', async () => {
-      await provider.insertNode({ id: 'node-1', type: 'Test', properties: {} });
+      await provider.insertNode({ id: 'node-1', labels: ['Test'], properties: {} });
       await provider.insertEdge({ id: 'edge-1', type: 'Test', sourceId: 'n1', targetId: 'n2', properties: {} });
 
       await provider.clear();
@@ -304,7 +304,7 @@ describe('CachedStorageProvider', () => {
 
   describe('delegation to underlying — hasNode (no transaction)', () => {
     it('should return true when node exists', async () => {
-      await provider.insertNode({ id: 'node-1', type: 'Test', properties: {} });
+      await provider.insertNode({ id: 'node-1', labels: ['Test'], properties: {} });
 
       const result = await provider.hasNode('node-1');
 
@@ -318,7 +318,7 @@ describe('CachedStorageProvider', () => {
 
     it('should return true from cache without calling underlying when cache hit', async () => {
       // Pre-populate cache directly
-      await cacheManager.setNode('graph-test', 'node-cached', { id: 'node-cached', type: 'Test', properties: {} });
+      await cacheManager.setNode('graph-test', 'node-cached', { id: 'node-cached', labels: ['Test'], properties: {} });
 
       const cacheHitCountBefore = (await cacheManager.getStats()).hitCount;
       const result = await provider.hasNode('node-cached');
@@ -331,7 +331,7 @@ describe('CachedStorageProvider', () => {
 
     it('should cache node data after hasNode finds it in underlying on cache miss', async () => {
       // Insert node directly into mock storage (bypassing cache)
-      await mockProvider.insertNode({ id: 'node-orphan', type: 'Test', properties: {} });
+      await mockProvider.insertNode({ id: 'node-orphan', labels: ['Test'], properties: {} });
 
       // hasNode should find it in underlying and cache it
       const result = await provider.hasNode('node-orphan');
@@ -420,8 +420,8 @@ describe('CachedStorageProvider', () => {
 
   describe('delegation to underlying — getAllNodes', () => {
     it('should return all nodes from underlying', async () => {
-      await provider.insertNode({ id: 'node-1', type: 'Test', properties: {} });
-      await provider.insertNode({ id: 'node-2', type: 'Test', properties: {} });
+      await provider.insertNode({ id: 'node-1', labels: ['Test'], properties: {} });
+      await provider.insertNode({ id: 'node-2', labels: ['Test'], properties: {} });
 
       const nodes = await provider.getNodes();
 
@@ -452,9 +452,9 @@ describe('CachedStorageProvider', () => {
 
   describe('delegation to underlying — getNodesByType', () => {
     it('should return nodes filtered by type', async () => {
-      await provider.insertNode({ id: 'node-1', type: 'Person', properties: {} });
-      await provider.insertNode({ id: 'node-2', type: 'Place', properties: {} });
-      await provider.insertNode({ id: 'node-3', type: 'Person', properties: {} });
+      await provider.insertNode({ id: 'node-1', labels: ['Person'], properties: {} });
+      await provider.insertNode({ id: 'node-2', labels: ['Place'], properties: {} });
+      await provider.insertNode({ id: 'node-3', labels: ['Person'], properties: {} });
 
       const nodes = await provider.getNodes({ filter: { types: ['Person'] } });
 
@@ -500,28 +500,28 @@ describe('CachedStorageProvider', () => {
 
   describe('delegation to underlying — property operations', () => {
     it('should delegate addProperty', async () => {
-      await provider.insertNode({ id: 'node-1', type: 'Test', properties: { } });
+      await provider.insertNode({ id: 'node-1', labels: ['Test'], properties: { } });
       const spy = jest.spyOn(mockProvider, 'addProperty');
       await provider.addProperty('node', 'node-1', 'name', 'Alice');
       expect(spy).toHaveBeenCalledWith('node', 'node-1', 'name', 'Alice', undefined);
     });
 
     it('should delegate updateProperty', async () => {
-      await provider.insertNode({ id: 'node-1', type: 'Test', properties: { name: 'Alice' } });
+      await provider.insertNode({ id: 'node-1', labels: ['Test'], properties: { name: 'Alice' } });
       const spy = jest.spyOn(mockProvider, 'updateProperty');
       await provider.updateProperty('node', 'node-1', 'name', 'Bob');
       expect(spy).toHaveBeenCalledWith('node', 'node-1', 'name', 'Bob', undefined);
     });
 
     it('should delegate deleteProperty', async () => {
-      await provider.insertNode({ id: 'node-1', type: 'Test', properties: { name: 'Alice' } });
+      await provider.insertNode({ id: 'node-1', labels: ['Test'], properties: { name: 'Alice' } });
       const spy = jest.spyOn(mockProvider, 'deleteProperty');
       await provider.deleteProperty('node', 'node-1', 'name');
       expect(spy).toHaveBeenCalledWith('node', 'node-1', 'name', undefined);
     });
 
     it('should delegate clearProperties', async () => {
-      await provider.insertNode({ id: 'node-1', type: 'Test', properties: { name: 'Alice', age: 30 } });
+      await provider.insertNode({ id: 'node-1', labels: ['Test'], properties: { name: 'Alice', age: 30 } });
       const spy = jest.spyOn(mockProvider, 'clearProperties');
       await provider.clearProperties('node', 'node-1');
       expect(spy).toHaveBeenCalledWith('node', 'node-1', undefined);
@@ -604,8 +604,8 @@ describe('CachedStorageProvider', () => {
   describe('getAllNodes cache optimization', () => {
     it('should serve from cache when orderBy is undefined and cache has entries', async () => {
       // Insert nodes into underlying
-      await provider.insertNode({ id: 'node-1', type: 'Test', properties: {} });
-      await provider.insertNode({ id: 'node-2', type: 'Test', properties: {} });
+      await provider.insertNode({ id: 'node-1', labels: ['Test'], properties: {} });
+      await provider.insertNode({ id: 'node-2', labels: ['Test'], properties: {} });
 
       // Warm the cache to populate it (need preloadStrategy: all)
       const warmConfig: CacheConfig = { ...defaultConfig, preloadStrategy: 'all' };
@@ -621,8 +621,8 @@ describe('CachedStorageProvider', () => {
 
     it('should delegate to underlying when orderBy provided but cache is incomplete', async () => {
       // Insert only some nodes into cache via insertNode
-      await provider.insertNode({ id: 'node-1', type: 'Test', properties: {} });
-      await provider.insertNode({ id: 'node-2', type: 'Test', properties: {} });
+      await provider.insertNode({ id: 'node-1', labels: ['Test'], properties: {} });
+      await provider.insertNode({ id: 'node-2', labels: ['Test'], properties: {} });
 
       // Warm cache for only 2 nodes
       const warmConfig: CacheConfig = { ...defaultConfig, preloadStrategy: 'all' };
@@ -630,7 +630,7 @@ describe('CachedStorageProvider', () => {
       await warmProvider.warmCache();
 
       // Manually add a node to underlying but not to cache
-      mockProvider.insertNode({ id: 'node-3', type: 'Test', properties: {} });
+      mockProvider.insertNode({ id: 'node-3', labels: ['Test'], properties: {} });
 
       const nodes = await warmProvider.getNodes({ orderBy: { field: 'updatedOn', direction: 'asc' } });
 
@@ -639,7 +639,7 @@ describe('CachedStorageProvider', () => {
     });
 
     it('should delegate to underlying when inside transaction', async () => {
-      await provider.insertNode({ id: 'node-1', type: 'Test', properties: {} });
+      await provider.insertNode({ id: 'node-1', labels: ['Test'], properties: {} });
 
       const txn = await provider.beginTransaction();
       const nodes = await provider.getNodes({ transaction: txn });
@@ -650,7 +650,7 @@ describe('CachedStorageProvider', () => {
     it('should limit results when limit <= cachedCount', async () => {
       // Insert 5 nodes
       for (let i = 1; i <= 5; i++) {
-        await provider.insertNode({ id: `node-${i}`, type: 'Test', properties: { order: i } });
+        await provider.insertNode({ id: `node-${i}`, labels: ['Test'], properties: { order: i } });
       }
 
       const warmConfig: CacheConfig = { ...defaultConfig, preloadStrategy: 'all' };
@@ -666,9 +666,9 @@ describe('CachedStorageProvider', () => {
 
     it('should serve from cache with sorting when orderBy provided and cache is complete', async () => {
       // Insert nodes with different createdOn timestamps
-      await provider.insertNode({ id: 'node-1', type: 'Test', properties: { name: 'A' }, createdOn: 1000 });
-      await provider.insertNode({ id: 'node-2', type: 'Test', properties: { name: 'B' }, createdOn: 3000 });
-      await provider.insertNode({ id: 'node-3', type: 'Test', properties: { name: 'C' }, createdOn: 2000 });
+      await provider.insertNode({ id: 'node-1', labels: ['Test'], properties: { name: 'A' }, createdOn: 1000 });
+      await provider.insertNode({ id: 'node-2', labels: ['Test'], properties: { name: 'B' }, createdOn: 3000 });
+      await provider.insertNode({ id: 'node-3', labels: ['Test'], properties: { name: 'C' }, createdOn: 2000 });
 
       const warmConfig: CacheConfig = { ...defaultConfig, preloadStrategy: 'all' };
       const warmProvider = new CachedStorageProvider(mockProvider as any, 'graph-test', cacheManager, warmConfig);
@@ -687,9 +687,9 @@ describe('CachedStorageProvider', () => {
 
     it('should handle undefined fields during sorting', async () => {
       // Insert nodes where some have undefined createdOn
-      await provider.insertNode({ id: 'node-1', type: 'Test', properties: { name: 'A' }, createdOn: 1000 });
-      await provider.insertNode({ id: 'node-2', type: 'Test', properties: { name: 'B' } }); // createdOn undefined
-      await provider.insertNode({ id: 'node-3', type: 'Test', properties: { name: 'C' }, createdOn: 2000 });
+      await provider.insertNode({ id: 'node-1', labels: ['Test'], properties: { name: 'A' }, createdOn: 1000 });
+      await provider.insertNode({ id: 'node-2', labels: ['Test'], properties: { name: 'B' } }); // createdOn undefined
+      await provider.insertNode({ id: 'node-3', labels: ['Test'], properties: { name: 'C' }, createdOn: 2000 });
 
       const warmConfig: CacheConfig = { ...defaultConfig, preloadStrategy: 'all' };
       const warmProvider = new CachedStorageProvider(mockProvider as any, 'graph-test', cacheManager, warmConfig);
@@ -704,9 +704,9 @@ describe('CachedStorageProvider', () => {
 
     it('should sort desc with undefined fields', async () => {
       // Insert nodes where some have undefined createdOn
-      await provider.insertNode({ id: 'node-1', type: 'Test', properties: { name: 'A' }, createdOn: 1000 });
-      await provider.insertNode({ id: 'node-2', type: 'Test', properties: { name: 'B' } }); // createdOn undefined
-      await provider.insertNode({ id: 'node-3', type: 'Test', properties: { name: 'C' }, createdOn: 2000 });
+      await provider.insertNode({ id: 'node-1', labels: ['Test'], properties: { name: 'A' }, createdOn: 1000 });
+      await provider.insertNode({ id: 'node-2', labels: ['Test'], properties: { name: 'B' } }); // createdOn undefined
+      await provider.insertNode({ id: 'node-3', labels: ['Test'], properties: { name: 'C' }, createdOn: 2000 });
 
       const warmConfig: CacheConfig = { ...defaultConfig, preloadStrategy: 'all' };
       const warmProvider = new CachedStorageProvider(mockProvider as any, 'graph-test', cacheManager, warmConfig);

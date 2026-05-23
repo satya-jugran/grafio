@@ -50,7 +50,7 @@ export class GraphIndex {
   async getNodes(options?: GraphQueryOptions): Promise<readonly Node[]> {
     if (!options) {
       const data = await this._store.getNodes(undefined);
-      return data.map(d => new Node(d.type, d.properties, d.id, d.createdOn, d.updatedOn));
+      return data.map(d => new Node(d.labels, d.properties, d.id, d.createdOn, d.updatedOn));
     }
     const handle = options.transaction?._getHandle();
     const storageOptions: StorageQueryOptions = {
@@ -60,7 +60,7 @@ export class GraphIndex {
       transaction: handle,
     };
     const data = await this._store.getNodes(storageOptions);
-    return data.map(d => new Node(d.type, d.properties, d.id, d.createdOn, d.updatedOn));
+    return data.map(d => new Node(d.labels, d.properties, d.id, d.createdOn, d.updatedOn));
   }
 
   /** Returns all edges in the graph. */
@@ -117,7 +117,7 @@ export class GraphIndex {
    * @throws InvalidPropertyError if properties contain non-supported primitive values
    * @throws NodeAlreadyExistsError if a node with this id already exists
    */
-  async addNode(type: string, properties: Record<string, unknown> = {}, transaction?: GraphTransaction): Promise<Node> {
+  async addNode(labels: string | string[], properties: Record<string, unknown> = {}, transaction?: GraphTransaction): Promise<Node> {
     // Validate properties are flat primitives
     if (!isFlatRecord(properties)) {
       const invalidEntry = Object.entries(properties).find(([, value]) => {
@@ -131,7 +131,7 @@ export class GraphIndex {
     }
 
     const handle = transaction?._getHandle();
-    const node = new Node(type, properties);
+    const node = new Node(labels, properties);
     try {
       if (await this._store.hasNode(node.id, handle)) {
         throw new NodeAlreadyExistsError(node.id);
@@ -188,7 +188,7 @@ export class GraphIndex {
     const handle = transaction?._getHandle();
     const data = await this._store.getNode(id, handle);
     if (!data) return undefined;
-    return new Node(data.type, data.properties, data.id, data.createdOn, data.updatedOn);
+    return new Node(data.labels, data.properties, data.id, data.createdOn, data.updatedOn);
   }
 
   /** Returns nodes by their ids. */
@@ -197,7 +197,7 @@ export class GraphIndex {
     const data = await this._store.getNodesByIds(ids, handle);
     const result = new Map<string, Node>();
     for (const [id, d] of data) {
-      result.set(id, new Node(d.type, d.properties, d.id, d.createdOn, d.updatedOn));
+      result.set(id, new Node(d.labels, d.properties, d.id, d.createdOn, d.updatedOn));
     }
     return result;
   }

@@ -322,7 +322,7 @@ export function runGraphIndexScenarios(
 
         const results = await graph.getNodes({ filter: { types: ['Person'], properties: [{ key: 'email', value: 'alice@example.com' }] } });
         expect(results).toHaveLength(1);
-        expect(results[0].type).toBe('Person');
+        expect(results[0].labels).toEqual(['Person']);
       });
 
       it('should return empty array when property value does not match', async () => {

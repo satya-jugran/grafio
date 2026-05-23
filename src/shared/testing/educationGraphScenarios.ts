@@ -48,7 +48,7 @@ export function runEducationGraphScenarios(buildGraph: () => Promise<Graph>): vo
         const nodes = await graph.getNodes();
         const pythonCourse = nodes.find(n => n.properties.name === 'Python');
         const children = await getChildNodes(pythonCourse!.id);
-        const chapters = children.filter(n => n.type === 'Chapter');
+        const chapters = children.filter(n => n.labels.includes('Chapter'));
         expect(chapters).toHaveLength(6);
       });
 
@@ -56,7 +56,7 @@ export function runEducationGraphScenarios(buildGraph: () => Promise<Graph>): vo
         const nodes = await graph.getNodes();
         const nodejsCourse = nodes.find(n => n.properties.name === 'NodeJS');
         const children = await getChildNodes(nodejsCourse!.id);
-        const chapters = children.filter(n => n.type === 'Chapter');
+        const chapters = children.filter(n => n.labels.includes('Chapter'));
         expect(chapters).toHaveLength(7);
       });
 
@@ -83,7 +83,7 @@ export function runEducationGraphScenarios(buildGraph: () => Promise<Graph>): vo
         const nodes = await graph.getNodes();
         const python = nodes.find(n => n.properties.name === 'Python');
         const children = await getChildNodes(python!.id);
-        const chapters = children.filter(n => n.type === 'Chapter');
+        const chapters = children.filter(n => n.labels.includes('Chapter'));
         const orderedChapters = chapters.sort((a, b) =>
           (a.properties.order as number) - (b.properties.order as number)
         );
@@ -98,7 +98,7 @@ export function runEducationGraphScenarios(buildGraph: () => Promise<Graph>): vo
         const nodes = await graph.getNodes();
         const python = nodes.find(n => n.properties.name === 'Python');
         const pythonChildren = await getChildNodes(python!.id);
-        const chapters = pythonChildren.filter(n => n.type === 'Chapter');
+        const chapters = pythonChildren.filter(n => n.labels.includes('Chapter'));
         const firstChapter = chapters.find(n => n.properties.name === 'Python Basics');
         const sections = await getChildNodes(firstChapter!.id);
         expect(sections).toHaveLength(3);
@@ -108,7 +108,7 @@ export function runEducationGraphScenarios(buildGraph: () => Promise<Graph>): vo
         const nodes = await graph.getNodes();
         const python = nodes.find(n => n.properties.name === 'Python');
         const pythonChildren = await getChildNodes(python!.id);
-        const chapters = pythonChildren.filter(n => n.type === 'Chapter');
+        const chapters = pythonChildren.filter(n => n.labels.includes('Chapter'));
 
         for (const chapter of chapters) {
           const sections = await getChildNodes(chapter.id);
@@ -120,7 +120,7 @@ export function runEducationGraphScenarios(buildGraph: () => Promise<Graph>): vo
         const nodes = await graph.getNodes();
         const python = nodes.find(n => n.properties.name === 'Python');
         const pythonChildren = await getChildNodes(python!.id);
-        const chapters = pythonChildren.filter(n => n.type === 'Chapter');
+        const chapters = pythonChildren.filter(n => n.labels.includes('Chapter'));
         const firstChapter = chapters.find(n => n.properties.name === 'Python Basics');
         const sections = await getChildNodes(firstChapter!.id);
         expect(sections[0]?.properties.duration).toBeDefined();
@@ -132,7 +132,7 @@ export function runEducationGraphScenarios(buildGraph: () => Promise<Graph>): vo
         const nodes = await graph.getNodes();
         const python = nodes.find(n => n.properties.name === 'Python');
         const children = await getChildNodes(python!.id);
-        const exams = children.filter(n => n.type === 'Exam');
+        const exams = children.filter(n => n.labels.includes('Exam'));
         expect(exams).toHaveLength(2);
       });
 
@@ -140,11 +140,11 @@ export function runEducationGraphScenarios(buildGraph: () => Promise<Graph>): vo
         const nodes = await graph.getNodes();
         const python = nodes.find(n => n.properties.name === 'Python');
         const pythonChildren = await getChildNodes(python!.id);
-        const exams = pythonChildren.filter(n => n.type === 'Exam');
+        const exams = pythonChildren.filter(n => n.labels.includes('Exam'));
 
         for (const exam of exams) {
           const examChildren = await getChildNodes(exam.id);
-          const tests = examChildren.filter(n => n.type === 'Test');
+          const tests = examChildren.filter(n => n.labels.includes('Test'));
           expect(tests.length).toBeGreaterThanOrEqual(3);
           expect(tests.length).toBeLessThanOrEqual(4);
         }
@@ -154,7 +154,7 @@ export function runEducationGraphScenarios(buildGraph: () => Promise<Graph>): vo
         const nodes = await graph.getNodes();
         const python = nodes.find(n => n.properties.name === 'Python');
         const pythonChildren = await getChildNodes(python!.id);
-        const exams = pythonChildren.filter(n => n.type === 'Exam');
+        const exams = pythonChildren.filter(n => n.labels.includes('Exam'));
         const firstExam = exams[0];
         const tests = await getChildNodes(firstExam!.id);
         expect(tests[0]?.properties.questions).toBeDefined();
@@ -169,8 +169,8 @@ export function runEducationGraphScenarios(buildGraph: () => Promise<Graph>): vo
 
         const pythonParents = await getParentNodes(python!.id);
         const nodejsParents = await getParentNodes(nodejs!.id);
-        const pythonAuthors = pythonParents.filter(n => n.type === 'Author');
-        const nodejsAuthors = nodejsParents.filter(n => n.type === 'Author');
+        const pythonAuthors = pythonParents.filter(n => n.labels.includes('Author'));
+        const nodejsAuthors = nodejsParents.filter(n => n.labels.includes('Author'));
 
         expect(pythonAuthors).toHaveLength(2);
         expect(nodejsAuthors).toHaveLength(2);
@@ -180,7 +180,7 @@ export function runEducationGraphScenarios(buildGraph: () => Promise<Graph>): vo
         const nodes = await graph.getNodes();
         const python = nodes.find(n => n.properties.name === 'Python');
         const parents = await getParentNodes(python!.id);
-        const authors = parents.filter(n => n.type === 'Author');
+        const authors = parents.filter(n => n.labels.includes('Author'));
         const authorNames = authors.map(a => a.properties.name);
         expect(authorNames).toContain('John Doe');
         expect(authorNames).toContain('Jane Smith');
@@ -193,8 +193,8 @@ export function runEducationGraphScenarios(buildGraph: () => Promise<Graph>): vo
 
         const pythonParents = await getParentNodes(python!.id);
         const nodejsParents = await getParentNodes(nodejs!.id);
-        const pythonPublishers = pythonParents.filter(n => n.type === 'Publisher');
-        const nodejsPublishers = nodejsParents.filter(n => n.type === 'Publisher');
+        const pythonPublishers = pythonParents.filter(n => n.labels.includes('Publisher'));
+        const nodejsPublishers = nodejsParents.filter(n => n.labels.includes('Publisher'));
 
         expect(pythonPublishers).toHaveLength(1);
         expect(nodejsPublishers).toHaveLength(1);
@@ -212,7 +212,7 @@ export function runEducationGraphScenarios(buildGraph: () => Promise<Graph>): vo
         const nodes = await graph.getNodes();
         const python = nodes.find(n => n.properties.name === 'Python');
         const children = await getChildNodes(python!.id);
-        const tags = children.filter(n => n.type === 'Tag');
+        const tags = children.filter(n => n.labels.includes('Tag'));
         const tagNames = tags.map(t => t.properties.name);
 
         expect(tagNames).toContain('Programming');
@@ -223,7 +223,7 @@ export function runEducationGraphScenarios(buildGraph: () => Promise<Graph>): vo
         const nodes = await graph.getNodes();
         const nodejs = nodes.find(n => n.properties.name === 'NodeJS');
         const children = await getChildNodes(nodejs!.id);
-        const tags = children.filter(n => n.type === 'Tag');
+        const tags = children.filter(n => n.labels.includes('Tag'));
         const tagNames = tags.map(t => t.properties.name);
 
         expect(tagNames).toContain('Programming');
@@ -266,7 +266,7 @@ export function runEducationGraphScenarios(buildGraph: () => Promise<Graph>): vo
         const nodes = await graph.getNodes();
         const python = nodes.find(n => n.properties.name === 'Python');
         const pythonChildren = await getChildNodes(python!.id);
-        const chapters = pythonChildren.filter(n => n.type === 'Chapter');
+        const chapters = pythonChildren.filter(n => n.labels.includes('Chapter'));
         const firstChapter = chapters[0];
 
         const paths = await graph.traverse(python!.id, firstChapter!.id, { method: 'bfs' });
@@ -277,7 +277,7 @@ export function runEducationGraphScenarios(buildGraph: () => Promise<Graph>): vo
         const nodes = await graph.getNodes();
         const python = nodes.find(n => n.properties.name === 'Python');
         const pythonChildren = await getChildNodes(python!.id);
-        const chapters = pythonChildren.filter(n => n.type === 'Chapter');
+        const chapters = pythonChildren.filter(n => n.labels.includes('Chapter'));
         const firstChapter = chapters[0];
         const sections = await getChildNodes(firstChapter!.id);
         const firstSection = sections[0];
@@ -290,7 +290,7 @@ export function runEducationGraphScenarios(buildGraph: () => Promise<Graph>): vo
         const nodes = await graph.getNodes();
         const python = nodes.find(n => n.properties.name === 'Python');
         const pythonChildren = await getChildNodes(python!.id);
-        const exams = pythonChildren.filter(n => n.type === 'Exam');
+        const exams = pythonChildren.filter(n => n.labels.includes('Exam'));
         const firstExam = exams[0];
 
         const paths = await graph.traverse(python!.id, firstExam!.id, { method: 'bfs' });
@@ -301,7 +301,7 @@ export function runEducationGraphScenarios(buildGraph: () => Promise<Graph>): vo
         const nodes = await graph.getNodes();
         const python = nodes.find(n => n.properties.name === 'Python');
         const pythonChildren = await getChildNodes(python!.id);
-        const exams = pythonChildren.filter(n => n.type === 'Exam');
+        const exams = pythonChildren.filter(n => n.labels.includes('Exam'));
         const firstExam = exams[0];
         const tests = await getChildNodes(firstExam!.id);
         const firstTest = tests[0];
@@ -332,7 +332,7 @@ export function runEducationGraphScenarios(buildGraph: () => Promise<Graph>): vo
         const nodes = await graph.getNodes();
         const python = nodes.find(n => n.properties.name === 'Python');
         const children = await getChildNodes(python!.id);
-        const tags = children.filter(n => n.type === 'Tag');
+        const tags = children.filter(n => n.labels.includes('Tag'));
         const firstTag = tags[0];
 
         const paths = await graph.traverse(python!.id, firstTag!.id, { method: 'bfs' });
@@ -343,12 +343,12 @@ export function runEducationGraphScenarios(buildGraph: () => Promise<Graph>): vo
         const nodes = await graph.getNodes();
         const python = nodes.find(n => n.properties.name === 'Python');
         const pythonChildren = await getChildNodes(python!.id);
-        const pythonExams = pythonChildren.filter(n => n.type === 'Exam');
+        const pythonExams = pythonChildren.filter(n => n.labels.includes('Exam'));
         const pythonExam = pythonExams[0];
 
         const nodejs = nodes.find(n => n.properties.name === 'NodeJS');
         const nodejsChildren = await getChildNodes(nodejs!.id);
-        const nodejsChapters = nodejsChildren.filter(n => n.type === 'Chapter');
+        const nodejsChapters = nodejsChildren.filter(n => n.labels.includes('Chapter'));
         const nodejsChapter = nodejsChapters[0];
 
         const paths = await graph.traverse(pythonExam!.id, nodejsChapter!.id, { method: 'bfs' });
@@ -359,7 +359,7 @@ export function runEducationGraphScenarios(buildGraph: () => Promise<Graph>): vo
         const nodes = await graph.getNodes();
         const python = nodes.find(n => n.properties.name === 'Python');
         const pythonChildren = await getChildNodes(python!.id);
-        const chapters = pythonChildren.filter(n => n.type === 'Chapter');
+        const chapters = pythonChildren.filter(n => n.labels.includes('Chapter'));
         const firstChapter = chapters[0];
 
         const paths = await graph.traverse(python!.id, firstChapter!.id, { method: 'dfs' });
@@ -371,7 +371,7 @@ export function runEducationGraphScenarios(buildGraph: () => Promise<Graph>): vo
         const python = nodes.find(n => n.properties.name === 'Python');
         // Find an author who is actually an author of the Python course
         // (alice and jane are Python authors; john and doe are NodeJS authors)
-        const authors = nodes.filter(n => n.type === 'Author');
+        const authors = nodes.filter(n => n.labels.includes('Author'));
         const pythonAuthorIds = new Set(
           (await graph.getEdges({ filter: { types: ['AUTHOR_OF'] } }))
             .filter((e: any) => e.targetId === python!.id)
@@ -380,11 +380,11 @@ export function runEducationGraphScenarios(buildGraph: () => Promise<Graph>): vo
         const author = authors.find(a => pythonAuthorIds.has(a.id));
 
         const courseChildren = await getChildNodes(python!.id);
-        const chapters = courseChildren.filter(n => n.type === 'Chapter');
+        const chapters = courseChildren.filter(n => n.labels.includes('Chapter'));
         const firstChapter = chapters[0];
 
         const chapterChildren = await getChildNodes(firstChapter!.id);
-        const sections = chapterChildren.filter(n => n.type === 'Section');
+        const sections = chapterChildren.filter(n => n.labels.includes('Section'));
         const firstSection = sections[0];
 
         const pathAuthorToCourse = await graph.traverse(author!.id, python!.id, { method: 'bfs' });
@@ -487,9 +487,9 @@ export function runEducationGraphScenarios(buildGraph: () => Promise<Graph>): vo
 
         const pathTargets = paths!.map(p => p[p.length - 1]);
         const children = await getChildNodes(pythonCourse!.id);
-        const chapters = children.filter(n => n.type === 'Chapter');
-        const exams = children.filter(n => n.type === 'Exam');
-        const tags = children.filter(n => n.type === 'Tag');
+        const chapters = children.filter(n => n.labels.includes('Chapter'));
+        const exams = children.filter(n => n.labels.includes('Exam'));
+        const tags = children.filter(n => n.labels.includes('Tag'));
 
         chapters.forEach(ch => {
           expect(pathTargets).toContain(ch.id);

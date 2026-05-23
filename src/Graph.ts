@@ -31,6 +31,10 @@ export { TransactionNotActiveError, TransactionFailedError } from './Graph/Graph
  * // Default in-memory (existing behaviour, unchanged)
  * const graph = new Graph();
  * const node = await graph.addNode('Person', { name: 'Alice' });
+
+ * @example
+ * // Multi-label node
+ * const node = await graph.addNode(['Person', 'Employee'], { name: 'Alice' });
  *
  * @example
  * // MongoDB-backed graph
@@ -136,13 +140,13 @@ export class Graph {
 
   /**
    * Adds a new node to the graph.
-   * @param type - The type (label) of the node
+   * @param labels - One or more node labels (e.g., "Course" or ["Person", "Employee"])
    * @param properties - Optional JSON properties
    * @param transaction - Optional transaction to use for this operation
    * @returns The newly created Node
    */
-  async addNode(type: string, properties: Record<string, unknown> = {}, transaction?: GraphTransaction): Promise<Node> {
-    return this._index.addNode(type, properties, transaction);
+  async addNode(labels: string | string[], properties: Record<string, unknown> = {}, transaction?: GraphTransaction): Promise<Node> {
+    return this._index.addNode(labels, properties, transaction);
   }
 
   /**

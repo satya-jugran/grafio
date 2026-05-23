@@ -47,8 +47,8 @@ export function runGraphFromJSONScenarios(
     it('should throw NodeAlreadyExistsError for duplicate node IDs', async () => {
       const data = {
         nodes: [
-          { id: 'node1', type: 'Test', properties: { name: 'A' } },
-          { id: 'node1', type: 'Test', properties: { name: 'B' } },
+          { id: 'node1', labels: ['Test'], properties: { name: 'A' } },
+          { id: 'node1', labels: ['Test'], properties: { name: 'B' } },
         ],
         edges: [],
       };
@@ -58,8 +58,8 @@ export function runGraphFromJSONScenarios(
     it('should throw EdgeAlreadyExistsError for duplicate edge IDs', async () => {
       const data = {
         nodes: [
-          { id: 'node1', type: 'Test', properties: { name: 'A' } },
-          { id: 'node2', type: 'Test', properties: { name: 'B' } },
+          { id: 'node1', labels: ['Test'], properties: { name: 'A' } },
+          { id: 'node2', labels: ['Test'], properties: { name: 'B' } },
         ],
         edges: [
           { id: 'edge1', sourceId: 'node1', targetId: 'node2', type: 'LINKS', properties: {} },
@@ -72,7 +72,7 @@ export function runGraphFromJSONScenarios(
     it('should throw NodeNotFoundError for edge referencing non-existent source', async () => {
       const data = {
         nodes: [
-          { id: 'node1', type: 'Test', properties: { name: 'A' } },
+          { id: 'node1', labels: ['Test'], properties: { name: 'A' } },
         ],
         edges: [
           { id: 'edge1', sourceId: 'non-existent', targetId: 'node1', type: 'LINKS', properties: {} },
@@ -84,7 +84,7 @@ export function runGraphFromJSONScenarios(
     it('should throw NodeNotFoundError for edge referencing non-existent target', async () => {
       const data = {
         nodes: [
-          { id: 'node1', type: 'Test', properties: { name: 'A' } },
+          { id: 'node1', labels: ['Test'], properties: { name: 'A' } },
         ],
         edges: [
           { id: 'edge1', sourceId: 'node1', targetId: 'non-existent', type: 'LINKS', properties: {} },
@@ -96,8 +96,8 @@ export function runGraphFromJSONScenarios(
     it('should successfully create graph with valid data', async () => {
       const data = {
         nodes: [
-          { id: 'node1', type: 'Test', properties: { name: 'A' } },
-          { id: 'node2', type: 'Test', properties: { name: 'B' } },
+          { id: 'node1', labels: ['Test'], properties: { name: 'A' } },
+          { id: 'node2', labels: ['Test'], properties: { name: 'B' } },
         ],
         edges: [
           { id: 'edge1', sourceId: 'node1', targetId: 'node2', type: 'LINKS', properties: {} },
@@ -112,7 +112,7 @@ export function runGraphFromJSONScenarios(
       it('should throw InvalidPropertyError when node has nested object property', async () => {
         const data = {
           nodes: [
-            { id: 'node1', type: 'Test', properties: { name: 'A', meta: { key: 'value' } } },
+            { id: 'node1', labels: ['Test'], properties: { name: 'A', meta: { key: 'value' } } },
           ],
           edges: [],
         };
@@ -122,7 +122,7 @@ export function runGraphFromJSONScenarios(
       it('should throw InvalidPropertyError when node has array property', async () => {
         const data = {
           nodes: [
-            { id: 'node1', type: 'Test', properties: { tags: ['a', 'b'] } },
+            { id: 'node1', labels: ['Test'], properties: { tags: ['a', 'b'] } },
           ],
           edges: [],
         };
@@ -132,7 +132,7 @@ export function runGraphFromJSONScenarios(
       it('should throw InvalidPropertyError when node has function property', async () => {
         const data = {
           nodes: [
-            { id: 'node1', type: 'Test', properties: { callback: () => {} } },
+            { id: 'node1', labels: ['Test'], properties: { callback: () => {} } },
           ],
           edges: [],
         };
@@ -142,7 +142,7 @@ export function runGraphFromJSONScenarios(
       it('should accept node with all primitive properties', async () => {
         const data = {
           nodes: [
-            { id: 'node1', type: 'Test', properties: { name: 'A', age: 30, active: true, score: 99.5 } },
+            { id: 'node1', labels: ['Test'], properties: { name: 'A', age: 30, active: true, score: 99.5 } },
           ],
           edges: [],
         };
@@ -155,8 +155,8 @@ export function runGraphFromJSONScenarios(
       it('should throw InvalidPropertyError when edge has nested object property', async () => {
         const data = {
           nodes: [
-            { id: 'node1', type: 'Test', properties: { name: 'A' } },
-            { id: 'node2', type: 'Test', properties: { name: 'B' } },
+            { id: 'node1', labels: ['Test'], properties: { name: 'A' } },
+            { id: 'node2', labels: ['Test'], properties: { name: 'B' } },
           ],
           edges: [
             { id: 'edge1', sourceId: 'node1', targetId: 'node2', type: 'LINKS', properties: { meta: { key: 'value' } } },
@@ -168,8 +168,8 @@ export function runGraphFromJSONScenarios(
       it('should throw InvalidPropertyError when edge has array property', async () => {
         const data = {
           nodes: [
-            { id: 'node1', type: 'Test', properties: { name: 'A' } },
-            { id: 'node2', type: 'Test', properties: { name: 'B' } },
+            { id: 'node1', labels: ['Test'], properties: { name: 'A' } },
+            { id: 'node2', labels: ['Test'], properties: { name: 'B' } },
           ],
           edges: [
             { id: 'edge1', sourceId: 'node1', targetId: 'node2', type: 'LINKS', properties: { values: [1, 2, 3] } },
@@ -181,8 +181,8 @@ export function runGraphFromJSONScenarios(
       it('should throw InvalidPropertyError when edge has function property', async () => {
         const data = {
           nodes: [
-            { id: 'node1', type: 'Test', properties: { name: 'A' } },
-            { id: 'node2', type: 'Test', properties: { name: 'B' } },
+            { id: 'node1', labels: ['Test'], properties: { name: 'A' } },
+            { id: 'node2', labels: ['Test'], properties: { name: 'B' } },
           ],
           edges: [
             { id: 'edge1', sourceId: 'node1', targetId: 'node2', type: 'LINKS', properties: { callback: () => {} } },
@@ -194,8 +194,8 @@ export function runGraphFromJSONScenarios(
       it('should accept edge with all primitive properties', async () => {
         const data = {
           nodes: [
-            { id: 'node1', type: 'Test', properties: { name: 'A' } },
-            { id: 'node2', type: 'Test', properties: { name: 'B' } },
+            { id: 'node1', labels: ['Test'], properties: { name: 'A' } },
+            { id: 'node2', labels: ['Test'], properties: { name: 'B' } },
           ],
           edges: [
             { id: 'edge1', sourceId: 'node1', targetId: 'node2', type: 'LINKS', properties: { weight: 0.95, active: true } },
