@@ -5,6 +5,10 @@ import type * as Preset from '@docusaurus/preset-classic';
 const config: Config = {
   title: 'Grafio',
   tagline: 'High-performance graph database with native Cypher support and pluggable storage',
+
+  clientModules: [
+    require.resolve('./src/clientModules/gtagPageView'),
+  ],
   favicon: 'img/favicon.svg',
   url: 'https://satya-jugran.github.io',
   baseUrl: '/grafio/',
