@@ -1,4 +1,4 @@
-# Open Cypher clauses support
+# Open Cypher Coverage
 
 import CoverageChart from '@site/src/components/CoverageChart';
 
