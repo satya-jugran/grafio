@@ -118,7 +118,7 @@ export interface QueryAst {
   kind: 'Query';
   /** Pipeline segments (WITH-delimited). Empty array for non-WITH queries. */
   segments: QuerySegment[];
-  /** The MATCH clause (required). */
+  /** The MATCH clause (synthesized as empty if omitted by user). */
   match: MatchClause;
   /** Optional WHERE clause. */
   where?: WhereClause;

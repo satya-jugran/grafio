@@ -289,7 +289,7 @@ export class Parser {
     return { kind: 'Having', expression };
   }
 
-  /** RETURN [DISTINCT] returnItem (',' returnItem)* */
+  /** WITH [DISTINCT] ('*' | returnItem) (',' returnItem)* [ORDER BY ...] [SKIP ...] [LIMIT ...] [WHERE ...] */
   private _parseWithClause(): import('./ast/AstNode').WithClause {
     this._consume(TokenKind.WITH, "Expected 'WITH'");
     let star = false;
@@ -313,10 +313,10 @@ export class Parser {
       }
     }
 
+    const where = this._check(TokenKind.WHERE) ? this._parseWhereClause() : undefined;
     const orderBy = this._check(TokenKind.ORDER) ? this._parseOrderByClause() : undefined;
     const skip = this._check(TokenKind.SKIP) ? this._parseSkipClause() : undefined;
     const limit = this._check(TokenKind.LIMIT) ? this._parseLimitClause() : undefined;
-    const where = this._check(TokenKind.WHERE) ? this._parseWhereClause() : undefined;
 
     return {
       kind: 'With',

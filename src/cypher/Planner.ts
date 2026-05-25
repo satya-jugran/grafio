@@ -77,9 +77,6 @@ export class Planner {
           delete: segment.delete,
           remove: segment.remove,
           return: { kind: 'Return', distinct: segment.with.distinct, items: segment.with.items },
-          orderBy: segment.with.orderBy,
-          skip: segment.with.skip,
-          limit: segment.with.limit,
           segments: [],
         };
         await this._planSegment(fakeAst, steps, knownVars, segment.with.star);
@@ -89,6 +86,12 @@ export class Planner {
             kind: 'FilterStep',
             predicate: segment.with.where.expression,
           });
+        }
+        if (segment.with.orderBy) {
+          steps.push(this._projPlanner.planSort({ orderBy: segment.with.orderBy, return: fakeAst.return } as any));
+        }
+        if (segment.with.skip || segment.with.limit) {
+          steps.push(this._projPlanner.planLimit({ skip: segment.with.skip, limit: segment.with.limit } as any));
         }
       }
     }
