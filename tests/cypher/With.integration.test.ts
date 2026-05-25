@@ -43,15 +43,25 @@ describe('CypherEngine WITH Integration', () => {
     expect(res.rows[0].name).toBe('Bob');
   });
 
-  it('allows duplicate bindings across MATCH clauses separated by WITH (join anchoring)', async () => {
-    await engine.execute("CREATE (a:Person {name: 'Alice'})");
-    // `n` is re-bound in the second MATCH, but since it's already in the WITH scope, it should anchor the join.
+  it('anchors the next MATCH to variables passed through WITH (join anchoring)', async () => {
+    await engine.execute("CREATE (a:Person {name: 'Alice'}), (b:Person {name: 'Bob'})");
+    // `n` is passed through WITH. The second MATCH uses `n` as an anchor, so it only finds Alice.
     const res = await engine.execute(
-      "MATCH (n:Person) WITH n.name AS name MATCH (n:Person) RETURN n.name AS finalName, name"
+      "MATCH (n:Person {name: 'Alice'}) WITH n MATCH (n:Person) RETURN n.name AS finalName"
     );
     expect(res.rows).toHaveLength(1);
     expect(res.rows[0].finalName).toBe('Alice');
-    expect(res.rows[0].name).toBe('Alice');
+  });
+
+  it('allows variables dropped by WITH to be re-bound as new full scans in subsequent MATCH clauses', async () => {
+    await engine.execute("CREATE (a:Person {name: 'Alice'}), (b:Person {name: 'Bob'})");
+    // `n` is dropped by the WITH clause. The second MATCH binds a completely new `n` variable, doing a full node scan.
+    const res = await engine.execute(
+      "MATCH (n:Person {name: 'Alice'}) WITH n.name AS name MATCH (n:Person) RETURN n.name AS finalName, name ORDER BY n.name"
+    );
+    expect(res.rows).toHaveLength(2);
+    expect(res.rows[0]).toEqual({ finalName: 'Alice', name: 'Alice' });
+    expect(res.rows[1]).toEqual({ finalName: 'Bob', name: 'Alice' });
   });
 
   it('throws SemanticError if unaliased expression used in WITH', async () => {

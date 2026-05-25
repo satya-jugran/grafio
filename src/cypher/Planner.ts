@@ -131,7 +131,7 @@ export class Planner {
     // crossVar and become a FilterStep.
     const consumed = new Set<string>();
     for (const pattern of orderedPatterns) {
-      this._patternPlanner.planPath(pattern, steps, ast, perVar, idLookups, consumed);
+      this._patternPlanner.planPath(pattern, steps, ast, perVar, idLookups, consumed, knownVars);
     }
 
     // ── 5. Remove consumed id-lookups from crossVar ────────────────
@@ -330,6 +330,21 @@ export class Planner {
       (projStep as any).star = true;
     }
     steps.push(projStep);
+
+    // ── 8. Prune knownVars based on projection ──────────────────────
+    if (!isWithStar) {
+      const projected = new Set<string>();
+      for (const item of ast.return.items) {
+        if (item.alias) projected.add(item.alias);
+        else if (item.expression.kind === 'Identifier') projected.add(item.expression.name);
+      }
+      knownVars.clear();
+      for (const p of projected) knownVars.add(p);
+    } else {
+      for (const item of ast.return.items) {
+        if (item.alias) knownVars.add(item.alias);
+      }
+    }
   }
 
   // ── CREATE pattern planning ──────────────────────────────────────
