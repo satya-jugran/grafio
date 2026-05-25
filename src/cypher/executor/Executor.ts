@@ -31,6 +31,10 @@ import {
   ProjectStep,
   PlanStepExecutionStats,
   PlanExecutionStats,
+  MergeStep,
+  SetPropertyStep,
+  CreateNodeStep,
+  CreateEdgeStep,
 } from '../plan/QueryPlan';
 import { CypherResult, CypherRow, CypherSummary } from '../Result';
 import { CypherRuntimeError } from '../errors';
@@ -150,6 +154,8 @@ export class Executor {
         return this._readExecutor.executeNodeScan(step, rows, params, transaction);
       case 'NodeSeekStep':
         return this._readExecutor.executeNodeSeek(step, rows, params, transaction);
+      case 'VerifyNodeStep':
+        return this._readExecutor.executeVerifyNode(step, rows, params, transaction);
       case 'EdgeExpandStep':
         return this._readExecutor.executeEdgeExpand(step, rows, params, transaction);
 
@@ -176,6 +182,63 @@ export class Executor {
         this._edgesCreated += result.edgesCreated ?? 0;
         this._propertiesSet += result.propertiesSet ?? 0;
         return result.rows;
+      }
+      case 'MergeStep': {
+        const stepMerge = step as MergeStep;
+        const resultRows: Row[] = [];
+        for (const row of rows) {
+          let matchRows = [row];
+          for (const rStep of stepMerge.readSteps) {
+             matchRows = await this._executeStep(rStep, matchRows, params, transaction);
+             if (matchRows.length === 0) break;
+          }
+
+          if (matchRows.length > 0) {
+            let currentRows = matchRows;
+            for (const item of stepMerge.onMatchItems) {
+               const setStep: SetPropertyStep = {
+                 kind: 'SetPropertyStep',
+                 variable: item.variable,
+                 entityKind: item.entityKind,
+                 assignments: [{ key: item.property, value: item.value }]
+               };
+               const res = await this._writeExecutor.executeSetProperty(setStep, currentRows, params, transaction);
+               currentRows = res.rows;
+               this._propertiesSet += res.propertiesSet ?? 0;
+            }
+            resultRows.push(...currentRows);
+          } else {
+            let currentRows = [row];
+            for (const cStep of stepMerge.createSteps) {
+               if (cStep.kind === 'CreateNodeStep') {
+                 const res = await this._writeExecutor.executeCreateNode(cStep as CreateNodeStep, currentRows, params, transaction);
+                 currentRows = res.rows;
+                 this._nodesCreated += res.nodesCreated ?? 0;
+                 this._propertiesSet += res.propertiesSet ?? 0;
+               } else if (cStep.kind === 'CreateEdgeStep') {
+                 const res = await this._writeExecutor.executeCreateEdge(cStep as CreateEdgeStep, currentRows, params, transaction);
+                 currentRows = res.rows;
+                 this._edgesCreated += res.edgesCreated ?? 0;
+                 this._propertiesSet += res.propertiesSet ?? 0;
+               } else {
+                 currentRows = await this._executeStep(cStep, currentRows, params, transaction);
+               }
+            }
+            for (const item of stepMerge.onCreateItems) {
+               const setStep: SetPropertyStep = {
+                 kind: 'SetPropertyStep',
+                 variable: item.variable,
+                 entityKind: item.entityKind,
+                 assignments: [{ key: item.property, value: item.value }]
+               };
+               const res = await this._writeExecutor.executeSetProperty(setStep, currentRows, params, transaction);
+               currentRows = res.rows;
+               this._propertiesSet += res.propertiesSet ?? 0;
+            }
+            resultRows.push(...currentRows);
+          }
+        }
+        return resultRows;
       }
       case 'SetPropertyStep': {
         const result = await this._writeExecutor.executeSetProperty(step, rows, params, transaction);

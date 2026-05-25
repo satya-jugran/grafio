@@ -217,13 +217,24 @@ export class Semantic {
     // items for SHOW INDEXES are projection aliases, not variable references.
     if (ast.createIndex || ast.dropIndex || ast.showIndexes) return ast;
 
-    // Build the extra scope from CREATE patterns so variables introduced
-    // by CREATE can be referenced in RETURN, WHERE, ORDER BY, etc.
-    const extraScope = this._collectCreateScope(ast);
+    // Build the extra scope from CREATE/MERGE patterns so variables introduced
+    // by them can be referenced in RETURN, WHERE, ORDER BY, etc.
+    const extraScope = this._collectWriteScope(ast);
 
     // Check WHERE clause.
     if (ast.where) {
       this._checkExpressionVars(ast.where.expression, 'WHERE', extraScope);
+    }
+
+    // Check MERGE clause SET items.
+    if (ast.merge) {
+      for (const merge of ast.merge) {
+        for (const action of merge.actions) {
+          for (const item of action.items) {
+            this._checkExpressionVars(item.value, 'MERGE SET', extraScope);
+          }
+        }
+      }
     }
 
     // Check RETURN items.
@@ -847,12 +858,23 @@ export class Semantic {
    * @throws {CypherSemanticError} if a variable used in a write clause is undefined.
    */
   private _checkWriteScope(ast: QueryAst): QueryAst {
-    if (!ast.set && !ast.delete && !ast.remove) return ast;
+    if (!ast.set && !ast.delete && !ast.remove && !ast.merge) return ast;
 
-    // Build the full set of known variables: MATCH scope ∪ CREATE scope.
+    // Build the full set of known variables: MATCH scope ∪ CREATE/MERGE scope.
     const knownVars = new Set(this._scope.keys());
-    const createScope = this._collectCreateScope(ast);
-    for (const v of createScope) knownVars.add(v);
+    const writeScope = this._collectWriteScope(ast);
+    for (const v of writeScope) knownVars.add(v);
+
+    // MERGE clause: SET variable must be in scope.
+    if (ast.merge) {
+      for (const merge of ast.merge) {
+        for (const action of merge.actions) {
+          for (const item of action.items) {
+            this._checkExpressionVarsBound(item.variable, 'MERGE SET', knownVars);
+          }
+        }
+      }
+    }
 
     // SET clause: the variable property-access target must be in scope.
     if (ast.set) {
@@ -918,6 +940,22 @@ export class Semantic {
       }
     }
 
+    // Check MERGE SET clauses.
+    if (ast.merge) {
+      for (const merge of ast.merge) {
+        for (const action of merge.actions) {
+          for (const item of action.items) {
+            if (this._expressionReferencesAny(item.variable, deletedVars)) {
+              throw new CypherSemanticError(
+                `Cannot SET property on deleted variable. ` +
+                `Variables deleted: ${[...deletedVars].join(', ')}`,
+              );
+            }
+          }
+        }
+      }
+    }
+
     return ast;
   }
 
@@ -934,13 +972,27 @@ export class Semantic {
    * @throws {CypherSemanticError} if a SET value is a non-primitive literal.
    */
   private _checkSetTypes(ast: QueryAst): QueryAst {
-    if (!ast.set) return ast;
+    if (ast.set) {
+      for (const item of ast.set.items) {
+        if (!this._isPrimitiveExpression(item.value)) {
+          throw new CypherSemanticError(
+            'Property value must be a primitive type (string, number, boolean, or null)',
+          );
+        }
+      }
+    }
 
-    for (const item of ast.set.items) {
-      if (!this._isPrimitiveExpression(item.value)) {
-        throw new CypherSemanticError(
-          'Property value must be a primitive type (string, number, boolean, or null)',
-        );
+    if (ast.merge) {
+      for (const merge of ast.merge) {
+        for (const action of merge.actions) {
+          for (const item of action.items) {
+            if (!this._isPrimitiveExpression(item.value)) {
+              throw new CypherSemanticError(
+                'Property value must be a primitive type (string, number, boolean, or null)',
+              );
+            }
+          }
+        }
       }
     }
 
@@ -950,26 +1002,43 @@ export class Semantic {
   // ── Write-pass helpers ──────────────────────────────────────────
 
   /**
-   * Collect all variable names introduced by CREATE patterns into a Set.
+   * Collect all variable names introduced by CREATE and MERGE patterns into a Set.
    *
-   * Walks the pattern paths in the CREATE clause the same way
+   * Walks the pattern paths in the CREATE and MERGE clauses the same way
    * {@link _resolveScopes} walks MATCH patterns.
    */
-  private _collectCreateScope(ast: QueryAst): Set<string> {
+  private _collectWriteScope(ast: QueryAst): Set<string> {
     const vars = new Set<string>();
-    if (!ast.create) return vars;
 
-    for (const pattern of ast.create.patterns) {
-      // Handle NamedPath binding.
-      if (pattern.kind === 'NamedPath' && pattern.name) {
-        vars.add(pattern.name);
+    if (ast.create) {
+      for (const pattern of ast.create.patterns) {
+        // Handle NamedPath binding.
+        if (pattern.kind === 'NamedPath' && pattern.name) {
+          vars.add(pattern.name);
+        }
+        const segments = getPatternSegments(pattern);
+        for (const segment of segments) {
+          if (segment.kind === 'NodePattern' && segment.variable) {
+            vars.add(segment.variable);
+          } else if (segment.kind === 'EdgePattern' && segment.variable) {
+            vars.add(segment.variable);
+          }
+        }
       }
-      const segments = getPatternSegments(pattern);
-      for (const segment of segments) {
-        if (segment.kind === 'NodePattern' && segment.variable) {
-          vars.add(segment.variable);
-        } else if (segment.kind === 'EdgePattern' && segment.variable) {
-          vars.add(segment.variable);
+    }
+
+    if (ast.merge) {
+      for (const merge of ast.merge) {
+        if (merge.pattern.kind === 'NamedPath' && merge.pattern.name) {
+          vars.add(merge.pattern.name);
+        }
+        const segments = getPatternSegments(merge.pattern);
+        for (const segment of segments) {
+          if (segment.kind === 'NodePattern' && segment.variable) {
+            vars.add(segment.variable);
+          } else if (segment.kind === 'EdgePattern' && segment.variable) {
+            vars.add(segment.variable);
+          }
         }
       }
     }

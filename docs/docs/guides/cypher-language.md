@@ -122,23 +122,7 @@ MATCH (p:Person {name: 'Alice'})
 RETURN p.name, p.age
 ```
 
-## Supported Clauses
 
-| Clause | Support | Notes |
-|--------|---------|-------|
-| `MATCH` | ✅ Read-only | Typed/untyped nodes, directed edges |
-| `WHERE` | ✅ Full expressions | AND/OR/NOT, comparisons, IN, IS NULL |
-| `RETURN` | ✅ With DISTINCT | Property access, aliases with AS |
-| `ORDER BY` | ✅ ASC/DESC | Default ASC |
-| `SKIP` | ✅ Literal + `$param` | Runtime evaluation |
-| `LIMIT` | ✅ Literal + `$param` | Runtime evaluation |
-| `WITH` | ✅ Chaining | Aliases and aggregations |
-| `CREATE` | ✅ Write | Node and relationship creation |
-| `DELETE` | ✅ Write | Node and relationship deletion |
-| `DETACH DELETE` | ✅ Cascade | Delete with incident edges |
-| `SET` | ✅ Write | Property updates |
-| `CREATE INDEX` | ✅ DDL | Index creation |
-| `DROP INDEX` | ✅ DDL | Index removal |
 
 ## Next Steps
 

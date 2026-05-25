@@ -45,6 +45,7 @@ export class PatternPlanner {
     perVar: Map<string, PropertyFilter[]>,
     idLookups?: Map<string, unknown>,
     consumed?: Set<string>,
+    knownVars?: ReadonlySet<string>,
   ): void {
     const segments = getPatternSegments(pattern);
     if (segments.length === 0) return;
@@ -67,6 +68,37 @@ export class PatternPlanner {
       consumed?.add(firstNode.variable);
       this._planTrailingSegments(segments, steps, ast, pattern);
       this._emitPerVarFilters(firstNode.variable, perVar, steps);
+      return;
+    }
+
+    // ── Root variable is already bound → VerifyNodeStep ──────────
+    if (firstNode.variable && knownVars?.has(firstNode.variable)) {
+      const label = firstNode.labels.length > 0 ? firstNode.labels[0] : '';
+      
+      const inlineFilters: PropertyFilter[] =
+        firstNode.properties && Object.keys(firstNode.properties).length > 0
+          ? Object.entries(firstNode.properties).map(([key, value]) => ({
+              key,
+              value,
+              op: '=' as const,
+            }))
+          : [];
+      
+      const extraFilters = perVar.get(firstNode.variable) ?? [];
+      const allFilters = [...inlineFilters, ...extraFilters];
+      const propertyFilters = allFilters.length > 0 ? allFilters : undefined;
+      const types = firstNode.labels.length > 0 ? firstNode.labels : undefined;
+
+      steps.push({
+        kind: 'VerifyNodeStep',
+        variable: firstNode.variable,
+        label,
+        types,
+        propertyFilters,
+      });
+
+      consumed?.add(firstNode.variable);
+      this._planTrailingSegments(segments, steps, ast, pattern);
       return;
     }
 
@@ -403,6 +435,9 @@ export class PatternPlanner {
         return step.variable;
       }
       if (step.kind === 'NodeSeekStep') {
+        return step.variable;
+      }
+      if (step.kind === 'VerifyNodeStep') {
         return step.variable;
       }
       if (step.kind === 'EdgeExpandStep') {

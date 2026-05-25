@@ -15,6 +15,7 @@ import {
   NodeScanStep,
   NodeSeekStep,
   EdgeExpandStep,
+  VerifyNodeStep,
 } from '../../plan/QueryPlan';
 import { UnboundParameterError } from '../../errors';
 import { Row, ExpressionEvaluator } from '../ExpressionEvaluator';
@@ -126,6 +127,84 @@ export class ReadStepExecutor {
     }
 
     return resolved;
+  }
+
+  // ── VerifyNodeStep ───────────────────────────────────────────────
+
+  /**
+   * Execute a {@link VerifyNodeStep}: filter existing rows by verifying
+   * that their bound variable matches the pattern's required labels and properties.
+   */
+  async executeVerifyNode(
+    step: VerifyNodeStep,
+    rows: Row[],
+    params: Record<string, unknown>,
+    transaction?: GraphTransaction,
+  ): Promise<Row[]> {
+    let resolvedFilters: Array<Record<string, unknown>> | undefined;
+    if (step.propertyFilters?.length) {
+      resolvedFilters = this._resolvePropertyFilterParams(
+        step.propertyFilters as Array<Record<string, unknown>>,
+        params,
+      );
+    }
+
+    return parallelMap(rows, async (rowChunk) => {
+      const chunkResult: Row[] = [];
+      for (const row of rowChunk) {
+        const node = row.get(step.variable) as Node | undefined;
+        if (!node) continue;
+
+        if (step.types && step.types.length > 0) {
+          if (!node.labels || !step.types.some(t => node.labels.includes(t))) continue;
+        }
+
+        if (resolvedFilters) {
+          if (!this._evaluatePropertyFilters(node.properties, resolvedFilters)) continue;
+        }
+
+        chunkResult.push(row);
+      }
+      return chunkResult;
+    }, this._maxDegreeOfParallelism);
+  }
+
+  private _evaluatePropertyFilters(nodeProps: Record<string, unknown>, filters: Array<Record<string, unknown>>): boolean {
+    for (const filter of filters) {
+      if (!this._evaluateOneFilter(nodeProps, filter)) return false;
+    }
+    return true;
+  }
+
+  private _evaluateOneFilter(nodeProps: Record<string, unknown>, filter: Record<string, unknown>): boolean {
+    if (filter.AND && Array.isArray(filter.AND)) {
+      return filter.AND.every(f => this._evaluateOneFilter(nodeProps, f));
+    }
+    if (filter.OR && Array.isArray(filter.OR)) {
+      return filter.OR.some(f => this._evaluateOneFilter(nodeProps, f));
+    }
+
+    const key = filter.key as string;
+    const op = (filter.op as string) || '=';
+    const expectedValue = filter.value;
+    const actualValue = nodeProps[key];
+
+    switch (op) {
+      case '=': return actualValue === expectedValue;
+      case '<>': return actualValue !== expectedValue;
+      case '>': return (actualValue as any) > (expectedValue as any);
+      case '<': return (actualValue as any) < (expectedValue as any);
+      case '>=': return (actualValue as any) >= (expectedValue as any);
+      case '<=': return (actualValue as any) <= (expectedValue as any);
+      case 'CONTAINS': return typeof actualValue === 'string' && actualValue.includes(expectedValue as string);
+      case 'STARTS_WITH': return typeof actualValue === 'string' && actualValue.startsWith(expectedValue as string);
+      case 'ENDS_WITH': return typeof actualValue === 'string' && actualValue.endsWith(expectedValue as string);
+      case 'IN': return Array.isArray(expectedValue) && expectedValue.includes(actualValue);
+      case 'NOT_IN': return Array.isArray(expectedValue) && !expectedValue.includes(actualValue);
+      case 'IS_NULL': return actualValue == null;
+      case 'IS_NOT_NULL': return actualValue != null;
+      default: return false;
+    }
   }
 
   // ── NodeSeekStep ───────────────────────────────────────────────
@@ -247,6 +326,11 @@ export class ReadStepExecutor {
         continue;
       }
 
+      const existingTarget = row.get(step.target) as Node | undefined;
+      if (existingTarget && existingTarget.id !== targetNode.id) {
+        continue;
+      }
+
       const newRow = new Map(row);
       if (step.edgeVar) newRow.set(step.edgeVar, edge);
       newRow.set(step.target, targetNode);
@@ -336,19 +420,22 @@ export class ReadStepExecutor {
           : undefined;
 
         if (newHops >= step.minHops && newHops <= step.maxHops) {
-          const newRow = new Map(curRow);
-          if (step.edgeVar) newRow.set(step.edgeVar, edge);
-          newRow.set(step.target, targetNode);
+          const existingTarget = curRow.get(step.target) as Node | undefined;
+          if (!existingTarget || existingTarget.id === targetNode.id) {
+            const newRow = new Map(curRow);
+            if (step.edgeVar) newRow.set(step.edgeVar, edge);
+            newRow.set(step.target, targetNode);
 
-          if (step.pathVar && newPathNodes && newPathEdges) {
-            const pathValue: (Node | Edge)[] = [newPathNodes[0]];
-            for (let i = 0; i < newPathEdges.length; i++) {
-              pathValue.push(newPathEdges[i], newPathNodes[i + 1]);
+            if (step.pathVar && newPathNodes && newPathEdges) {
+              const pathValue: (Node | Edge)[] = [newPathNodes[0]];
+              for (let i = 0; i < newPathEdges.length; i++) {
+                pathValue.push(newPathEdges[i], newPathNodes[i + 1]);
+              }
+              newRow.set(step.pathVar, pathValue);
             }
-            newRow.set(step.pathVar, pathValue);
-          }
 
-          result.push(newRow);
+            result.push(newRow);
+          }
         }
 
         const prevHops = visited.get(targetId);
