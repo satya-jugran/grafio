@@ -858,7 +858,7 @@ export class Semantic {
    * @throws {CypherSemanticError} if a variable used in a write clause is undefined.
    */
   private _checkWriteScope(ast: QueryAst): QueryAst {
-    if (!ast.set && !ast.delete && !ast.remove) return ast;
+    if (!ast.set && !ast.delete && !ast.remove && !ast.merge) return ast;
 
     // Build the full set of known variables: MATCH scope ∪ CREATE/MERGE scope.
     const knownVars = new Set(this._scope.keys());
