@@ -214,10 +214,12 @@ export class Executor {
                  const res = await this._writeExecutor.executeCreateNode(cStep as CreateNodeStep, currentRows, params, transaction);
                  currentRows = res.rows;
                  this._nodesCreated += res.nodesCreated ?? 0;
+                 this._propertiesSet += res.propertiesSet ?? 0;
                } else if (cStep.kind === 'CreateEdgeStep') {
                  const res = await this._writeExecutor.executeCreateEdge(cStep as CreateEdgeStep, currentRows, params, transaction);
                  currentRows = res.rows;
                  this._edgesCreated += res.edgesCreated ?? 0;
+                 this._propertiesSet += res.propertiesSet ?? 0;
                } else {
                  currentRows = await this._executeStep(cStep, currentRows, params, transaction);
                }
