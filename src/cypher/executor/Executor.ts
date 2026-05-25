@@ -154,6 +154,8 @@ export class Executor {
         return this._readExecutor.executeNodeScan(step, rows, params, transaction);
       case 'NodeSeekStep':
         return this._readExecutor.executeNodeSeek(step, rows, params, transaction);
+      case 'VerifyNodeStep':
+        return this._readExecutor.executeVerifyNode(step, rows, params, transaction);
       case 'EdgeExpandStep':
         return this._readExecutor.executeEdgeExpand(step, rows, params, transaction);
 

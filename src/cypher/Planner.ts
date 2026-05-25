@@ -140,7 +140,7 @@ export class Planner {
           }
         }
         const readSteps: PlanStep[] = [];
-        this._patternPlanner.planPath(mergeClause.pattern, readSteps, ast, new Map());
+        this._patternPlanner.planPath(mergeClause.pattern, readSteps, ast, new Map(), undefined, undefined, knownVars);
 
         const createSteps: PlanStep[] = [];
         this._planCreatePath(mergeClause.pattern, createSteps, new Set(knownVars));

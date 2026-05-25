@@ -60,7 +60,8 @@ export type PlanStep =
   | CreateIndexStep
   | DropIndexStep
   | ShowIndexesStep
-  | MergeStep;
+  | MergeStep
+  | VerifyNodeStep;
 
 // ── Individual step types ─────────────────────────────────────────
 
@@ -99,6 +100,23 @@ export interface NodeSeekStep {
   key?: string;
   types?: string[];
   variable: string;
+}
+
+/**
+ * Verify that an already-bound node matches the required labels and properties.
+ *
+ * Used primarily by MERGE when the pattern root is an existing bound variable.
+ */
+export interface VerifyNodeStep {
+  kind: 'VerifyNodeStep';
+  /** The bound variable name to verify. */
+  variable: string;
+  /** The primary label to check (informational, falls back to types). */
+  label?: string;
+  /** Node type(s) to require. The node must have at least one of these labels. */
+  types?: string[];
+  /** Optional property filters pushed down from inline pattern properties. */
+  propertyFilters?: PropertyFilter[];
 }
 
 /**

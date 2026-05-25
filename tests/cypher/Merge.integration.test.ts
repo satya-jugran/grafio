@@ -42,7 +42,7 @@ describe('CypherEngine MERGE Integration', () => {
     expect(res.rows[0].age).toBe(30);
   });
 
-  it('creates edges if they do not exist', async () => {
+  it('creates edges between existing bound variables', async () => {
     await engine.execute("CREATE (a:Person {name: 'Alice'}), (b:Person {name: 'Bob'})");
     await engine.execute(
       "MATCH (a:Person {name: 'Alice'}), (b:Person {name: 'Bob'}) MERGE (a)-[r:KNOWS]->(b) ON CREATE SET r.since = 2020"
@@ -52,7 +52,7 @@ describe('CypherEngine MERGE Integration', () => {
     expect(res.rows[0].since).toBe(2020);
   });
 
-  it('matches edges if they already exist', async () => {
+  it('matches edges between existing bound variables', async () => {
     await engine.execute("CREATE (a:Person {name: 'Alice'}), (b:Person {name: 'Bob'})");
     await engine.execute(
       "MATCH (a:Person {name: 'Alice'}), (b:Person {name: 'Bob'}) CREATE (a)-[r:KNOWS {since: 2020}]->(b)"
@@ -63,5 +63,23 @@ describe('CypherEngine MERGE Integration', () => {
     const res = await engine.execute('MATCH ()-[r:KNOWS]->() RETURN r.since AS since');
     expect(res.rows).toHaveLength(1);
     expect(res.rows[0].since).toBe(2021);
+  });
+
+  it('ignores conflicting inline properties on a bound node during MERGE creation', async () => {
+    await engine.execute("CREATE (a:Person {name: 'Alice'})");
+    // 'a' is bound to Alice. MERGE checks if Alice matches name='Charlie'. She doesn't.
+    // So MERGE falls back to CREATE.
+    // During CREATE, 'a' is already bound, so it DOES NOT create a new node for 'a'.
+    // Instead, it creates 'b' (Bob) and an edge from the bound 'a' (Alice) to 'b'.
+    await engine.execute(
+      "MATCH (a:Person {name: 'Alice'}) MERGE (a:Person {name: 'Charlie'})-[r:KNOWS]->(b:Person {name: 'Bob'})"
+    );
+    const res = await engine.execute('MATCH (p:Person) RETURN p.name AS name');
+    // We should have Alice and Bob only. The 'Charlie' property is discarded during CREATE because 'a' is bound.
+    expect(res.rows).toHaveLength(2);
+    
+    // Verify edge is from Alice to Bob
+    const edgeRes = await engine.execute('MATCH (a:Person {name: "Alice"})-[r:KNOWS]->(b:Person {name: "Bob"}) RETURN r');
+    expect(edgeRes.rows).toHaveLength(1);
   });
 });
