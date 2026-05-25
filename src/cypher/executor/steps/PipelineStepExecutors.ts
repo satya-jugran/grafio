@@ -60,6 +60,11 @@ export class PipelineStepExecutor {
     const projected = await parallelMap(rows, (chunk) => {
       const mapped = chunk.map((row) => {
         const newRow = new Map<string, unknown>();
+        if (step.star) {
+          for (const [k, v] of row.entries()) {
+            newRow.set(k, v);
+          }
+        }
         for (const col of step.columns) {
           newRow.set(col.alias, this._evaluator.evaluate(col.expression, row, params));
         }
@@ -75,8 +80,9 @@ export class PipelineStepExecutor {
 
     for (const row of projected) {
       const keyParts: string[] = [];
-      for (const col of step.columns) {
-        keyParts.push(this._distinctKey(row.get(col.alias)));
+      const keys = step.star ? Array.from(row.keys()).sort() : step.columns.map(c => c.alias);
+      for (const colName of keys) {
+        keyParts.push(this._distinctKey(row.get(colName)));
       }
       const key = keyParts.join('\x00');
 

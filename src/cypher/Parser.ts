@@ -163,78 +163,101 @@ export class Parser {
     if (this._check(TokenKind.SHOW) && (this._peek(1)?.kind === TokenKind.INDEX || (this._peek(1)?.kind === TokenKind.IDENT && this._peek(1)?.value.toLowerCase() === 'indexes'))) {
       return this._parseShowIndexes();
     }
-    // MATCH is now optional — CREATE (n) RETURN n is valid standalone.
-    const match = this._check(TokenKind.MATCH) ? this._parseMatchClause() : undefined;
+    const segments: import('./ast/AstNode').QuerySegment[] = [];
 
-    // WHERE must appear immediately after MATCH per standard Cypher grammar.
-    const where = this._check(TokenKind.WHERE) ? this._parseWhereClause() : undefined;
+    while (!this._isAtEnd()) {
+      // MATCH is now optional — CREATE (n) RETURN n is valid standalone.
+      const match = this._check(TokenKind.MATCH) ? this._parseMatchClause() : undefined;
 
-    // Write clauses (each optional, in positional order).
-    // If CREATE is followed by INDEX, this is DDL — skip and let _ensureAtEnd reject the hybrid query.
-    const create = this._check(TokenKind.CREATE) && this._peek(1)?.kind !== TokenKind.INDEX
-      ? this._parseCreateClause()
-      : undefined;
+      // WHERE must appear immediately after MATCH per standard Cypher grammar.
+      const where = this._check(TokenKind.WHERE) ? this._parseWhereClause() : undefined;
 
-    const merge: MergeClause[] = [];
-    while (this._check(TokenKind.MERGE)) {
-      merge.push(this._parseMergeClause());
+      // Write clauses (each optional, in positional order).
+      // If CREATE is followed by INDEX, this is DDL — skip and let _ensureAtEnd reject the hybrid query.
+      const create = this._check(TokenKind.CREATE) && this._peek(1)?.kind !== TokenKind.INDEX
+        ? this._parseCreateClause()
+        : undefined;
+
+      const merge: MergeClause[] = [];
+      while (this._check(TokenKind.MERGE)) {
+        merge.push(this._parseMergeClause());
+      }
+
+      const set = this._check(TokenKind.SET) ? this._parseSetClause() : undefined;
+      const del = this._check(TokenKind.DELETE) || this._check(TokenKind.DETACH)
+        ? this._parseDeleteClause()
+        : undefined;
+      const remove = this._check(TokenKind.REMOVE) ? this._parseRemoveClause() : undefined;
+
+      if (this._check(TokenKind.WITH)) {
+        segments.push({
+          kind: 'QuerySegment',
+          match,
+          where,
+          create,
+          merge: merge.length > 0 ? merge : undefined,
+          set,
+          delete: del,
+          remove,
+          with: this._parseWithClause(),
+        });
+      } else {
+        const ret: ReturnClause = this._check(TokenKind.RETURN)
+          ? this._parseReturnClause()
+          : { kind: 'Return', distinct: false, items: [] };
+        const having = this._check(TokenKind.HAVING) ? this._parseHavingClause() : undefined;
+        const orderBy = this._check(TokenKind.ORDER) ? this._parseOrderByClause() : undefined;
+        const skip = this._check(TokenKind.SKIP) ? this._parseSkipClause() : undefined;
+        const limit = this._check(TokenKind.LIMIT) ? this._parseLimitClause() : undefined;
+
+        // Ensure no trailing tokens beyond the supported clauses.
+        if (!this._isAtEnd()) {
+          const token = this._peek();
+          throw new CypherSyntaxError(
+            `Unexpected token '${token.value}' after query clauses`,
+            token.line,
+            token.col,
+          );
+        }
+
+        const isEmpty =
+          segments.length === 0 &&
+          match === undefined &&
+          create === undefined &&
+          merge.length === 0 &&
+          set === undefined &&
+          del === undefined &&
+          remove === undefined &&
+          ret.items.length === 0;
+
+        if (isEmpty) {
+          throw new CypherSyntaxError(
+            "Query must contain at least one clause (MATCH, CREATE, RETURN, WITH, etc.)",
+            1,
+            1,
+          );
+        }
+
+        return {
+          kind: 'Query',
+          segments,
+          match: match ?? { kind: 'Match', patterns: [] },
+          where,
+          create,
+          merge: merge.length > 0 ? merge : undefined,
+          set,
+          delete: del,
+          remove,
+          return: ret,
+          having,
+          orderBy,
+          skip,
+          limit,
+        };
+      }
     }
-
-    const set = this._check(TokenKind.SET) ? this._parseSetClause() : undefined;
-    const del = this._check(TokenKind.DELETE) || this._check(TokenKind.DETACH)
-      ? this._parseDeleteClause()
-      : undefined;
-    const remove = this._check(TokenKind.REMOVE) ? this._parseRemoveClause() : undefined;
-    const ret: ReturnClause = this._check(TokenKind.RETURN)
-      ? this._parseReturnClause()
-      : { kind: 'Return', distinct: false, items: [] };
-    const having = this._check(TokenKind.HAVING) ? this._parseHavingClause() : undefined;
-    const orderBy = this._check(TokenKind.ORDER) ? this._parseOrderByClause() : undefined;
-    const skip = this._check(TokenKind.SKIP) ? this._parseSkipClause() : undefined;
-    const limit = this._check(TokenKind.LIMIT) ? this._parseLimitClause() : undefined;
-
-    // Ensure no trailing tokens beyond the supported clauses.
-    if (!this._isAtEnd()) {
-      const token = this._peek();
-      throw new CypherSyntaxError(
-        `Unexpected token '${token.value}' after query clauses`,
-        token.line,
-        token.col,
-      );
-    }
-
-    const isEmpty =
-      match === undefined &&
-      create === undefined &&
-      merge.length === 0 &&
-      set === undefined &&
-      del === undefined &&
-      remove === undefined &&
-      ret.items.length === 0;
-
-    if (isEmpty) {
-      throw new CypherSyntaxError(
-        "Query must contain at least one clause (MATCH, CREATE, RETURN, etc.)",
-        1,
-        1,
-      );
-    }
-
-    return {
-      kind: 'Query',
-      match: match ?? { kind: 'Match', patterns: [] },
-      where,
-      create,
-      merge: merge.length > 0 ? merge : undefined,
-      set,
-      delete: del,
-      remove,
-      return: ret,
-      having,
-      orderBy,
-      skip,
-      limit,
-    };
+    
+    throw new CypherSyntaxError("Unexpected end of query", 1, 1);
   }
 
   // ── Clause parsers ──────────────────────────────────────────────
@@ -266,7 +289,47 @@ export class Parser {
     return { kind: 'Having', expression };
   }
 
-  /** RETURN [DISTINCT] returnItem (',' returnItem)* */
+  /** WITH [DISTINCT] ('*' | returnItem) (',' returnItem)* [ORDER BY ...] [SKIP ...] [LIMIT ...] [WHERE ...] */
+  private _parseWithClause(): import('./ast/AstNode').WithClause {
+    this._consume(TokenKind.WITH, "Expected 'WITH'");
+    let star = false;
+    let distinct = false;
+    const items: ReturnItem[] = [];
+
+    if (this._check(TokenKind.STAR)) {
+      star = true;
+      this._advance();
+      while (this._check(TokenKind.COMMA)) {
+        this._advance();
+        items.push(this._parseReturnItem());
+      }
+    } else {
+      distinct = this._check(TokenKind.DISTINCT);
+      if (distinct) this._advance();
+      items.push(this._parseReturnItem());
+      while (this._check(TokenKind.COMMA)) {
+        this._advance();
+        items.push(this._parseReturnItem());
+      }
+    }
+
+    const where = this._check(TokenKind.WHERE) ? this._parseWhereClause() : undefined;
+    const orderBy = this._check(TokenKind.ORDER) ? this._parseOrderByClause() : undefined;
+    const skip = this._check(TokenKind.SKIP) ? this._parseSkipClause() : undefined;
+    const limit = this._check(TokenKind.LIMIT) ? this._parseLimitClause() : undefined;
+
+    return {
+      kind: 'With',
+      star,
+      distinct,
+      items,
+      where,
+      orderBy,
+      skip,
+      limit,
+    };
+  }
+
   private _parseReturnClause(): ReturnClause {
     this._consume(TokenKind.RETURN, "Expected 'RETURN'");
 
@@ -526,6 +589,7 @@ export class Parser {
 
     return {
       kind: 'Query',
+      segments: [],
       match: { kind: 'Match', patterns: [] },
       createIndex: {
         kind: 'CreateIndex',
@@ -562,6 +626,7 @@ export class Parser {
 
     return {
       kind: 'Query',
+      segments: [],
       match: { kind: 'Match', patterns: [] },
       dropIndex: {
         kind: 'DropIndex',
@@ -591,6 +656,7 @@ export class Parser {
 
     return {
       kind: 'Query',
+      segments: [],
       match: { kind: 'Match', patterns: [] },
       showIndexes: { kind: 'ShowIndexes' },
       return: {

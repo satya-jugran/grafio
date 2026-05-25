@@ -116,7 +116,9 @@ export interface ShowIndexesClause {
 
 export interface QueryAst {
   kind: 'Query';
-  /** The MATCH clause (required). */
+  /** Pipeline segments (WITH-delimited). Empty array for non-WITH queries. */
+  segments: QuerySegment[];
+  /** The MATCH clause (synthesized as empty if omitted by user). */
   match: MatchClause;
   /** Optional WHERE clause. */
   where?: WhereClause;
@@ -184,6 +186,45 @@ export interface ReturnItem {
   expression: Expression;
   /** Optional alias (the part after AS). */
   alias?: string;
+}
+
+export interface WithClause {
+  kind: 'With';
+  /** Whether WITH * was specified (carry all in-scope variables forward). */
+  star: boolean;
+  /** Whether DISTINCT is specified. */
+  distinct: boolean;
+  /** Projected items (same shape as ReturnItem). Empty when star=true and no extras. */
+  items: ReturnItem[];
+  /** Optional WHERE clause after WITH (filters the projected rows). */
+  where?: WhereClause;
+  /** Optional ORDER BY within WITH. */
+  orderBy?: OrderByClause;
+  /** Optional SKIP within WITH. */
+  skip?: SkipClause;
+  /** Optional LIMIT within WITH. */
+  limit?: LimitClause;
+}
+
+/** A single pipeline stage in a multi-segment query, delimited by WITH. */
+export interface QuerySegment {
+  kind: 'QuerySegment';
+  /** Optional MATCH clause for this segment. */
+  match?: MatchClause;
+  /** Optional WHERE clause for this segment (after MATCH, before WITH). */
+  where?: WhereClause;
+  /** Optional CREATE clause. */
+  create?: CreateClause;
+  /** Optional MERGE clauses. */
+  merge?: MergeClause[];
+  /** Optional SET clause. */
+  set?: SetClause;
+  /** Optional DELETE clause. */
+  delete?: DeleteClause;
+  /** Optional REMOVE clause. */
+  remove?: RemoveClause;
+  /** The WITH clause that terminates this segment. */
+  with: WithClause;
 }
 
 export interface OrderByClause {

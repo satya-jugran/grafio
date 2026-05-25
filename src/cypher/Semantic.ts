@@ -57,6 +57,8 @@ import {
   IsNullExpr,
   ListExpr,
   FunctionCallExpr,
+  WithClause,
+  QuerySegment,
 } from './ast/AstNode';
 
 // ── Scope types ───────────────────────────────────────────────────
@@ -130,6 +132,10 @@ export class Semantic {
    * @throws {CypherSemanticError} if any pass detects a violation.
    */
   public analyse(ast: QueryAst): QueryAst {
+    if (ast.segments && ast.segments.length > 0) {
+      return this._analyseMultiSegment(ast);
+    }
+
     // Scope resolution always runs first — it populates the scope table.
     let result = this._resolveScopes(ast);
 
@@ -139,6 +145,100 @@ export class Semantic {
     }
 
     return result;
+  }
+
+  private _analyseMultiSegment(ast: QueryAst): QueryAst {
+    this._scope = new Map();
+
+    for (const segment of ast.segments) {
+      // 1. Resolve MATCH scopes (adds to this._scope)
+      if (segment.match) {
+        for (let i = 0; i < segment.match.patterns.length; i++) {
+          this._collectPatternScope(segment.match.patterns[i], i);
+        }
+      }
+
+      // Check WITH alias rule before anything else
+      for (const item of segment.with.items) {
+        if (!item.alias && !this._isSimpleAliasable(item.expression)) {
+          throw new CypherSemanticError(`Expression in WITH must be aliased (use AS)`);
+        }
+      }
+
+      // Construct a temporary QueryAst for this segment to reuse existing passes
+      const fakeAst: QueryAst = {
+        kind: 'Query',
+        match: segment.match ?? { kind: 'Match', patterns: [] },
+        where: segment.where,
+        create: segment.create,
+        merge: segment.merge,
+        set: segment.set,
+        delete: segment.delete,
+        remove: segment.remove,
+        return: { kind: 'Return', distinct: segment.with.distinct, items: segment.with.items },
+        orderBy: segment.with.orderBy,
+        skip: segment.with.skip,
+        limit: segment.with.limit,
+        segments: [],
+      };
+
+      // Run passes 2 through 9 on the fake AST
+      // (Skips 1=_resolveScopes, 10=_checkIndexDdlValidity)
+      for (const pass of this._passes.slice(1, -1)) {
+        pass.call(this, fakeAst);
+      }
+
+      const extraScope = this._collectWriteScope(fakeAst);
+
+      // Compute output scope for next segment
+      const nextScope = new Map<string, ScopeEntry>();
+      
+      if (segment.with.star) {
+        // Carry forward all variables from current scope and extra scope
+        for (const [name, entry] of this._scope.entries()) {
+          nextScope.set(name, entry);
+        }
+        for (const name of extraScope) {
+          nextScope.set(name, { name, patternIndex: -1, bindingKind: 'node' });
+        }
+      }
+
+      // Add explicit items
+      for (let i = 0; i < segment.with.items.length; i++) {
+        const item = segment.with.items[i];
+        const alias = item.alias ?? this._deriveReturnAlias(item.expression);
+        nextScope.set(alias, { name: alias, patternIndex: i, bindingKind: 'node' }); 
+      }
+
+      // Check WITH WHERE against post-projection scope
+      if (segment.with.where) {
+        const tempScope = this._scope;
+        this._scope = nextScope;
+        this._checkExpressionVars(segment.with.where.expression, 'WITH WHERE');
+        this._scope = tempScope;
+      }
+
+      this._scope = nextScope;
+    }
+
+    // Now process the final segment (the remaining fields in QueryAst)
+    if (ast.match) {
+      for (let i = 0; i < ast.match.patterns.length; i++) {
+        this._collectPatternScope(ast.match.patterns[i], i);
+      }
+    }
+
+    // Run passes on the final segment (skipping _resolveScopes)
+    let result = ast;
+    for (const pass of this._passes.slice(1)) {
+      result = pass.call(this, result);
+    }
+
+    return result;
+  }
+
+  private _isSimpleAliasable(expr: Expression): boolean {
+    return expr.kind === 'Identifier' || expr.kind === 'PropertyAccess';
   }
 
   /**
@@ -440,10 +540,15 @@ export class Semantic {
    * @throws {CypherSemanticError} on the first duplicate.
    */
   private _checkDuplicateBindings(ast: QueryAst): QueryAst {
+    this._checkDuplicateBindingsForPatterns(ast.match.patterns);
+    return ast;
+  }
+
+  private _checkDuplicateBindingsForPatterns(patterns: MatchPattern[]): void {
     const seen = new Map<string, { patternIndex: number; bindingKind: string }>();
 
-    for (let i = 0; i < ast.match.patterns.length; i++) {
-      const pattern = ast.match.patterns[i];
+    for (let i = 0; i < patterns.length; i++) {
+      const pattern = patterns[i];
       const segments = getPatternSegments(pattern);
 
       for (const segment of segments) {
@@ -472,8 +577,6 @@ export class Semantic {
         seen.set(varName, { patternIndex: i, bindingKind });
       }
     }
-
-    return ast;
   }
 
   // ── ORDER BY helpers ────────────────────────────────────────────
