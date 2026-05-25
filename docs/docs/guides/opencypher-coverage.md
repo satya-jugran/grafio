@@ -9,12 +9,12 @@ Grafio's Cypher engine supports a comprehensive subset of openCypher.
 - `ORDER BY`
 - `SKIP`
 - `LIMIT`
-- `WITH`
 - `CREATE`
 - `DELETE`
 - `DETACH DELETE`
 - `DROP INDEX`
 - `SHOW INDEXES`
+- `WITH`
 
 ## Partially supported
 
@@ -41,6 +41,6 @@ Grafio's Cypher engine supports a comprehensive subset of openCypher.
 
 ## Coverage
 
-Grafio currently covers approximately **66%** of standard openCypher clauses (16 out of 24 core clauses are either fully or partially supported).
+Grafio currently covers approximately **67%** of standard openCypher clauses (16 out of 24 core clauses are either fully or partially supported).
 
 <CoverageChart />

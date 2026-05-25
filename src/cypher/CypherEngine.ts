@@ -81,7 +81,6 @@ export interface CypherQueryOptions {
 const GATED_TOKENS: ReadonlySet<TokenKind> = new Set([
   // Other unsupported clauses
   TokenKind.OPTIONAL,
-  TokenKind.WITH,
   TokenKind.UNWIND,
 ]);
 

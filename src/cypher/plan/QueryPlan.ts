@@ -190,6 +190,8 @@ export interface ProjectStep {
   columns: ProjectColumn[];
   /** Whether DISTINCT was specified in the RETURN clause. */
   distinct: boolean;
+  /** Whether WITH * was specified, preserving all incoming variables. */
+  star?: boolean;
 }
 
 /**

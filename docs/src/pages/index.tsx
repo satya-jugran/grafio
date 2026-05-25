@@ -15,7 +15,7 @@ function HomepageHeader() {
     <header className={styles.hero}>
       <div style={{ position: 'absolute', top: '1rem', right: '1rem', zIndex: 10 }}>
         <span className="badge badge--primary" style={{ fontSize: '0.9rem', padding: '0.3rem 0.8rem' }}>
-          Latest Version: v7.5.1
+          Latest Version: v7.6.0
         </span>
       </div>
       <div className={styles.heroInner}>

@@ -63,6 +63,43 @@ export class Planner {
    */
   public async plan(ast: QueryAst): Promise<QueryPlan> {
     const steps: PlanStep[] = [];
+    const knownVars = new Set<string>();
+
+    if (ast.segments && ast.segments.length > 0) {
+      for (const segment of ast.segments) {
+        const fakeAst: QueryAst = {
+          kind: 'Query',
+          match: segment.match ?? { kind: 'Match', patterns: [] },
+          where: segment.where,
+          create: segment.create,
+          merge: segment.merge,
+          set: segment.set,
+          delete: segment.delete,
+          remove: segment.remove,
+          return: { kind: 'Return', distinct: segment.with.distinct, items: segment.with.items },
+          orderBy: segment.with.orderBy,
+          skip: segment.with.skip,
+          limit: segment.with.limit,
+          segments: [],
+        };
+        await this._planSegment(fakeAst, steps, knownVars, segment.with.star);
+
+        if (segment.with.where) {
+          steps.push({
+            kind: 'FilterStep',
+            predicate: segment.with.where.expression,
+          });
+        }
+      }
+    }
+
+    // Now plan the final segment
+    await this._planSegment(ast, steps, knownVars, false);
+
+    return { steps };
+  }
+
+  private async _planSegment(ast: QueryAst, steps: PlanStep[], knownVars: Set<string>, isWithStar: boolean): Promise<void> {
 
     // ── 1. Collect variables + decompose WHERE ────────────────────
     const varRegistry = this._whereDecomposer.collectVariables(
@@ -109,9 +146,8 @@ export class Planner {
       });
     }
 
-    // Build a mutable set of already-bound variable names so that
-    // nodes already in scope are treated as endpoints.
-    const knownVars = new Set<string>(varRegistry.keys());
+    // Update knownVars with varRegistry so they are treated as endpoints
+    for (const v of varRegistry.keys()) knownVars.add(v);
 
     // ── NEW: Emit CREATE steps ─────────────────────────────────────
     if (ast.create) {
@@ -285,9 +321,12 @@ export class Planner {
     }
 
     // ── 7. Projection — always last ───────────────────────────────
-    steps.push(this._projPlanner.planProjection(ast, hasAggregates));
-
-    return { steps };
+    const projStep = this._projPlanner.planProjection(ast, hasAggregates);
+    // If it's a WITH *, flag it so the Executor knows to preserve all rows
+    if (isWithStar) {
+      (projStep as any).star = true;
+    }
+    steps.push(projStep);
   }
 
   // ── CREATE pattern planning ──────────────────────────────────────
