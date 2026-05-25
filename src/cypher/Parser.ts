@@ -589,6 +589,7 @@ export class Parser {
 
     return {
       kind: 'Query',
+      segments: [],
       match: { kind: 'Match', patterns: [] },
       createIndex: {
         kind: 'CreateIndex',
@@ -625,6 +626,7 @@ export class Parser {
 
     return {
       kind: 'Query',
+      segments: [],
       match: { kind: 'Match', patterns: [] },
       dropIndex: {
         kind: 'DropIndex',
@@ -654,6 +656,7 @@ export class Parser {
 
     return {
       kind: 'Query',
+      segments: [],
       match: { kind: 'Match', patterns: [] },
       showIndexes: { kind: 'ShowIndexes' },
       return: {
