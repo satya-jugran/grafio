@@ -327,7 +327,7 @@ export class Planner {
     const projStep = this._projPlanner.planProjection(ast, hasAggregates);
     // If it's a WITH *, flag it so the Executor knows to preserve all rows
     if (isWithStar) {
-      (projStep as any).star = true;
+      projStep.star = true;
     }
     steps.push(projStep);
 
