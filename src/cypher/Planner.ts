@@ -109,19 +109,59 @@ export class Planner {
       });
     }
 
+    // Build a mutable set of already-bound variable names so that
+    // nodes already in scope are treated as endpoints.
+    const knownVars = new Set<string>(varRegistry.keys());
+
     // ── NEW: Emit CREATE steps ─────────────────────────────────────
     if (ast.create) {
-      // Build a mutable set of already-bound variable names so that
-      // nodes already in scope (from MATCH or earlier CREATE patterns)
-      // are treated as endpoints rather than being re-created.
-      // The set is mutated by _planCreatePath so that node variables
-      // introduced by one CREATE pattern are visible to subsequent
-      // patterns — preventing duplicate node creation when, e.g.,
-      // `CREATE (a), (b), (a)-[:R]->(b)` references 'a' and 'b'
-      // in a later path pattern.
-      const knownVars = new Set<string>(varRegistry.keys());
       for (const pattern of ast.create.patterns) {
         this._planCreatePath(pattern, steps, knownVars);
+      }
+    }
+
+    // ── NEW: Emit MERGE steps ──────────────────────────────────────
+    if (ast.merge) {
+      for (const mergeClause of ast.merge) {
+        const onCreateItems = [];
+        const onMatchItems = [];
+        for (const action of mergeClause.actions) {
+          const arr = action.onMatch ? onMatchItems : onCreateItems;
+          for (const item of action.items) {
+            // Parser enforces item.variable is an IdentifierExpr
+            const varName = (item.variable as IdentifierExpr).name;
+            const entityKind = this._resolveEntityKind(varName, ast);
+            arr.push({
+              variable: varName,
+              property: item.property,
+              value: item.value,
+              entityKind
+            });
+          }
+        }
+        const readSteps: PlanStep[] = [];
+        this._patternPlanner.planPath(mergeClause.pattern, readSteps, ast, new Map());
+
+        const createSteps: PlanStep[] = [];
+        this._planCreatePath(mergeClause.pattern, createSteps, new Set(knownVars));
+
+        steps.push({
+          kind: 'MergeStep',
+          pattern: mergeClause.pattern,
+          readSteps,
+          createSteps,
+          onCreateItems,
+          onMatchItems
+        });
+
+        // Add variables to knownVars so subsequent SET/DELETE steps know they are bound
+        const segments = getPatternSegments(mergeClause.pattern);
+        if (mergeClause.pattern.kind === 'NamedPath' && mergeClause.pattern.name) {
+          knownVars.add(mergeClause.pattern.name);
+        }
+        for (const segment of segments) {
+          if (segment.variable) knownVars.add(segment.variable);
+        }
       }
     }
 
@@ -409,6 +449,12 @@ export class Planner {
     // If still unresolved, check CREATE patterns
     if (!res && ast.create?.patterns) {
       checkPatterns(ast.create.patterns);
+    }
+
+    if (!res && ast.merge) {
+      for (const mergeClause of ast.merge) {
+        if (!res) checkPatterns([mergeClause.pattern]);
+      }
     }
 
     return res ?? 'node';

@@ -79,8 +79,6 @@ export interface CypherQueryOptions {
  * message to the consumer.
  */
 const GATED_TOKENS: ReadonlySet<TokenKind> = new Set([
-  // Write clauses
-  TokenKind.MERGE,
   // Other unsupported clauses
   TokenKind.OPTIONAL,
   TokenKind.WITH,

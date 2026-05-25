@@ -34,6 +34,22 @@ export interface CreateClause {
   patterns: MatchPattern[];
 }
 
+export interface MergeClause {
+  kind: 'Merge';
+  /** The pattern to merge. OpenCypher only allows one pattern. */
+  pattern: MatchPattern;
+  /** ON CREATE SET and ON MATCH SET actions. */
+  actions: MergeAction[];
+}
+
+export interface MergeAction {
+  kind: 'MergeAction';
+  /** True for ON MATCH, False for ON CREATE */
+  onMatch: boolean;
+  /** The set items */
+  items: SetItem[];
+}
+
 export interface SetClause {
   kind: 'Set';
   items: SetItem[];
@@ -106,6 +122,8 @@ export interface QueryAst {
   where?: WhereClause;
   /** Optional CREATE clause. */
   create?: CreateClause;
+  /** Optional MERGE clauses. */
+  merge?: MergeClause[];
   /** Optional SET clause. */
   set?: SetClause;
   /** Optional DELETE clause. */

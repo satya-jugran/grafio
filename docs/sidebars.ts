@@ -22,6 +22,7 @@ const sidebars: SidebarsConfig = {
       items: [
         'guides/core-concepts',
         'guides/cypher-language',
+        'guides/opencypher-coverage',
         'guides/querying-graph',
         'guides/data-operations',
         'guides/filtering',

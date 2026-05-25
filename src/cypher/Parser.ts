@@ -56,6 +56,8 @@ import {
   DeleteClause,
   RemoveClause,
   RemoveItem,
+  MergeClause,
+  MergeAction,
   CreateIndexClause,
   DropIndexClause,
   ShowIndexesClause,
@@ -172,6 +174,12 @@ export class Parser {
     const create = this._check(TokenKind.CREATE) && this._peek(1)?.kind !== TokenKind.INDEX
       ? this._parseCreateClause()
       : undefined;
+
+    const merge: MergeClause[] = [];
+    while (this._check(TokenKind.MERGE)) {
+      merge.push(this._parseMergeClause());
+    }
+
     const set = this._check(TokenKind.SET) ? this._parseSetClause() : undefined;
     const del = this._check(TokenKind.DELETE) || this._check(TokenKind.DETACH)
       ? this._parseDeleteClause()
@@ -198,6 +206,7 @@ export class Parser {
     const isEmpty =
       match === undefined &&
       create === undefined &&
+      merge.length === 0 &&
       set === undefined &&
       del === undefined &&
       remove === undefined &&
@@ -216,6 +225,7 @@ export class Parser {
       match: match ?? { kind: 'Match', patterns: [] },
       where,
       create,
+      merge: merge.length > 0 ? merge : undefined,
       set,
       delete: del,
       remove,
@@ -340,6 +350,42 @@ export class Parser {
       patterns.push(this._parsePatternPath());
     }
     return { kind: 'Create', patterns };
+  }
+
+  /** MERGE patternPath (ON CREATE SET ...)* (ON MATCH SET ...)* */
+  private _parseMergeClause(): MergeClause {
+    this._consume(TokenKind.MERGE, "Expected 'MERGE'");
+    const pattern = this._parsePatternPath();
+    const actions: MergeAction[] = [];
+
+    while (this._check(TokenKind.ON)) {
+      this._advance(); // consume ON
+      let onMatch = false;
+      if (this._check(TokenKind.MATCH)) {
+        onMatch = true;
+        this._advance(); // consume MATCH
+      } else if (this._check(TokenKind.CREATE)) {
+        onMatch = false;
+        this._advance(); // consume CREATE
+      } else {
+        throw new CypherSyntaxError(
+          "Expected 'MATCH' or 'CREATE' after 'ON'",
+          this._peek().line,
+          this._peek().col
+        );
+      }
+
+      this._consume(TokenKind.SET, "Expected 'SET' after 'ON " + (onMatch ? "MATCH" : "CREATE") + "'");
+
+      const items: SetItem[] = [this._parseSetItem()];
+      while (this._check(TokenKind.COMMA)) {
+        this._advance();
+        items.push(this._parseSetItem());
+      }
+      actions.push({ kind: 'MergeAction', onMatch, items });
+    }
+
+    return { kind: 'Merge', pattern, actions };
   }
 
   /** DETACH? DELETE IDENT (',' IDENT)* */

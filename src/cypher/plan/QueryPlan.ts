@@ -8,7 +8,7 @@
  * @module cypher/plan/QueryPlan
  */
 
-import { Expression, PropertyMap } from '../ast/AstNode';
+import { Expression, PropertyMap, MatchPattern } from '../ast/AstNode';
 
 // ── Shared filter types ───────────────────────────────────────────
 
@@ -59,7 +59,8 @@ export type PlanStep =
   | RemovePropertyStep
   | CreateIndexStep
   | DropIndexStep
-  | ShowIndexesStep;
+  | ShowIndexesStep
+  | MergeStep;
 
 // ── Individual step types ─────────────────────────────────────────
 
@@ -288,6 +289,15 @@ export interface AggregateStep {
 }
 
 // ── Write steps ─────────────────────────────────────────────────────
+
+export interface MergeStep {
+  kind: 'MergeStep';
+  pattern: MatchPattern;
+  readSteps: PlanStep[];
+  createSteps: PlanStep[];
+  onCreateItems: Array<{ variable: string; property: string; value: Expression; entityKind: 'node' | 'edge' }>;
+  onMatchItems: Array<{ variable: string; property: string; value: Expression; entityKind: 'node' | 'edge' }>;
+}
 
 /** Create a node and bind it to a variable. */
 export interface CreateNodeStep {
