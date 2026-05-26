@@ -158,6 +158,14 @@ export class ExpressionEvaluator {
         return expr.elements.map((e) => this.evaluate(e, row, params));
       }
 
+      case 'Map': {
+        const result: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(expr.props)) {
+          result[k] = this.evaluate(v, row, params);
+        }
+        return result;
+      }
+
       case 'FunctionCall': {
         switch (expr.name.toUpperCase()) {
           // ── id(node|relationship) → internal UUID ─────────────

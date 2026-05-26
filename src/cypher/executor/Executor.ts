@@ -200,7 +200,7 @@ export class Executor {
                  kind: 'SetPropertyStep',
                  variable: item.variable,
                  entityKind: item.entityKind,
-                 assignments: [{ key: item.property, value: item.value }]
+                 assignments: [{ key: item.property, operator: item.operator, value: item.value }]
                };
                const res = await this._writeExecutor.executeSetProperty(setStep, currentRows, params, transaction);
                currentRows = res.rows;
@@ -229,7 +229,7 @@ export class Executor {
                  kind: 'SetPropertyStep',
                  variable: item.variable,
                  entityKind: item.entityKind,
-                 assignments: [{ key: item.property, value: item.value }]
+                 assignments: [{ key: item.property, operator: item.operator, value: item.value }]
                };
                const res = await this._writeExecutor.executeSetProperty(setStep, currentRows, params, transaction);
                currentRows = res.rows;

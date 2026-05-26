@@ -315,8 +315,8 @@ export interface MergeStep {
   pattern: MatchPattern;
   readSteps: PlanStep[];
   createSteps: PlanStep[];
-  onCreateItems: Array<{ variable: string; property: string; value: Expression; entityKind: 'node' | 'edge' }>;
-  onMatchItems: Array<{ variable: string; property: string; value: Expression; entityKind: 'node' | 'edge' }>;
+  onCreateItems: Array<{ variable: string; property?: string; operator: '=' | '+='; value: Expression; entityKind: 'node' | 'edge' }>;
+  onMatchItems: Array<{ variable: string; property?: string; operator: '=' | '+='; value: Expression; entityKind: 'node' | 'edge' }>;
 }
 
 /** Create a node and bind it to a variable. */
@@ -353,7 +353,7 @@ export interface SetPropertyStep {
   /** Which kind of entity. */
   entityKind: 'node' | 'edge';
   /** Property assignments. */
-  assignments: Array<{ key: string; value: Expression }>;
+  assignments: Array<{ key?: string; operator: '=' | '+='; value: Expression }>;
 }
 
 /** Delete a matched entity (node or edge). */

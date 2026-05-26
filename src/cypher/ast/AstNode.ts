@@ -59,8 +59,10 @@ export interface SetItem {
   kind: 'SetItem';
   /** The entity variable being modified (e.g., `n` in `SET n.prop = val`). */
   variable: Expression;
-  /** The property key. */
-  property: string;
+  /** The property key. Optional for map replacement/mutation. */
+  property?: string;
+  /** Operator '=' for property assignment/map replace, '+=' for map mutation */
+  operator: '=' | '+=';
   /** The value expression. */
   value: Expression;
 }
@@ -335,6 +337,7 @@ export type Expression =
   | InExpr
   | IsNullExpr
   | ListExpr
+  | MapExpr
   | FunctionCallExpr;
 
 // -- Literals --
@@ -429,4 +432,10 @@ export interface FunctionCallExpr {
   args: Expression[];
   /** Whether DISTINCT modifier was applied, e.g. `COUNT(DISTINCT x)`. */
   distinct?: boolean;
+}
+
+export interface MapExpr {
+  kind: 'Map';
+  /** The properties of the map. */
+  props: Record<string, Expression>;
 }

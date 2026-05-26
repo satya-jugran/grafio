@@ -162,8 +162,8 @@ export class Planner {
     // ── NEW: Emit MERGE steps ──────────────────────────────────────
     if (ast.merge) {
       for (const mergeClause of ast.merge) {
-        const onCreateItems: Array<{ variable: string; property: string; value: Expression; entityKind: 'node' | 'edge' }> = [];
-        const onMatchItems: Array<{ variable: string; property: string; value: Expression; entityKind: 'node' | 'edge' }> = [];
+        const onCreateItems: Array<{ variable: string; property?: string; operator: '=' | '+='; value: Expression; entityKind: 'node' | 'edge' }> = [];
+        const onMatchItems: Array<{ variable: string; property?: string; operator: '=' | '+='; value: Expression; entityKind: 'node' | 'edge' }> = [];
         for (const action of mergeClause.actions) {
           const arr = action.onMatch ? onMatchItems : onCreateItems;
           for (const item of action.items) {
@@ -173,6 +173,7 @@ export class Planner {
             arr.push({
               variable: varName,
               property: item.property,
+              operator: item.operator,
               value: item.value,
               entityKind
             });
@@ -217,7 +218,7 @@ export class Planner {
           kind: 'SetPropertyStep',
           variable: varName,
           entityKind,
-          assignments: [{ key: item.property, value: item.value }],
+          assignments: [{ key: item.property, operator: item.operator, value: item.value }],
         });
       }
     }

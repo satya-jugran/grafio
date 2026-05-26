@@ -185,7 +185,7 @@ export class PlanFormatter {
         return 'CreateEdgeStep ' + step.variable + ':(' + step.source + ')-[:' + step.types.join('|') + ']->(' + step.target + ') ' + JSON.stringify(step.properties);
 
       case 'SetPropertyStep':
-        const assignments = step.assignments.map(a => a.key + '=' + this.getExpressionDescription(a.value)).join(', ');
+        const assignments = step.assignments.map(a => (a.key ? a.key + ' ' + a.operator + ' ' : a.operator + ' ') + this.getExpressionDescription(a.value)).join(', ');
         return 'SetPropertyStep ' + step.variable + '.' + step.entityKind + ' ' + assignments;
       
       case 'DeleteEntityStep':
@@ -270,8 +270,8 @@ export class PlanFormatter {
         return 'CreateEdgeStep [' + step.variable + ':(' + step.source + ')-[:' + step.types.join('|') + ']->(' + step.target + ') ' + JSON.stringify(step.properties) + ']';
 
       case 'SetPropertyStep':
-        const assignments = step.assignments.map(a => a.key + '=' + this.getExpressionDescription(a.value)).join(', ');
-        return 'SetPropertyStep [' + step.variable + '.' + step.entityKind + ' ' + assignments + ']';
+        const assignments2 = step.assignments.map(a => (a.key ? a.key + ' ' + a.operator + ' ' : a.operator + ' ') + this.getExpressionDescription(a.value)).join(', ');
+        return 'SetPropertyStep [' + step.variable + '.' + step.entityKind + ' ' + assignments2 + ']';
 
       case 'DeleteEntityStep':
         return 'DeleteEntityStep [' + step.variable + '.' + step.entityKind + (step.detach ? ' DETACH' : '') + ']';
@@ -328,6 +328,8 @@ export class PlanFormatter {
       case 'FunctionCall':
         const args = expr.args.map(a => this.getExpressionDescription(a)).join(', ');
         return expr.name + '(' + (expr.distinct ? 'DISTINCT ' : '') + args + ')';
+      case 'Map':
+        return '{' + Object.entries(expr.props).map(([k, v]) => k + ': ' + this.getExpressionDescription(v)).join(', ') + '}';
     }
   }
 

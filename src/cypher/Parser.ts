@@ -478,15 +478,36 @@ export class Parser {
     return { kind: 'Set', items };
   }
 
-  /** SET item: IDENT '.' IDENT '=' expression */
+  /** SET item: IDENT '.' IDENT '=' expression | IDENT '=' expression | IDENT '+=' expression */
   private _parseSetItem(): SetItem {
     const varToken = this._consume(TokenKind.IDENT, 'Expected variable name in SET');
     const variable: IdentifierExpr = { kind: 'Identifier', name: varToken.value };
-    this._consume(TokenKind.DOT, "Expected '.' in SET property assignment");
-    const propToken = this._consume(TokenKind.IDENT, 'Expected property name');
-    this._consume(TokenKind.EQ, "Expected '=' in SET assignment");
-    const value = this._parseExpression();
-    return { kind: 'SetItem', variable, property: propToken.value, value };
+
+    if (this._check(TokenKind.DOT)) {
+      // IDENT '.' IDENT '=' expr
+      this._advance();
+      const propToken = this._consume(TokenKind.IDENT, 'Expected property name');
+      this._consume(TokenKind.EQ, "Expected '=' in SET assignment");
+      const value = this._parseExpression();
+      return { kind: 'SetItem', variable, property: propToken.value, operator: '=', value };
+    } else if (this._check(TokenKind.EQ)) {
+      // IDENT '=' expr (replace all properties)
+      this._advance();
+      const value = this._parseExpression();
+      return { kind: 'SetItem', variable, operator: '=', value };
+    } else if (this._check(TokenKind.PLUS_EQ)) {
+      // IDENT '+=' expr (mutate properties)
+      this._advance();
+      const value = this._parseExpression();
+      return { kind: 'SetItem', variable, operator: '+=', value };
+    } else {
+      const token = this._peek();
+      throw new CypherSyntaxError(
+        `Expected '.', '=', or '+=' after variable name in SET, found '${token.value}'`,
+        token.line,
+        token.col
+      );
+    }
   }
 
   /** REMOVE removeItem (',' removeItem)* */
@@ -1083,6 +1104,23 @@ export class Parser {
 
         this._consume(TokenKind.RBRACKET, "Expected ']'");
         return { kind: 'List', elements };
+      }
+
+      // Map literal { key: expr, ... }
+      case TokenKind.LBRACE: {
+        this._advance();
+        const props: Record<string, Expression> = {};
+
+        if (!this._check(TokenKind.RBRACE)) {
+          do {
+            const key = this._consume(TokenKind.IDENT, 'Expected property key').value;
+            this._consume(TokenKind.COLON, "Expected ':' after property key");
+            props[key] = this._parseExpression();
+          } while (this._check(TokenKind.COMMA) && this._advance());
+        }
+
+        this._consume(TokenKind.RBRACE, "Expected '}'");
+        return { kind: 'Map', props };
       }
 
       default:

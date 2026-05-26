@@ -89,6 +89,29 @@ describe('Semantic', () => {
     });
   });
 
+  // ── SET clause validation ────────────────────────────────────────
+  describe('SET clause validation', () => {
+    it('allows primitive values in SET map replacement', () => {
+      expect(() => analyse('MATCH (n) SET n = { age: 30, name: "Alice", active: true, score: null } RETURN n'))
+        .not.toThrow();
+    });
+
+    it('allows primitive values in SET map mutation', () => {
+      expect(() => analyse('MATCH (n) SET n += { age: 30, name: "Alice", active: true, score: null } RETURN n'))
+        .not.toThrow();
+    });
+
+    it('rejects nested maps in SET map replacement', () => {
+      expect(() => analyse('MATCH (n) SET n = { user: { name: "Alice" } } RETURN n'))
+        .toThrow(CypherSemanticError);
+    });
+
+    it('rejects lists in SET map mutation', () => {
+      expect(() => analyse('MATCH (n) SET n += { tags: ["a", "b"] } RETURN n'))
+        .toThrow(CypherSemanticError);
+    });
+  });
+
   // ── Semantic Analysis for Aggregates ────────────────────────────
   describe('Semantic Analysis for Aggregates', () => {
     // -- Valid aggregate queries --
