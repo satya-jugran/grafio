@@ -1166,6 +1166,39 @@ describe('CypherEngine Integration', () => {
       expect(node.properties.score).toBe(100);
     });
 
+    it('rejects non-plain objects in SET n = $map', async () => {
+      graph.clear();
+      const engine = new CypherEngine(graph);
+
+      await engine.execute(
+        "CREATE (n:Person {name: 'Ivy'})",
+      );
+
+      await expect(
+        engine.execute("MATCH (n:Person {name: 'Ivy'}) SET n = $map", { map: new Date() })
+      ).rejects.toThrow('SET map assignment requires a plain object map value');
+      
+      const result = await engine.execute("MATCH (n:Person {name: 'Ivy'}) RETURN n");
+      expect((result.rows[0].n as any).properties.name).toBe('Ivy');
+    });
+
+    it('rejects nested maps in SET n += $map via parameters', async () => {
+      graph.clear();
+      const engine = new CypherEngine(graph);
+
+      await engine.execute(
+        "CREATE (n:Person {name: 'Ivy'})",
+      );
+
+      await expect(
+        engine.execute("MATCH (n:Person {name: 'Ivy'}) SET n += $map", { map: { a: 1, b: { nested: true } } })
+      ).rejects.toThrow('Map property values must be a primitive type');
+
+      const result = await engine.execute("MATCH (n:Person {name: 'Ivy'}) RETURN n");
+      expect((result.rows[0].n as any).properties.name).toBe('Ivy');
+      expect((result.rows[0].n as any).properties.a).toBeUndefined();
+    });
+
     it('deletes a node with relationships using DETACH DELETE', async () => {
       graph.clear();
       const engine = new CypherEngine(graph);

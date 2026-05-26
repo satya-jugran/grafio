@@ -132,10 +132,24 @@ export class WriteStepExecutor {
 
         if (key === undefined) {
           // Map replacement or mutation
-          if (typeof evaluatedValue !== 'object' || evaluatedValue === null || Array.isArray(evaluatedValue)) {
-            throw new CypherRuntimeError('SET map assignment requires a map value');
+          if (
+            typeof evaluatedValue !== 'object' ||
+            evaluatedValue === null ||
+            Array.isArray(evaluatedValue) ||
+            Object.getPrototypeOf(evaluatedValue) !== Object.prototype
+          ) {
+            throw new CypherRuntimeError('SET map assignment requires a plain object map value');
           }
           const mapVal = evaluatedValue as Record<string, unknown>;
+
+          // Pre-validate that all values in the map are primitive before mutating the graph
+          for (const v of Object.values(mapVal)) {
+            if (v !== null && typeof v !== 'string' && typeof v !== 'number' && typeof v !== 'boolean') {
+              throw new CypherRuntimeError(
+                'Map property values must be a primitive type (string, number, boolean, or null)',
+              );
+            }
+          }
 
           if (operator === '=') {
             // Replace all existing properties
