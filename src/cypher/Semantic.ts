@@ -1098,6 +1098,15 @@ export class Semantic {
             'SET map replacement or mutation requires a map expression or parameter',
           );
         }
+        if (item.value.kind === 'Map') {
+          for (const val of Object.values((item.value as import('./ast/AstNode').MapExpr).props)) {
+            if (!this._isPrimitiveExpression(val)) {
+              throw new CypherSemanticError(
+                'Map property values must be a primitive type (string, number, boolean, or null)',
+              );
+            }
+          }
+        }
       }
     };
 
