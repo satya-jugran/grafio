@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.7.0] - 2026-05-26
+
+### ✨ New Features
+
+1. **SET Map Assignment and Mutation**
+   - Added support for the openCypher `SET n = {map}` syntax to replace all properties on a node or edge.
+   - Added support for the openCypher `SET n += {map}` syntax to mutate (merge) properties onto a node or edge.
+   - Enforces strict semantic type checking to ensure map property values are primitive data types.
+   - Features robust runtime safety by guaranteeing plain-object structures for parameterized `$map` values and deeply pre-validating primitive types prior to modifying the underlying graph indexes.
+
 ## [7.6.0] - 2026-05-25
 
 ### ✨ New Features
