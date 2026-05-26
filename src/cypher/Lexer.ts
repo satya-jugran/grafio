@@ -143,12 +143,21 @@ export class Lexer {
         case ',': tokens.push(this._makeToken(TokenKind.COMMA, ',')); this._advance(); continue;
         case '.': tokens.push(this._makeToken(TokenKind.DOT, '.')); this._advance(); continue;
         case '|': tokens.push(this._makeToken(TokenKind.PIPE, '|')); this._advance(); continue;
-        case '+': tokens.push(this._makeToken(TokenKind.PLUS, '+')); this._advance(); continue;
         case '*': tokens.push(this._makeToken(TokenKind.STAR, '*')); this._advance(); continue;
         case '/': tokens.push(this._makeToken(TokenKind.SLASH, '/')); this._advance(); continue;
       }
 
       // ── Two-character tokens (arrows, comparisons) ──────────────
+      if (ch === '+' && this._peek(1) === '=') {
+        tokens.push(this._makeToken(TokenKind.PLUS_EQ, '+='));
+        this._advance(2);
+        continue;
+      }
+      if (ch === '+') {
+        tokens.push(this._makeToken(TokenKind.PLUS, '+'));
+        this._advance();
+        continue;
+      }
       if (ch === '-' && this._peek(1) === '>') {
         tokens.push(this._makeToken(TokenKind.ARROW_RIGHT, '->'));
         this._advance(2);

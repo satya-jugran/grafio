@@ -89,6 +89,7 @@ export const enum TokenKind {
   GT = 'GT',
   GTE = 'GTE',
   PLUS = 'PLUS',
+  PLUS_EQ = 'PLUS_EQ',
   MINUS = 'MINUS',
   STAR = 'STAR',
   SLASH = 'SLASH',

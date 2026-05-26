@@ -535,6 +535,40 @@ describe('Parser', () => {
       expect(ast.return.kind).toBe('Return');
     });
 
+    it('parses SET map replace', () => {
+      const ast = parse('MATCH (n:Person) SET n = { age: 30 } RETURN n');
+
+      expect(ast.set).toBeDefined();
+      expect(ast.set!.kind).toBe('Set');
+      expect(ast.set!.items).toHaveLength(1);
+
+      const item = ast.set!.items[0];
+      expect(item.kind).toBe('SetItem');
+      expect((item.variable as any).kind).toBe('Identifier');
+      expect(item.property).toBeUndefined();
+      expect(item.operator).toBe('=');
+      expect(item.value.kind).toBe('Map');
+
+      expect(ast.return.kind).toBe('Return');
+    });
+
+    it('parses SET map mutate', () => {
+      const ast = parse('MATCH (n:Person) SET n += { age: 30 } RETURN n');
+
+      expect(ast.set).toBeDefined();
+      expect(ast.set!.kind).toBe('Set');
+      expect(ast.set!.items).toHaveLength(1);
+
+      const item = ast.set!.items[0];
+      expect(item.kind).toBe('SetItem');
+      expect((item.variable as any).kind).toBe('Identifier');
+      expect(item.property).toBeUndefined();
+      expect(item.operator).toBe('+=');
+      expect(item.value.kind).toBe('Map');
+
+      expect(ast.return.kind).toBe('Return');
+    });
+
     it('parses DELETE node', () => {
       const ast = parse('MATCH (n:Person) DELETE n RETURN 1');
 

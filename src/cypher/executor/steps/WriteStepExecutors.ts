@@ -127,35 +127,80 @@ export class WriteStepExecutor {
 
       let updatedProperties = { ...(entity as Node | Edge).properties };
 
-      for (const { key, value } of step.assignments) {
+      for (const { key, operator, value } of step.assignments) {
         const evaluatedValue = this._evaluator.evaluate(value as Expression, row, params);
-        try {
-          if (step.entityKind === 'node') {
-            await this._graph.updateNodeProperty(
-              (entity as Node).id, key, evaluatedValue, transaction,
-            );
-          } else {
-            await this._graph.updateEdgeProperty(
-              (entity as Edge).id, key, evaluatedValue, transaction,
-            );
+
+        if (key === undefined) {
+          // Map replacement or mutation
+          if (typeof evaluatedValue !== 'object' || evaluatedValue === null || Array.isArray(evaluatedValue)) {
+            throw new CypherRuntimeError('SET map assignment requires a map value');
           }
-        } catch (e: unknown) {
-          if (e instanceof PropertyNotFoundError) {
+          const mapVal = evaluatedValue as Record<string, unknown>;
+
+          if (operator === '=') {
+            // Replace all existing properties
+            for (const existingKey of Object.keys(updatedProperties)) {
+              if (step.entityKind === 'node') {
+                await this._graph.deleteNodeProperty((entity as Node).id, existingKey, transaction);
+              } else {
+                await this._graph.deleteEdgeProperty((entity as Edge).id, existingKey, transaction);
+              }
+            }
+            updatedProperties = {};
+          }
+
+          // Add/update properties from the map
+          for (const [k, v] of Object.entries(mapVal)) {
+            try {
+              if (step.entityKind === 'node') {
+                await this._graph.updateNodeProperty((entity as Node).id, k, v, transaction);
+              } else {
+                await this._graph.updateEdgeProperty((entity as Edge).id, k, v, transaction);
+              }
+            } catch (e: unknown) {
+              if (e instanceof PropertyNotFoundError) {
+                if (step.entityKind === 'node') {
+                  await this._graph.addNodeProperty((entity as Node).id, k, v, transaction);
+                } else {
+                  await this._graph.addEdgeProperty((entity as Edge).id, k, v, transaction);
+                }
+              } else {
+                throw e;
+              }
+            }
+            updatedProperties[k] = v;
+            propertiesSet++;
+          }
+        } else {
+          // Single property assignment
+          try {
             if (step.entityKind === 'node') {
-              await this._graph.addNodeProperty(
+              await this._graph.updateNodeProperty(
                 (entity as Node).id, key, evaluatedValue, transaction,
               );
             } else {
-              await this._graph.addEdgeProperty(
+              await this._graph.updateEdgeProperty(
                 (entity as Edge).id, key, evaluatedValue, transaction,
               );
             }
-          } else {
-            throw e;
+          } catch (e: unknown) {
+            if (e instanceof PropertyNotFoundError) {
+              if (step.entityKind === 'node') {
+                await this._graph.addNodeProperty(
+                  (entity as Node).id, key, evaluatedValue, transaction,
+                );
+              } else {
+                await this._graph.addEdgeProperty(
+                  (entity as Edge).id, key, evaluatedValue, transaction,
+                );
+              }
+            } else {
+              throw e;
+            }
           }
+          updatedProperties = { ...updatedProperties, [key]: evaluatedValue };
+          propertiesSet++;
         }
-        updatedProperties = { ...updatedProperties, [key]: evaluatedValue };
-        propertiesSet++;
       }
 
       const updatedOn = Date.now();

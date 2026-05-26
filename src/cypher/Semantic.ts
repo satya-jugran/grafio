@@ -742,6 +742,11 @@ export class Semantic {
           this._collectUnresolvedPostAggIdentifiers(elem, allowed),
         );
 
+      case 'Map':
+        return Object.values(expr.props).flatMap((elem) =>
+          this._collectUnresolvedPostAggIdentifiers(elem, allowed),
+        );
+
       case 'FunctionCall':
         return expr.args.flatMap((arg) =>
           this._collectUnresolvedPostAggIdentifiers(arg, allowed),
@@ -786,6 +791,9 @@ export class Semantic {
       case 'List':
         return expr.elements.some(e => this._containsAggregate(e));
 
+      case 'Map':
+        return Object.values(expr.props).some(e => this._containsAggregate(e));
+
       case 'Identifier':
       case 'Literal':
       case 'Parameter':
@@ -824,6 +832,8 @@ export class Semantic {
         return `$${expr.name}`;
       case 'FunctionCall':
         return `${expr.name}(...)`;
+      case 'Map':
+        return '{...}';
       default:
         return 'expression';
     }
@@ -1075,13 +1085,25 @@ export class Semantic {
    * @throws {CypherSemanticError} if a SET value is a non-primitive literal.
    */
   private _checkSetTypes(ast: QueryAst): QueryAst {
-    if (ast.set) {
-      for (const item of ast.set.items) {
+    const checkItem = (item: import('./ast/AstNode').SetItem) => {
+      if (item.property !== undefined) {
         if (!this._isPrimitiveExpression(item.value)) {
           throw new CypherSemanticError(
             'Property value must be a primitive type (string, number, boolean, or null)',
           );
         }
+      } else {
+        if (item.value.kind !== 'Map' && item.value.kind !== 'Parameter') {
+          throw new CypherSemanticError(
+            'SET map replacement or mutation requires a map expression or parameter',
+          );
+        }
+      }
+    };
+
+    if (ast.set) {
+      for (const item of ast.set.items) {
+        checkItem(item);
       }
     }
 
@@ -1089,11 +1111,7 @@ export class Semantic {
       for (const merge of ast.merge) {
         for (const action of merge.actions) {
           for (const item of action.items) {
-            if (!this._isPrimitiveExpression(item.value)) {
-              throw new CypherSemanticError(
-                'Property value must be a primitive type (string, number, boolean, or null)',
-              );
-            }
+            checkItem(item);
           }
         }
       }
@@ -1179,6 +1197,12 @@ export class Semantic {
       case 'Parameter':
         return;
 
+      case 'Map':
+        for (const v of Object.values(expr.props)) {
+          this._checkExpressionVarsBound(v, clause, knownVars);
+        }
+        return;
+
       default:
         // Binary, Unary, In, IsNull, FunctionCall, List — complex
         // expressions; allow them (runtime will catch type issues).
@@ -1226,6 +1250,11 @@ export class Semantic {
           this._expressionReferencesAny(e, varNames),
         );
 
+      case 'Map':
+        return Object.values(expr.props).some(e =>
+          this._expressionReferencesAny(e, varNames),
+        );
+
       case 'FunctionCall':
         return expr.args.some(a =>
           this._expressionReferencesAny(a, varNames),
@@ -1245,7 +1274,7 @@ export class Semantic {
    * types are allowed since they may resolve to primitives at runtime.
    */
   private _isPrimitiveExpression(expr: Expression): boolean {
-    if (expr.kind === 'List') return false;
+    if (expr.kind === 'List' || expr.kind === 'Map') return false;
     // Literals are primitive by construction (string | number | boolean | null).
     // Parameters, identifiers, property accesses, function calls, and binary
     // expressions may resolve to primitives at runtime — be lenient.

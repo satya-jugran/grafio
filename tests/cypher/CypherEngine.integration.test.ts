@@ -1124,6 +1124,47 @@ describe('CypherEngine Integration', () => {
       );
       expect(verify.rows).toHaveLength(0);
     });
+    it('replaces all properties on a node with SET n = {map}', async () => {
+      graph.clear();
+      const engine = new CypherEngine(graph);
+
+      await engine.execute(
+        "CREATE (n:Person {name: 'Ivy', age: 24, city: 'Miami'})",
+      );
+
+      const result = await engine.execute(
+        "MATCH (n:Person {name: 'Ivy'}) SET n = {name: 'Ivy New', score: 100} RETURN n",
+      );
+
+      expect(result.summary.propertiesSet).toBe(2);
+
+      const node = result.rows[0].n as any;
+      expect(node.properties.name).toBe('Ivy New');
+      expect(node.properties.score).toBe(100);
+      expect(node.properties.age).toBeUndefined();
+      expect(node.properties.city).toBeUndefined();
+    });
+
+    it('mutates properties on a node with SET n += {map}', async () => {
+      graph.clear();
+      const engine = new CypherEngine(graph);
+
+      await engine.execute(
+        "CREATE (n:Person {name: 'Ivy', age: 24, city: 'Miami'})",
+      );
+
+      const result = await engine.execute(
+        "MATCH (n:Person {name: 'Ivy'}) SET n += {age: 25, score: 100} RETURN n",
+      );
+
+      expect(result.summary.propertiesSet).toBe(2);
+
+      const node = result.rows[0].n as any;
+      expect(node.properties.name).toBe('Ivy');
+      expect(node.properties.age).toBe(25);
+      expect(node.properties.city).toBe('Miami');
+      expect(node.properties.score).toBe(100);
+    });
 
     it('deletes a node with relationships using DETACH DELETE', async () => {
       graph.clear();
