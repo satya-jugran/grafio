@@ -16,6 +16,7 @@ Grafio's Cypher engine supports a comprehensive subset of openCypher.
 - `SHOW INDEXES`
 - `WITH`
 - `MERGE`
+- `SET`
 
 ## Partially supported
 
@@ -24,7 +25,6 @@ Grafio's Cypher engine supports a comprehensive subset of openCypher.
 | `MATCH` | Missing `OPTIONAL MATCH` and `shortestPath()` |
 | `WHERE` | Missing regex matching (`=~`), `exists()`, and list comprehensions |
 | `RETURN` | Missing `CASE WHEN` and list/map projections |
-| `SET` | Missing replacing/mutating all properties with a map (`SET n = {map}`) |
 | `REMOVE` | Missing label removal (`REMOVE n:Label`) |
 | `CREATE INDEX` | Missing index uniqueness constraints |
 
