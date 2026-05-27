@@ -30,7 +30,6 @@ import { CypherSemanticError } from './errors';
 import {
   QueryAst,
   MatchClause,
-  WhereClause,
   CreateClause,
   SetClause,
   DeleteClause,
@@ -152,9 +151,9 @@ export class Semantic {
 
     for (const segment of ast.segments) {
       // 1. Resolve MATCH scopes (adds to this._scope)
-      if (segment.match) {
-        for (let i = 0; i < segment.match.patterns.length; i++) {
-          this._collectPatternScope(segment.match.patterns[i], i);
+      for (const matchClause of segment.matches) {
+        for (let i = 0; i < matchClause.patterns.length; i++) {
+          this._collectPatternScope(matchClause.patterns[i], i);
         }
       }
 
@@ -168,8 +167,7 @@ export class Semantic {
       // Construct a temporary QueryAst for this segment to reuse existing passes
       const fakeAst: QueryAst = {
         kind: 'Query',
-        match: segment.match ?? { kind: 'Match', patterns: [] },
-        where: segment.where,
+        matches: segment.matches,
         create: segment.create,
         merge: segment.merge,
         set: segment.set,
@@ -222,9 +220,9 @@ export class Semantic {
     }
 
     // Now process the final segment (the remaining fields in QueryAst)
-    if (ast.match) {
-      for (let i = 0; i < ast.match.patterns.length; i++) {
-        this._collectPatternScope(ast.match.patterns[i], i);
+    for (const matchClause of ast.matches) {
+      for (let i = 0; i < matchClause.patterns.length; i++) {
+        this._collectPatternScope(matchClause.patterns[i], i);
       }
     }
 
@@ -259,9 +257,10 @@ export class Semantic {
   private _resolveScopes(ast: QueryAst): QueryAst {
     this._scope = new Map();
 
-    for (let i = 0; i < ast.match.patterns.length; i++) {
-      const pattern = ast.match.patterns[i];
-      this._collectPatternScope(pattern, i);
+    for (const matchClause of ast.matches) {
+      for (let i = 0; i < matchClause.patterns.length; i++) {
+        this._collectPatternScope(matchClause.patterns[i], i);
+      }
     }
 
     return ast;
@@ -321,9 +320,11 @@ export class Semantic {
     // by them can be referenced in RETURN, WHERE, ORDER BY, etc.
     const extraScope = this._collectWriteScope(ast);
 
-    // Check WHERE clause.
-    if (ast.where) {
-      this._checkExpressionVars(ast.where.expression, 'WHERE', extraScope);
+    // Check WHERE clauses (embedded in each MatchClause).
+    for (const matchClause of ast.matches) {
+      if (matchClause.where) {
+        this._checkExpressionVars(matchClause.where.expression, 'WHERE', extraScope);
+      }
     }
 
     // Check MERGE clause SET items.
@@ -540,7 +541,9 @@ export class Semantic {
    * @throws {CypherSemanticError} on the first duplicate.
    */
   private _checkDuplicateBindings(ast: QueryAst): QueryAst {
-    this._checkDuplicateBindingsForPatterns(ast.match.patterns);
+    for (const matchClause of ast.matches) {
+      this._checkDuplicateBindingsForPatterns(matchClause.patterns);
+    }
     return ast;
   }
 
@@ -636,10 +639,12 @@ export class Semantic {
    */
   private _checkAggregateGrouping(ast: QueryAst): QueryAst {
     // Rule 1: No aggregate functions in WHERE.
-    if (ast.where && this._containsAggregate(ast.where.expression)) {
-      throw new CypherSemanticError(
-        'Aggregate functions cannot be used in WHERE clauses',
-      );
+    for (const matchClause of ast.matches) {
+      if (matchClause.where && this._containsAggregate(matchClause.where.expression)) {
+        throw new CypherSemanticError(
+          'Aggregate functions cannot be used in WHERE clauses',
+        );
+      }
     }
 
     // Determine whether any RETURN item contains an aggregate function.
@@ -1353,7 +1358,7 @@ export class Semantic {
 
     // ── Rule 4: DDL + DML mutual exclusion ─────────────────────────
     const hasDml =
-      ast.match.patterns.length > 0 ||
+      ast.matches.some(m => m.patterns.length > 0) ||
       !!ast.create ||
       !!ast.set ||
       !!ast.delete ||

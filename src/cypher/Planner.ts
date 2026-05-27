@@ -69,8 +69,7 @@ export class Planner {
       for (const segment of ast.segments) {
         const fakeAst: QueryAst = {
           kind: 'Query',
-          match: segment.match ?? { kind: 'Match', patterns: [] },
-          where: segment.where,
+          matches: segment.matches,
           create: segment.create,
           merge: segment.merge,
           set: segment.set,
@@ -104,53 +103,10 @@ export class Planner {
 
   private async _planSegment(ast: QueryAst, steps: PlanStep[], knownVars: Set<string>, isWithStar: boolean): Promise<void> {
 
-    // ── 1. Collect variables + decompose WHERE ────────────────────
-    const varRegistry = this._whereDecomposer.collectVariables(
-      ast.match.patterns,
-    );
-
-    const { perVar, crossVar } = ast.where
-      ? this._whereDecomposer.decompose(ast.where.expression, varRegistry)
-      : { perVar: new Map(), crossVar: [] as Expression[] };
-
-    // ── 2. Detect id(n)=value for NodeSeekStep ────────────────────
-    const idLookups = this._reorderer.detectIdLookups(crossVar, varRegistry);
-
-    // ── 3. Reorder root patterns by selectivity ───────────────────
-    const orderedPatterns = await this._reorderer.reorder(
-      ast.match.patterns,
-      varRegistry,
-      perVar,
-      idLookups,
-    );
-
-    // ── 4. Emit pattern steps ──────────────────────────────────────
-    // Track which id-lookups were consumed as NodeSeekStep so that
-    // only those are removed from crossVar.  Unconsumed id-lookups
-    // (e.g. for a deeper node in a multi-hop path) remain in
-    // crossVar and become a FilterStep.
-    const consumed = new Set<string>();
-    for (const pattern of orderedPatterns) {
-      this._patternPlanner.planPath(pattern, steps, ast, perVar, idLookups, consumed, knownVars);
+    // ── Process each MATCH / OPTIONAL MATCH clause ─────────────────
+    for (const matchClause of ast.matches) {
+      await this._planMatchClause(matchClause, steps, knownVars, ast);
     }
-
-    // ── 5. Remove consumed id-lookups from crossVar ────────────────
-    if (consumed.size > 0) {
-      const lookupExprs = new Set<Expression>();
-      this._reorderer.collectIdLookupExprs(crossVar, lookupExprs, consumed);
-      this._reorderer.removeIdLookups(crossVar, lookupExprs);
-    }
-
-    // ── 6. Emit remaining cross-variable filter ───────────────────
-    if (crossVar.length > 0) {
-      steps.push({
-        kind: 'FilterStep',
-        predicate: this._whereDecomposer.andAll(crossVar),
-      });
-    }
-
-    // Update knownVars with varRegistry so they are treated as endpoints
-    for (const v of varRegistry.keys()) knownVars.add(v);
 
     // ── NEW: Emit CREATE steps ─────────────────────────────────────
     if (ast.create) {
@@ -499,9 +455,9 @@ export class Planner {
       }
     };
 
-    // Check MATCH patterns first
-    if (ast.match?.patterns) {
-      checkPatterns(ast.match.patterns);
+    // Check MATCH patterns
+    for (const matchClause of ast.matches) {
+      if (!res) checkPatterns(matchClause.patterns);
     }
 
     // If still unresolved, check CREATE patterns
@@ -516,6 +472,87 @@ export class Planner {
     }
 
     return res ?? 'node';
+  }
+
+  // ── MATCH clause planning (regular + optional) ───────────────────
+
+  /**
+   * Plan a single MATCH or OPTIONAL MATCH clause.
+   *
+   * For a regular MATCH: emits NodeScan/EdgeExpand/Filter steps directly.
+   * For an OPTIONAL MATCH: wraps them in an {@link OptionalMatchStep} that
+   * implements left-outer-join semantics.
+   */
+  private async _planMatchClause(
+    matchClause: import('./ast/AstNode').MatchClause,
+    steps: PlanStep[],
+    knownVars: Set<string>,
+    ast: QueryAst,
+  ): Promise<void> {
+    // 1. Collect variables from this match clause's patterns
+    const varRegistry = this._whereDecomposer.collectVariables(
+      matchClause.patterns,
+    );
+
+    // 2. Decompose the attached WHERE clause (if any)
+    const { perVar, crossVar } = matchClause.where
+      ? this._whereDecomposer.decompose(matchClause.where.expression, varRegistry)
+      : { perVar: new Map(), crossVar: [] as Expression[] };
+
+    // 3. Detect id(n)=value for NodeSeekStep
+    const idLookups = this._reorderer.detectIdLookups(crossVar, varRegistry);
+
+    // 4. Reorder root patterns by selectivity
+    const orderedPatterns = await this._reorderer.reorder(
+      matchClause.patterns,
+      varRegistry,
+      perVar,
+      idLookups,
+    );
+
+    // Determine the target steps list — for optional matches, use a separate
+    // buffer that will be wrapped in OptionalMatchStep.
+    const targetSteps: PlanStep[] = matchClause.optional ? [] : steps;
+
+    // 5. Emit pattern steps
+    const consumed = new Set<string>();
+    for (const pattern of orderedPatterns) {
+      this._patternPlanner.planPath(pattern, targetSteps, ast, perVar, idLookups, consumed, knownVars);
+    }
+
+    // 6. Remove consumed id-lookups from crossVar
+    if (consumed.size > 0) {
+      const lookupExprs = new Set<Expression>();
+      this._reorderer.collectIdLookupExprs(crossVar, lookupExprs, consumed);
+      this._reorderer.removeIdLookups(crossVar, lookupExprs);
+    }
+
+    // 7. Emit remaining cross-variable filter
+    if (crossVar.length > 0) {
+      targetSteps.push({
+        kind: 'FilterStep',
+        predicate: this._whereDecomposer.andAll(crossVar),
+      });
+    }
+
+    // 8. For OPTIONAL MATCH, wrap in OptionalMatchStep
+    if (matchClause.optional) {
+      // Identify new variables introduced by this match clause
+      const newVars: string[] = [];
+      for (const v of varRegistry.keys()) {
+        if (!knownVars.has(v)) {
+          newVars.push(v);
+        }
+      }
+      steps.push({
+        kind: 'OptionalMatchStep',
+        readSteps: targetSteps,
+        newVars,
+      });
+    }
+
+    // Update knownVars with all variables from this match clause
+    for (const v of varRegistry.keys()) knownVars.add(v);
   }
 
 }

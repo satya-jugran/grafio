@@ -387,7 +387,7 @@ export class ProjectionPlanner {
  *    no WHERE, aggregates reference only the edge variable
  */
   private _isEdgeSimplePlan(steps: PlanStep[], ast: QueryAst): boolean {
-    if (ast.where) return false;
+    if (ast.matches.some(m => m.where)) return false;
 
     let nodeScanCount = 0;
     let edgeExpandCount = 0;
@@ -419,7 +419,7 @@ export class ProjectionPlanner {
   }
 
   private _isSimplePlan(steps: PlanStep[], ast: QueryAst): boolean {
-    if (ast.where) return false;
+    if (ast.matches.some(m => m.where)) return false;
 
     let nodeScanCount = 0;
     for (const step of steps) {

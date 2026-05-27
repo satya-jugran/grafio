@@ -166,11 +166,8 @@ export class Parser {
     const segments: import('./ast/AstNode').QuerySegment[] = [];
 
     while (!this._isAtEnd()) {
-      // MATCH is now optional — CREATE (n) RETURN n is valid standalone.
-      const match = this._check(TokenKind.MATCH) ? this._parseMatchClause() : undefined;
-
-      // WHERE must appear immediately after MATCH per standard Cypher grammar.
-      const where = this._check(TokenKind.WHERE) ? this._parseWhereClause() : undefined;
+      // Parse a sequence of MATCH / OPTIONAL MATCH clauses (each with embedded WHERE).
+      const matches = this._parseMatchClauses();
 
       // Write clauses (each optional, in positional order).
       // If CREATE is followed by INDEX, this is DDL — skip and let _ensureAtEnd reject the hybrid query.
@@ -192,8 +189,7 @@ export class Parser {
       if (this._check(TokenKind.WITH)) {
         segments.push({
           kind: 'QuerySegment',
-          match,
-          where,
+          matches,
           create,
           merge: merge.length > 0 ? merge : undefined,
           set,
@@ -222,7 +218,7 @@ export class Parser {
 
         const isEmpty =
           segments.length === 0 &&
-          match === undefined &&
+          matches.length === 0 &&
           create === undefined &&
           merge.length === 0 &&
           set === undefined &&
@@ -241,8 +237,7 @@ export class Parser {
         return {
           kind: 'Query',
           segments,
-          match: match ?? { kind: 'Match', patterns: [] },
-          where,
+          matches,
           create,
           merge: merge.length > 0 ? merge : undefined,
           set,
@@ -262,8 +257,25 @@ export class Parser {
 
   // ── Clause parsers ──────────────────────────────────────────────
 
-  /** MATCH patternPath (',' patternPath)* */
-  private _parseMatchClause(): MatchClause {
+  /**
+   * Parse a sequence of MATCH / OPTIONAL MATCH clauses.
+   * Each MATCH clause consumes a trailing WHERE if present.
+   */
+  private _parseMatchClauses(): MatchClause[] {
+    const matches: MatchClause[] = [];
+    while (this._check(TokenKind.MATCH) || this._check(TokenKind.OPTIONAL)) {
+      if (this._check(TokenKind.OPTIONAL)) {
+        this._advance(); // consume OPTIONAL
+        matches.push(this._parseMatchClause(true));
+      } else {
+        matches.push(this._parseMatchClause(false));
+      }
+    }
+    return matches;
+  }
+
+  /** [OPTIONAL] MATCH patternPath (',' patternPath)* [WHERE expression] */
+  private _parseMatchClause(optional: boolean): MatchClause {
     this._consume(TokenKind.MATCH, "Expected 'MATCH'");
     const patterns: MatchPattern[] = [this._parsePatternPath()];
 
@@ -272,7 +284,10 @@ export class Parser {
       patterns.push(this._parsePatternPath());
     }
 
-    return { kind: 'Match', patterns };
+    // WHERE is a sub-clause of MATCH per OpenCypher spec.
+    const where = this._check(TokenKind.WHERE) ? this._parseWhereClause() : undefined;
+
+    return { kind: 'Match', optional, patterns, where };
   }
 
   /** WHERE expression */
@@ -611,7 +626,7 @@ export class Parser {
     return {
       kind: 'Query',
       segments: [],
-      match: { kind: 'Match', patterns: [] },
+      matches: [],
       createIndex: {
         kind: 'CreateIndex',
         name,
@@ -648,7 +663,7 @@ export class Parser {
     return {
       kind: 'Query',
       segments: [],
-      match: { kind: 'Match', patterns: [] },
+      matches: [],
       dropIndex: {
         kind: 'DropIndex',
         name: name,
@@ -678,7 +693,7 @@ export class Parser {
     return {
       kind: 'Query',
       segments: [],
-      match: { kind: 'Match', patterns: [] },
+      matches: [],
       showIndexes: { kind: 'ShowIndexes' },
       return: {
         kind: 'Return',

@@ -32,6 +32,7 @@ import {
   PlanStepExecutionStats,
   PlanExecutionStats,
   MergeStep,
+  OptionalMatchStep,
   SetPropertyStep,
   CreateNodeStep,
   CreateEdgeStep,
@@ -270,6 +271,29 @@ export class Executor {
       }
       case 'ShowIndexesStep':
         return this._indexExecutor.executeShowIndexes(step, rows);
+
+      case 'OptionalMatchStep': {
+        const optStep = step as OptionalMatchStep;
+        const resultRows: Row[] = [];
+        for (const row of rows) {
+          let matchRows: Row[] = [row];
+          for (const rStep of optStep.readSteps) {
+            matchRows = await this._executeStep(rStep, matchRows, params, transaction);
+            if (matchRows.length === 0) break;
+          }
+          if (matchRows.length > 0) {
+            resultRows.push(...matchRows);
+          } else {
+            // No matches — preserve the incoming row with new vars set to null
+            const nullRow = new Map(row);
+            for (const v of optStep.newVars) {
+              nullRow.set(v, null);
+            }
+            resultRows.push(nullRow);
+          }
+        }
+        return resultRows;
+      }
 
       default:
         throw new CypherRuntimeError(

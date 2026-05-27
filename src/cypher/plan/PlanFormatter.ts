@@ -203,6 +203,25 @@ export class PlanFormatter {
       case 'ShowIndexesStep':
         return 'ShowIndexesStep columns=[' + step.columns.map(c => c.alias).join(', ') + ']';
 
+      case 'OptionalMatchStep': {
+        const subSteps = step.readSteps.map(s => this.describeStepForMermaid(s, _params)).join(', ');
+        return 'OptionalMatchStep [newVars: ' + step.newVars.join(', ') + '] { ' + subSteps + ' }';
+      }
+
+      case 'MergeStep': {
+        const readDesc = step.readSteps.map(s => this.describeStepForMermaid(s, _params)).join(', ');
+        const createDesc = step.createSteps.map(s => this.describeStepForMermaid(s, _params)).join(', ');
+        let onMatch = '';
+        if (step.onMatchItems && step.onMatchItems.length > 0) {
+            onMatch = ' ON MATCH SET ' + step.onMatchItems.map(a => (a.property ? a.variable + '.' + a.property : a.variable) + ' ' + a.operator + ' ' + this.getExpressionDescription(a.value)).join(', ');
+        }
+        let onCreate = '';
+        if (step.onCreateItems && step.onCreateItems.length > 0) {
+            onCreate = ' ON CREATE SET ' + step.onCreateItems.map(a => (a.property ? a.variable + '.' + a.property : a.variable) + ' ' + a.operator + ' ' + this.getExpressionDescription(a.value)).join(', ');
+        }
+        return 'MergeStep { read: [' + readDesc + '], create: [' + createDesc + '] }' + onMatch + onCreate;
+      }
+
       default:
         return (step as PlanStep).kind;
     }
@@ -287,6 +306,25 @@ export class PlanFormatter {
 
       case 'ShowIndexesStep':
         return 'ShowIndexesStep [columns: ' + step.columns.map(c => c.alias).join(', ') + ']';
+
+      case 'OptionalMatchStep': {
+        const subStepsDesc = step.readSteps.map(s => this.describeStep(s, params)).join(', ');
+        return 'OptionalMatchStep [newVars: ' + step.newVars.join(', ') + '] { ' + subStepsDesc + ' }';
+      }
+
+      case 'MergeStep': {
+        const readDesc = step.readSteps.map(s => this.describeStep(s, params)).join(', ');
+        const createDesc = step.createSteps.map(s => this.describeStep(s, params)).join(', ');
+        let onMatch = '';
+        if (step.onMatchItems && step.onMatchItems.length > 0) {
+            onMatch = ' ON MATCH SET ' + step.onMatchItems.map(a => (a.property ? a.variable + '.' + a.property : a.variable) + ' ' + a.operator + ' ' + this.getExpressionDescription(a.value)).join(', ');
+        }
+        let onCreate = '';
+        if (step.onCreateItems && step.onCreateItems.length > 0) {
+            onCreate = ' ON CREATE SET ' + step.onCreateItems.map(a => (a.property ? a.variable + '.' + a.property : a.variable) + ' ' + a.operator + ' ' + this.getExpressionDescription(a.value)).join(', ');
+        }
+        return 'MergeStep { read: [' + readDesc + '], create: [' + createDesc + '] }' + onMatch + onCreate;
+      }
 
       default:
         return (step as PlanStep).kind;

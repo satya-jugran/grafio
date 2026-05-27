@@ -61,6 +61,7 @@ export type PlanStep =
   | DropIndexStep
   | ShowIndexesStep
   | MergeStep
+  | OptionalMatchStep
   | VerifyNodeStep;
 
 // ── Individual step types ─────────────────────────────────────────
@@ -317,6 +318,22 @@ export interface MergeStep {
   createSteps: PlanStep[];
   onCreateItems: Array<{ variable: string; property?: string; operator: '=' | '+='; value: Expression; entityKind: 'node' | 'edge' }>;
   onMatchItems: Array<{ variable: string; property?: string; operator: '=' | '+='; value: Expression; entityKind: 'node' | 'edge' }>;
+}
+
+/**
+ * Implements OPTIONAL MATCH (left-outer-join semantics).
+ *
+ * For each incoming row, the {@link readSteps} sub-plan is executed.
+ * If it yields one or more rows, those are emitted.
+ * If it yields zero rows, the incoming row is preserved with all
+ * variables listed in {@link newVars} set to `null`.
+ */
+export interface OptionalMatchStep {
+  kind: 'OptionalMatchStep';
+  /** The sub-plan steps to attempt (NodeScan, EdgeExpand, Filter, etc.). */
+  readSteps: PlanStep[];
+  /** Variables introduced by this OPTIONAL MATCH that should be null-filled on no match. */
+  newVars: string[];
 }
 
 /** Create a node and bind it to a variable. */
