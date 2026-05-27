@@ -1,4 +1,5 @@
 // No vitest import, use jest globals
+import { describe, expect, it, beforeEach, afterEach } from '@jest/globals';
 import { Graph } from '../../src/Graph';
 import { CypherEngine } from '../../src/cypher/CypherEngine';
 import { CypherSemanticError } from '../../src/cypher/errors';
@@ -7,15 +8,15 @@ describe('Cypher UNION clauses', () => {
   let graph: Graph;
   let engine: CypherEngine;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     graph = new Graph();
     engine = new CypherEngine(graph);
     
     // Setup initial data
-    engine.execute('CREATE (n:Person {name: "Alice", age: 30})');
-    engine.execute('CREATE (n:Person {name: "Bob", age: 40})');
-    engine.execute('CREATE (n:Animal {name: "Charlie", age: 5})');
-    engine.execute('CREATE (n:Person {name: "Charlie", age: 30})');
+    await engine.execute('CREATE (n:Person {name: "Alice", age: 30})');
+    await engine.execute('CREATE (n:Person {name: "Bob", age: 40})');
+    await engine.execute('CREATE (n:Animal {name: "Charlie", age: 5})');
+    await engine.execute('CREATE (n:Person {name: "Charlie", age: 30})');
   });
 
   afterEach(() => {
