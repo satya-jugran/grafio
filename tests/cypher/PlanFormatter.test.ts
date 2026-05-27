@@ -276,8 +276,8 @@ describe('PlanFormatter', () => {
         steps: [
           {
             kind: 'MergeStep',
-            pattern: { kind: 'NodePattern', variable: 'n', labels: ['Person'] },
-            readSteps: [ { kind: 'NodeScanStep', variable: 'n', types: ['Person'] } ],
+            pattern: { kind: 'PatternPath', segments: [{ kind: 'NodePattern', variable: 'n', labels: ['Person'], properties: {} }] },
+            readSteps: [ { kind: 'NodeScanStep', label: 'Person', variable: 'n', types: ['Person'] } ],
             createSteps: [ { kind: 'CreateNodeStep', variable: 'n', labels: ['Person'], properties: {} } ],
             onMatchItems: [ { variable: 'n', property: 'age', operator: '=', value: { kind: 'Literal', value: 30 }, entityKind: 'node' } ],
             onCreateItems: [ { variable: 'n', property: 'name', operator: '=', value: { kind: 'Literal', value: 'Alice' }, entityKind: 'node' } ],

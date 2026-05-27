@@ -61,7 +61,27 @@ export class Planner {
   /**
    * Translate a typed AST into a {@link QueryPlan}.
    */
-  public async plan(ast: QueryAst): Promise<QueryPlan> {
+  public async plan(ast: import('./ast/AstNode').Statement): Promise<QueryPlan> {
+    if (ast.kind === 'Union') {
+      const plans: QueryPlan[] = [];
+      for (const query of ast.queries) {
+        plans.push(await this.plan(query));
+      }
+      const steps: PlanStep[] = [{
+        kind: 'UnionStep',
+        plans,
+        all: ast.all,
+      }];
+      
+      if (ast.orderBy) {
+        steps.push(this._projPlanner.planSort({ orderBy: ast.orderBy, return: ast.queries[0].return } as any));
+      }
+      if (ast.skip || ast.limit) {
+        steps.push(this._projPlanner.planLimit({ skip: ast.skip, limit: ast.limit } as any));
+      }
+      return { steps };
+    }
+
     const steps: PlanStep[] = [];
     const knownVars = new Set<string>();
 

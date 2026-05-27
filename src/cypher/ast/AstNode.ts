@@ -150,6 +150,17 @@ export interface QueryAst {
   limit?: LimitClause;
 }
 
+export interface UnionAst {
+  kind: 'Union';
+  queries: QueryAst[];
+  all: boolean[];
+  orderBy?: OrderByClause;
+  skip?: SkipClause;
+  limit?: LimitClause;
+}
+
+export type Statement = QueryAst | UnionAst;
+
 // ── Clauses ───────────────────────────────────────────────────────
 
 export type MatchPattern = PatternPath | NamedPath;

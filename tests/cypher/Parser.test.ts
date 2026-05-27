@@ -6,9 +6,9 @@ import { TokenKind } from '../../src/cypher/Token';
 import { getPatternSegments, type MatchPattern, type PatternSegment } from '../../src/cypher/ast/AstNode';
 
 /** Helper: lex + parse in one call. */
-function parse(query: string) {
+function parse(query: string): import('../../src/cypher/ast/AstNode').QueryAst {
   const tokens = new Lexer(query).tokenise();
-  return new Parser(tokens).parse();
+  return new Parser(tokens).parse() as import('../../src/cypher/ast/AstNode').QueryAst;
 }
 
 /** Helper: get segments from a MatchPattern (handles PatternPath | NamedPath) */

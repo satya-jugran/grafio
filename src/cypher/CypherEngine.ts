@@ -162,7 +162,7 @@ export class CypherEngine {
 
     // ── 4. Semantic analysis ──────────────────────────────────────
     const semantic = new Semantic();
-    semantic.analyse(rawAst);
+    semantic.analyseStatement(rawAst);
 
     // ── 5. Plan ───────────────────────────────────────────────────
     const planner = new Planner(this._graph);
@@ -217,7 +217,7 @@ export class CypherEngine {
 
     // ── 4. Semantic analysis ──────────────────────────────────────
     const semantic = new Semantic();
-    semantic.analyse(rawAst);
+    semantic.analyseStatement(rawAst);
 
     // ── 5. Plan ───────────────────────────────────────────────────
     const planner = new Planner(this._graph);
@@ -253,7 +253,7 @@ export class CypherEngine {
    * Walk the AST and validate that all Parameter references have corresponding
    * entries in the params map. Throws UnboundParameterError if any are missing.
    */
-  private _validateParameters(ast: QueryAst, params: Record<string, unknown>): void {
+  private _validateParameters(ast: import('./ast/AstNode').Statement, params: Record<string, unknown>): void {
     const paramNames = this._collectParameterNames(ast);
     for (const name of paramNames) {
       if (!(name in params)) {
@@ -265,7 +265,7 @@ export class CypherEngine {
   /**
    * Recursively collect all parameter names referenced in an AST.
    */
-  private _collectParameterNames(ast: QueryAst): string[] {
+  private _collectParameterNames(ast: import('./ast/AstNode').Statement): string[] {
     const names: string[] = [];
     const walk = (node: unknown): void => {
       if (!node || typeof node !== 'object') return;

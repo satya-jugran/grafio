@@ -122,14 +122,6 @@ export class Semantic {
   /** Cached scope table populated by `_resolveScopes` and consumed by later passes. */
   private _scope: VariableScope = new Map();
 
-  /**
-   * Run all semantic passes over the AST.
-   *
-   * @param ast - The raw AST from the parser.
-   * @returns The validated AST (currently identical in shape; annotations
-   *          are stored internally on the analyser instance).
-   * @throws {CypherSemanticError} if any pass detects a violation.
-   */
   public analyse(ast: QueryAst): QueryAst {
     if (ast.segments && ast.segments.length > 0) {
       return this._analyseMultiSegment(ast);
@@ -144,6 +136,54 @@ export class Semantic {
     }
 
     return result;
+  }
+
+  /**
+   * Analyse a top-level statement (which may be a UnionAst).
+   */
+  public analyseStatement(stmt: import('./ast/AstNode').Statement): import('./ast/AstNode').Statement {
+    if (stmt.kind === 'Union') {
+      let firstColCount = -1;
+      let firstAliases: string[] = [];
+
+      for (let i = 0; i < stmt.queries.length; i++) {
+        const query = stmt.queries[i];
+        this.analyse(query);
+        
+        const aliases = query.return.items.map(item => item.alias ?? this._deriveReturnAlias(item.expression));
+        if (i === 0) {
+          firstColCount = aliases.length;
+          firstAliases = aliases;
+        } else {
+          if (aliases.length !== firstColCount) {
+            throw new CypherSemanticError(`All queries in a UNION must return the same number of columns. Query 1 returns ${firstColCount}, but Query ${i + 1} returns ${aliases.length}.`);
+          }
+          for (let j = 0; j < firstColCount; j++) {
+            if (aliases[j] !== firstAliases[j]) {
+              throw new CypherSemanticError(`All queries in a UNION must return the same column names. Column ${j + 1} in Query 1 is '${firstAliases[j]}', but in Query ${i + 1} is '${aliases[j]}'.`);
+            }
+          }
+        }
+      }
+
+      this._scope = new Map();
+      const allowedAliases = new Set(firstAliases);
+      if (stmt.orderBy) {
+        for (const item of stmt.orderBy.items) {
+          this._checkExpressionVarsWithAllowed(item.expression, 'UNION ORDER BY', allowedAliases);
+        }
+      }
+      if (stmt.skip) {
+        this._checkExpressionVarsWithAllowed(stmt.skip.expression, 'UNION SKIP', allowedAliases);
+      }
+      if (stmt.limit) {
+        this._checkExpressionVarsWithAllowed(stmt.limit.expression, 'UNION LIMIT', allowedAliases);
+      }
+
+      return stmt;
+    } else {
+      return this.analyse(stmt);
+    }
   }
 
   private _analyseMultiSegment(ast: QueryAst): QueryAst {

@@ -295,6 +295,48 @@ export class Executor {
         return resultRows;
       }
 
+      case 'UnionStep': {
+        const unionStep = step as import('../plan/QueryPlan').UnionStep;
+        let resultRows: Row[] = [];
+
+        for (let i = 0; i < unionStep.plans.length; i++) {
+          let subRows: Row[] = [new Map()];
+          for (const subStep of unionStep.plans[i].steps) {
+            subRows = await this._executeStep(
+              subStep,
+              subRows,
+              params,
+              transaction,
+            );
+          }
+
+          if (i === 0) {
+            resultRows = subRows;
+          } else {
+            const isAll = unionStep.all[i - 1];
+            resultRows = resultRows.concat(subRows);
+
+            if (!isAll) {
+              const seen = new Set<string>();
+              resultRows = resultRows.filter((row) => {
+                const obj: any = {};
+                const keys = Array.from(row.keys()).sort();
+                for (const k of keys) {
+                  obj[k] = row.get(k);
+                }
+                const hash = JSON.stringify(obj, (key, val) =>
+                  typeof val === 'bigint' ? val.toString() : val,
+                );
+                if (seen.has(hash)) return false;
+                seen.add(hash);
+                return true;
+              });
+            }
+          }
+        }
+        return resultRows;
+      }
+
       default:
         throw new CypherRuntimeError(
           `Unknown plan step kind: ${(step as PlanStep).kind}`,
@@ -309,9 +351,20 @@ export class Executor {
     rows: Row[],
     stats: PlanExecutionStats,
   ): CypherResult {
-    const projectStep = plan.steps.find(
+    let projectStep = plan.steps.find(
       (s): s is ProjectStep => s.kind === 'ProjectStep',
     );
+
+    if (!projectStep) {
+      const unionStep = plan.steps.find(
+        (s): s is import('../plan/QueryPlan').UnionStep => s.kind === 'UnionStep',
+      );
+      if (unionStep && unionStep.plans.length > 0) {
+        projectStep = unionStep.plans[0].steps.find(
+          (s): s is ProjectStep => s.kind === 'ProjectStep',
+        );
+      }
+    }
 
     const columns = projectStep
       ? projectStep.columns.map((c) => c.alias)

@@ -45,6 +45,8 @@ const KEYWORDS: Record<string, TokenKind> = {
   asc: TokenKind.ASC,
   desc: TokenKind.DESC,
   having: TokenKind.HAVING,
+  union: TokenKind.UNION,
+  all: TokenKind.ALL,
   // Future keywords
   create: TokenKind.CREATE,
   merge: TokenKind.MERGE,

@@ -62,7 +62,8 @@ export type PlanStep =
   | ShowIndexesStep
   | MergeStep
   | OptionalMatchStep
-  | VerifyNodeStep;
+  | VerifyNodeStep
+  | UnionStep;
 
 // ── Individual step types ─────────────────────────────────────────
 
@@ -393,6 +394,17 @@ export interface RemovePropertyStep {
   entityKind: 'node' | 'edge';
   /** Property key to remove. */
   property: string;
+}
+
+/** 
+ * Combines the result of multiple query plans.
+ */
+export interface UnionStep {
+  kind: 'UnionStep';
+  /** The plans for each subquery. */
+  plans: QueryPlan[];
+  /** all[i] is true if plans[i] is joined with UNION ALL to the next plan. */
+  all: boolean[];
 }
 
 // ── Index DDL steps ────────────────────────────────────────────────
