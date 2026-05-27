@@ -30,7 +30,6 @@ import { CypherSemanticError } from './errors';
 import {
   QueryAst,
   MatchClause,
-  WhereClause,
   CreateClause,
   SetClause,
   DeleteClause,
@@ -152,9 +151,9 @@ export class Semantic {
 
     for (const segment of ast.segments) {
       // 1. Resolve MATCH scopes (adds to this._scope)
-      if (segment.match) {
-        for (let i = 0; i < segment.match.patterns.length; i++) {
-          this._collectPatternScope(segment.match.patterns[i], i);
+      for (const matchClause of segment.matches) {
+        for (let i = 0; i < matchClause.patterns.length; i++) {
+          this._collectPatternScope(matchClause.patterns[i], i);
         }
       }
 
@@ -168,8 +167,7 @@ export class Semantic {
       // Construct a temporary QueryAst for this segment to reuse existing passes
       const fakeAst: QueryAst = {
         kind: 'Query',
-        match: segment.match ?? { kind: 'Match', patterns: [] },
-        where: segment.where,
+        matches: segment.matches,
         create: segment.create,
         merge: segment.merge,
         set: segment.set,
@@ -222,9 +220,9 @@ export class Semantic {
     }
 
     // Now process the final segment (the remaining fields in QueryAst)
-    if (ast.match) {
-      for (let i = 0; i < ast.match.patterns.length; i++) {
-        this._collectPatternScope(ast.match.patterns[i], i);
+    for (const matchClause of ast.matches) {
+      for (let i = 0; i < matchClause.patterns.length; i++) {
+        this._collectPatternScope(matchClause.patterns[i], i);
       }
     }
 
@@ -259,9 +257,10 @@ export class Semantic {
   private _resolveScopes(ast: QueryAst): QueryAst {
     this._scope = new Map();
 
-    for (let i = 0; i < ast.match.patterns.length; i++) {
-      const pattern = ast.match.patterns[i];
-      this._collectPatternScope(pattern, i);
+    for (const matchClause of ast.matches) {
+      for (let i = 0; i < matchClause.patterns.length; i++) {
+        this._collectPatternScope(matchClause.patterns[i], i);
+      }
     }
 
     return ast;
@@ -321,9 +320,23 @@ export class Semantic {
     // by them can be referenced in RETURN, WHERE, ORDER BY, etc.
     const extraScope = this._collectWriteScope(ast);
 
-    // Check WHERE clause.
-    if (ast.where) {
-      this._checkExpressionVars(ast.where.expression, 'WHERE', extraScope);
+    // Check WHERE clauses (embedded in each MatchClause).
+    // We build an incremental scope because a WHERE clause attached to an earlier MATCH
+    // cannot reference variables introduced by a later MATCH/OPTIONAL MATCH.
+    const incrementalScope = new Set<string>();
+
+    for (const matchClause of ast.matches) {
+      for (const pattern of matchClause.patterns) {
+        const segments = getPatternSegments(pattern);
+        if (pattern.kind === 'NamedPath' && pattern.name) incrementalScope.add(pattern.name);
+        for (const seg of segments) {
+          if (seg.variable) incrementalScope.add(seg.variable);
+        }
+      }
+
+      if (matchClause.where) {
+        this._checkExpressionVars(matchClause.where.expression, 'WHERE', extraScope, incrementalScope);
+      }
     }
 
     // Check MERGE clause SET items.
@@ -393,49 +406,52 @@ export class Semantic {
     expr: Expression,
     clause: string,
     extraScope?: ReadonlySet<string>,
+    restrictScope?: ReadonlySet<string>,
   ): void {
     switch (expr.kind) {
       case 'Identifier': {
-        if (!this._scope.has(expr.name) && !extraScope?.has(expr.name)) {
+        const isBoundInMain = restrictScope ? restrictScope.has(expr.name) : this._scope.has(expr.name);
+        if (!isBoundInMain && !extraScope?.has(expr.name)) {
+          const definedVars = restrictScope ? [...restrictScope.keys()] : [...this._scope.keys()];
           throw new CypherSemanticError(
             `Variable '${expr.name}' is not defined in ${clause} clause. ` +
-            `Defined variables: ${[...this._scope.keys()].join(', ') || '(none)'}`,
+            `Defined variables: ${definedVars.join(', ') || '(none)'}`,
           );
         }
         return;
       }
 
       case 'PropertyAccess':
-        this._checkExpressionVars(expr.object, clause, extraScope);
+        this._checkExpressionVars(expr.object, clause, extraScope, restrictScope);
         return;
 
       case 'Binary':
-        this._checkExpressionVars(expr.left, clause, extraScope);
-        this._checkExpressionVars(expr.right, clause, extraScope);
+        this._checkExpressionVars(expr.left, clause, extraScope, restrictScope);
+        this._checkExpressionVars(expr.right, clause, extraScope, restrictScope);
         return;
 
       case 'Unary':
-        this._checkExpressionVars(expr.operand, clause, extraScope);
+        this._checkExpressionVars(expr.operand, clause, extraScope, restrictScope);
         return;
 
       case 'In':
-        this._checkExpressionVars(expr.expression, clause, extraScope);
-        this._checkExpressionVars(expr.list, clause, extraScope);
+        this._checkExpressionVars(expr.expression, clause, extraScope, restrictScope);
+        this._checkExpressionVars(expr.list, clause, extraScope, restrictScope);
         return;
 
       case 'IsNull':
-        this._checkExpressionVars(expr.expression, clause, extraScope);
+        this._checkExpressionVars(expr.expression, clause, extraScope, restrictScope);
         return;
 
       case 'List':
         for (const elem of expr.elements) {
-          this._checkExpressionVars(elem, clause, extraScope);
+          this._checkExpressionVars(elem, clause, extraScope, restrictScope);
         }
         return;
 
       case 'FunctionCall':
         for (const arg of expr.args) {
-          this._checkExpressionVars(arg, clause, extraScope);
+          this._checkExpressionVars(arg, clause, extraScope, restrictScope);
         }
         return;
 
@@ -540,7 +556,9 @@ export class Semantic {
    * @throws {CypherSemanticError} on the first duplicate.
    */
   private _checkDuplicateBindings(ast: QueryAst): QueryAst {
-    this._checkDuplicateBindingsForPatterns(ast.match.patterns);
+    for (const matchClause of ast.matches) {
+      this._checkDuplicateBindingsForPatterns(matchClause.patterns);
+    }
     return ast;
   }
 
@@ -636,10 +654,12 @@ export class Semantic {
    */
   private _checkAggregateGrouping(ast: QueryAst): QueryAst {
     // Rule 1: No aggregate functions in WHERE.
-    if (ast.where && this._containsAggregate(ast.where.expression)) {
-      throw new CypherSemanticError(
-        'Aggregate functions cannot be used in WHERE clauses',
-      );
+    for (const matchClause of ast.matches) {
+      if (matchClause.where && this._containsAggregate(matchClause.where.expression)) {
+        throw new CypherSemanticError(
+          'Aggregate functions cannot be used in WHERE clauses',
+        );
+      }
     }
 
     // Determine whether any RETURN item contains an aggregate function.
@@ -1353,7 +1373,7 @@ export class Semantic {
 
     // ── Rule 4: DDL + DML mutual exclusion ─────────────────────────
     const hasDml =
-      ast.match.patterns.length > 0 ||
+      ast.matches.some(m => m.patterns.length > 0) ||
       !!ast.create ||
       !!ast.set ||
       !!ast.delete ||

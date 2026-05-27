@@ -49,6 +49,14 @@ export class WhereDecomposer {
     const vars = new Map<string, VarInfo>();
 
     for (const pattern of patterns) {
+      if (pattern.kind === 'NamedPath' && pattern.name && !vars.has(pattern.name)) {
+        vars.set(pattern.name, {
+          name: pattern.name,
+          labels: [],
+          isRoot: false,
+        });
+      }
+
       const segments = getPatternSegments(pattern);
       if (segments.length === 0) continue;
 
@@ -65,6 +73,16 @@ export class WhereDecomposer {
 
       // Walk alternating edge → node pairs for dependent variables.
       for (let i = 1; i < segments.length; i += 2) {
+        // Collect edge variable (if named).
+        const edge = segments[i] as { variable?: string };
+        if (edge.variable && !vars.has(edge.variable)) {
+          vars.set(edge.variable, {
+            name: edge.variable,
+            labels: [],
+            isRoot: false,
+          });
+        }
+
         const targetNode = segments[i + 1] as NodePattern;
         if (targetNode.variable && !vars.has(targetNode.variable)) {
           vars.set(targetNode.variable, {

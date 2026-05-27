@@ -243,6 +243,52 @@ describe('PlanFormatter', () => {
       expect(result).toContain('SUM(total)');
     });
 
+    it('describes OptionalMatchStep with nested steps', () => {
+      const plan: QueryPlan = {
+        steps: [
+          {
+            kind: 'OptionalMatchStep',
+            newVars: ['b', 'r'],
+            readSteps: [
+              {
+                kind: 'EdgeExpandStep',
+                source: 'a',
+                target: 'b',
+                edgeVar: 'r',
+                types: ['KNOWS'],
+                direction: 'out',
+                minHops: 1,
+                maxHops: 1,
+                strategy: 'single-hop',
+              },
+            ],
+          },
+        ],
+      };
+
+      const result = formatter.format(plan, 'text');
+      expect(result).toContain('OptionalMatchStep [newVars: b, r]');
+      expect(result).toContain('EdgeExpandStep (→) r:KNOWS → b');
+    });
+
+    it('describes MergeStep with nested steps and SET items', () => {
+      const plan: QueryPlan = {
+        steps: [
+          {
+            kind: 'MergeStep',
+            pattern: { kind: 'NodePattern', variable: 'n', labels: ['Person'] },
+            readSteps: [ { kind: 'NodeScanStep', variable: 'n', types: ['Person'] } ],
+            createSteps: [ { kind: 'CreateNodeStep', variable: 'n', labels: ['Person'], properties: {} } ],
+            onMatchItems: [ { variable: 'n', property: 'age', operator: '=', value: { kind: 'Literal', value: 30 }, entityKind: 'node' } ],
+            onCreateItems: [ { variable: 'n', property: 'name', operator: '=', value: { kind: 'Literal', value: 'Alice' }, entityKind: 'node' } ],
+          },
+        ],
+      };
+
+      const result = formatter.format(plan, 'text');
+      expect(result).toContain('MergeStep { read: [NodeScanStep (n:Person)], create: [CreateNodeStep [n:Person {}]] } ON MATCH SET n.age = 30 ON CREATE SET n.name = "Alice"');
+    });
+
     it('formats multi-step plans correctly', () => {
       const plan: QueryPlan = {
         steps: [

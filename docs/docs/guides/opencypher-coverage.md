@@ -17,12 +17,13 @@ Grafio's Cypher engine supports a comprehensive subset of openCypher.
 - `WITH`
 - `MERGE`
 - `SET`
+- `OPTIONAL MATCH`
 
 ## Partially supported
 
 | Clause | Notes |
 |--------|-------|
-| `MATCH` | Missing `OPTIONAL MATCH` and `shortestPath()` |
+| `MATCH` | Missing `shortestPath()` |
 | `WHERE` | Missing regex matching (`=~`), `exists()`, and list comprehensions |
 | `RETURN` | Missing `CASE WHEN` and list/map projections |
 | `REMOVE` | Missing label removal (`REMOVE n:Label`) |
@@ -30,7 +31,6 @@ Grafio's Cypher engine supports a comprehensive subset of openCypher.
 
 ## Not supported
 
-- `OPTIONAL MATCH`
 - `UNWIND`
 - `CALL`
 - `YIELD`
@@ -41,6 +41,6 @@ Grafio's Cypher engine supports a comprehensive subset of openCypher.
 
 ## Coverage
 
-Grafio currently covers approximately **67%** of standard openCypher clauses (16 out of 24 core clauses are either fully or partially supported).
+Grafio currently covers approximately **71%** of standard openCypher clauses (17 out of 24 core clauses are either fully or partially supported).
 
 <CoverageChart />

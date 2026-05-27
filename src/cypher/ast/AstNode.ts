@@ -120,10 +120,8 @@ export interface QueryAst {
   kind: 'Query';
   /** Pipeline segments (WITH-delimited). Empty array for non-WITH queries. */
   segments: QuerySegment[];
-  /** The MATCH clause (synthesized as empty if omitted by user). */
-  match: MatchClause;
-  /** Optional WHERE clause. */
-  where?: WhereClause;
+  /** Reading clauses: MATCH and/or OPTIONAL MATCH, each with its own WHERE. */
+  matches: MatchClause[];
   /** Optional CREATE clause. */
   create?: CreateClause;
   /** Optional MERGE clauses. */
@@ -158,8 +156,12 @@ export type MatchPattern = PatternPath | NamedPath;
 
 export interface MatchClause {
   kind: 'Match';
+  /** Whether this is an OPTIONAL MATCH (left-outer-join semantics). */
+  optional: boolean;
   /** One or more pattern paths (or named paths) in the MATCH clause. */
   patterns: MatchPattern[];
+  /** Optional WHERE sub-clause attached to this MATCH. */
+  where?: WhereClause;
 }
 
 export interface WhereClause {
@@ -211,10 +213,8 @@ export interface WithClause {
 /** A single pipeline stage in a multi-segment query, delimited by WITH. */
 export interface QuerySegment {
   kind: 'QuerySegment';
-  /** Optional MATCH clause for this segment. */
-  match?: MatchClause;
-  /** Optional WHERE clause for this segment (after MATCH, before WITH). */
-  where?: WhereClause;
+  /** Reading clauses: MATCH and/or OPTIONAL MATCH, each with its own WHERE. */
+  matches: MatchClause[];
   /** Optional CREATE clause. */
   create?: CreateClause;
   /** Optional MERGE clauses. */
