@@ -237,7 +237,7 @@ export class Parser {
     }
     const segments: import('./ast/AstNode').QuerySegment[] = [];
 
-    while (!this._isAtEnd() || this._check(TokenKind.UNION)) {
+    while (!this._isAtEnd() && !this._check(TokenKind.UNION)) {
       // Parse a sequence of MATCH / OPTIONAL MATCH clauses (each with embedded WHERE).
       const matches = this._parseMatchClauses();
 

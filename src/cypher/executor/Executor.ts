@@ -42,7 +42,7 @@ import { CypherRuntimeError } from '../errors';
 import { Row, ExpressionEvaluator } from './ExpressionEvaluator';
 
 import { ReadStepExecutor } from './steps/ReadStepExecutors';
-import { PipelineStepExecutor } from './steps/PipelineStepExecutors';
+import { PipelineStepExecutor, getDistinctKey } from './steps/PipelineStepExecutors';
 import { AggregateStepExecutor } from './steps/AggregateStepExecutor';
 import { WriteStepExecutor } from './steps/WriteStepExecutors';
 import { DeleteStepExecutor } from './steps/DeleteStepExecutors';
@@ -319,14 +319,12 @@ export class Executor {
             if (!isAll) {
               const seen = new Set<string>();
               resultRows = resultRows.filter((row) => {
-                const obj: any = {};
                 const keys = Array.from(row.keys()).sort();
+                const keyParts: string[] = [];
                 for (const k of keys) {
-                  obj[k] = row.get(k);
+                  keyParts.push(getDistinctKey(row.get(k)));
                 }
-                const hash = JSON.stringify(obj, (key, val) =>
-                  typeof val === 'bigint' ? val.toString() : val,
-                );
+                const hash = keyParts.join('\x00');
                 if (seen.has(hash)) return false;
                 seen.add(hash);
                 return true;
