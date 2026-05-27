@@ -47,6 +47,16 @@ describe('Semantic', () => {
         .toThrow(CypherSemanticError);
     });
 
+    it('rejects variable in WHERE clause from a subsequent MATCH', () => {
+      expect(() => analyse('MATCH (a) WHERE b.age > 18 MATCH (b) RETURN a, b'))
+        .toThrow(CypherSemanticError);
+    });
+
+    it('rejects variable in WHERE clause from a subsequent OPTIONAL MATCH', () => {
+      expect(() => analyse('MATCH (a) WHERE b.age > 18 OPTIONAL MATCH (a)-[:KNOWS]->(b) RETURN a, b'))
+        .toThrow(CypherSemanticError);
+    });
+
     it('rejects undefined variable in ORDER BY', () => {
       expect(() => analyse('MATCH (n) RETURN n ORDER BY z.name'))
         .toThrow(CypherSemanticError);

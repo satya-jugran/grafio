@@ -321,9 +321,21 @@ export class Semantic {
     const extraScope = this._collectWriteScope(ast);
 
     // Check WHERE clauses (embedded in each MatchClause).
+    // We build an incremental scope because a WHERE clause attached to an earlier MATCH
+    // cannot reference variables introduced by a later MATCH/OPTIONAL MATCH.
+    const incrementalScope = new Set<string>();
+
     for (const matchClause of ast.matches) {
+      for (const pattern of matchClause.patterns) {
+        const segments = getPatternSegments(pattern);
+        if (pattern.kind === 'NamedPath' && pattern.name) incrementalScope.add(pattern.name);
+        for (const seg of segments) {
+          if (seg.variable) incrementalScope.add(seg.variable);
+        }
+      }
+
       if (matchClause.where) {
-        this._checkExpressionVars(matchClause.where.expression, 'WHERE', extraScope);
+        this._checkExpressionVars(matchClause.where.expression, 'WHERE', extraScope, incrementalScope);
       }
     }
 
@@ -394,49 +406,52 @@ export class Semantic {
     expr: Expression,
     clause: string,
     extraScope?: ReadonlySet<string>,
+    restrictScope?: ReadonlySet<string>,
   ): void {
     switch (expr.kind) {
       case 'Identifier': {
-        if (!this._scope.has(expr.name) && !extraScope?.has(expr.name)) {
+        const isBoundInMain = restrictScope ? restrictScope.has(expr.name) : this._scope.has(expr.name);
+        if (!isBoundInMain && !extraScope?.has(expr.name)) {
+          const definedVars = restrictScope ? [...restrictScope.keys()] : [...this._scope.keys()];
           throw new CypherSemanticError(
             `Variable '${expr.name}' is not defined in ${clause} clause. ` +
-            `Defined variables: ${[...this._scope.keys()].join(', ') || '(none)'}`,
+            `Defined variables: ${definedVars.join(', ') || '(none)'}`,
           );
         }
         return;
       }
 
       case 'PropertyAccess':
-        this._checkExpressionVars(expr.object, clause, extraScope);
+        this._checkExpressionVars(expr.object, clause, extraScope, restrictScope);
         return;
 
       case 'Binary':
-        this._checkExpressionVars(expr.left, clause, extraScope);
-        this._checkExpressionVars(expr.right, clause, extraScope);
+        this._checkExpressionVars(expr.left, clause, extraScope, restrictScope);
+        this._checkExpressionVars(expr.right, clause, extraScope, restrictScope);
         return;
 
       case 'Unary':
-        this._checkExpressionVars(expr.operand, clause, extraScope);
+        this._checkExpressionVars(expr.operand, clause, extraScope, restrictScope);
         return;
 
       case 'In':
-        this._checkExpressionVars(expr.expression, clause, extraScope);
-        this._checkExpressionVars(expr.list, clause, extraScope);
+        this._checkExpressionVars(expr.expression, clause, extraScope, restrictScope);
+        this._checkExpressionVars(expr.list, clause, extraScope, restrictScope);
         return;
 
       case 'IsNull':
-        this._checkExpressionVars(expr.expression, clause, extraScope);
+        this._checkExpressionVars(expr.expression, clause, extraScope, restrictScope);
         return;
 
       case 'List':
         for (const elem of expr.elements) {
-          this._checkExpressionVars(elem, clause, extraScope);
+          this._checkExpressionVars(elem, clause, extraScope, restrictScope);
         }
         return;
 
       case 'FunctionCall':
         for (const arg of expr.args) {
-          this._checkExpressionVars(arg, clause, extraScope);
+          this._checkExpressionVars(arg, clause, extraScope, restrictScope);
         }
         return;
 
