@@ -211,6 +211,15 @@ describe('CypherEngine Integration', () => {
       );
       expect(result.rows[0].name).toBe('Henry');
     });
+
+    it('executes OPTIONAL MATCH and returns null for missing matches', async () => {
+      const result = await engine.execute(
+        "MATCH (p:Person {name: 'Alice'}) OPTIONAL MATCH (p)-[:KNOWS]->(f:Person {name: 'Nobody'}) RETURN p.name AS p_name, f.name AS f_name",
+      );
+      expect(result.rows).toHaveLength(1);
+      expect(result.rows[0].p_name).toBe('Alice');
+      expect(result.rows[0].f_name).toBeNull();
+    });
   });
 
   describe('Education Graph', () => {

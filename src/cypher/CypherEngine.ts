@@ -6,7 +6,7 @@
  *
  * ### Validation gate
  * After tokenisation, the engine scans for unsupported clauses (write,
- * aggregation, WITH, OPTIONAL MATCH, etc.) and throws
+ * aggregation, UNWIND, etc.) and throws
  * {@link CypherNotSupportedError}. This keeps the public API read-only
  * while the internal pipeline remains permissive and extensible.
  *
@@ -80,7 +80,6 @@ export interface CypherQueryOptions {
  */
 const GATED_TOKENS: ReadonlySet<TokenKind> = new Set([
   // Other unsupported clauses
-  TokenKind.OPTIONAL,
   TokenKind.UNWIND,
 ]);
 
@@ -127,7 +126,7 @@ export class CypherEngine {
    * @param params - Named parameter map (`$key` → value).
    * @returns A {@link CypherResult} containing rows and execution summary.
    * @throws {CypherSyntaxError}       on tokenisation / parse errors.
-   * @throws {CypherNotSupportedError} on unsupported clauses (write, aggregation, WITH, etc.).
+   * @throws {CypherNotSupportedError} on unsupported clauses (UNWIND, etc.).
    * @throws {CypherSemanticError}     on variable scope violations.
    * @throws {CypherRuntimeError}      on execution-time errors (unbound parameter, etc.).
    */
@@ -197,7 +196,7 @@ export class CypherEngine {
    * @param format - Output format: 'json' | 'ascii' | 'mermaid' (default: 'json').
    * @returns A formatted string representation of the query execution plan.
    * @throws {CypherSyntaxError}       on tokenisation / parse errors.
-   * @throws {CypherNotSupportedError} on unsupported clauses (write, aggregation, WITH, etc.).
+   * @throws {CypherNotSupportedError} on unsupported clauses (UNWIND, etc.).
    * @throws {CypherSemanticError}     on variable scope violations.
    */
   public async getQueryPlan(
