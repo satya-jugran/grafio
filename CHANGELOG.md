@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.8.0] - 2026-05-27
+
+### ✨ New Features
+
+1. **OPTIONAL MATCH Clause Support**
+   - Added support for the openCypher `OPTIONAL MATCH` clause, enabling left-outer-join semantics.
+   - Preserves rows and null-fills variables when patterns don't match.
+   - Fully supports nested `WHERE` clauses within `OPTIONAL MATCH`.
+   - Supports Named Paths (`path = (a)-->(b)`) which are correctly null-filled when missing.
+
+### 🐛 Bug Fixes
+
+1. **WHERE Clause Semantic Scoping**
+   - Fixed scope leakage where a `WHERE` clause could reference variables introduced in a subsequent `MATCH` or `OPTIONAL MATCH` clause. Variable validation now uses an incremental scope to strictly enforce linear declaration order.
+
 ## [7.7.0] - 2026-05-26
 
 ### ✨ New Features
