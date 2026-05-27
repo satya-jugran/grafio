@@ -49,6 +49,14 @@ export class WhereDecomposer {
     const vars = new Map<string, VarInfo>();
 
     for (const pattern of patterns) {
+      if (pattern.kind === 'NamedPath' && pattern.name && !vars.has(pattern.name)) {
+        vars.set(pattern.name, {
+          name: pattern.name,
+          labels: [],
+          isRoot: false,
+        });
+      }
+
       const segments = getPatternSegments(pattern);
       if (segments.length === 0) continue;
 
