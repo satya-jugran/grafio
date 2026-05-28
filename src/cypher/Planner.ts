@@ -177,7 +177,10 @@ export class Planner {
         return { ...expr, expression: e };
       }
       case 'List': {
-        const elems = await Promise.all(expr.elements.map(e => this._extractSubqueries(e, steps, knownVars)));
+        const elems: import('./ast/AstNode').Expression[] = [];
+        for (const e of expr.elements) {
+          elems.push(await this._extractSubqueries(e, steps, knownVars));
+        }
         return { ...expr, elements: elems };
       }
       case 'Map': {
@@ -188,7 +191,10 @@ export class Planner {
         return { ...expr, props };
       }
       case 'FunctionCall': {
-        const args = await Promise.all(expr.args.map(a => this._extractSubqueries(a, steps, knownVars)));
+        const args: import('./ast/AstNode').Expression[] = [];
+        for (const a of expr.args) {
+          args.push(await this._extractSubqueries(a, steps, knownVars));
+        }
         return { ...expr, args };
       }
       case 'Identifier':
