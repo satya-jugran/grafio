@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.10.0] - 2026-05-28
+
+### ✨ New Features
+
+1. **EXISTS Subquery Clause Support**
+   - Added support for openCypher `EXISTS { MATCH ... }` subqueries.
+   - Evaluates to true if the subquery returns at least one row, executing natively within the planner pipeline.
+   - Integrates natively with `WHERE`, `RETURN`, `ORDER BY`, `SET` and all logical boolean expressions.
+   - Features robust semantic scoping to prevent unintended variable leakage while retaining subquery functionality.
+
 ## [7.9.0] - 2026-05-28
 
 ### ✨ New Features

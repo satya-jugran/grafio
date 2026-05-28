@@ -92,6 +92,17 @@ WHERE friends > 3
 RETURN f.name, friends
 ```
 
+### EXISTS
+
+Evaluate existential subqueries:
+
+```cypher
+MATCH (p:Person)
+WHERE EXISTS { MATCH (p)-[:KNOWS]->(f:Person) WHERE f.age > 25 }
+RETURN p.name
+```
+
+
 ## Node Patterns
 
 ### Undirected Relationships
