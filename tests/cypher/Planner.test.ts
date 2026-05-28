@@ -10,7 +10,7 @@ import { IsNullExpr } from '../../src/cypher/ast/AstNode';
 async function plan(query: string) {
   const tokens = new Lexer(query).tokenise();
   const ast = new Parser(tokens).parse();
-  new Semantic().analyse(ast);
+  new Semantic().analyseStatement(ast);
   return new Planner().plan(ast);
 }
 

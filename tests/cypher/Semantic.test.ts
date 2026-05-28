@@ -9,7 +9,7 @@ function analyse(query: string) {
   const tokens = new Lexer(query).tokenise();
   const ast = new Parser(tokens).parse();
   const semantic = new Semantic();
-  semantic.analyse(ast);
+  semantic.analyseStatement(ast);
   return { ast, scope: semantic.scope };
 }
 

@@ -150,7 +150,79 @@ export class Parser {
    * @returns The root AST node.
    * @throws {CypherSyntaxError} on any syntax violation.
    */
-  public parse(): QueryAst {
+  public parse(): import('./ast/AstNode').Statement {
+    const firstQuery = this._parseSingleQuery();
+
+    if (this._check(TokenKind.UNION)) {
+      const queries = [firstQuery];
+      const all: boolean[] = [];
+
+      while (this._check(TokenKind.UNION)) {
+        this._advance();
+        if (this._check(TokenKind.ALL)) {
+          this._advance();
+          all.push(true);
+        } else {
+          all.push(false);
+        }
+        queries.push(this._parseSingleQuery());
+      }
+
+      const unionAst: import('./ast/AstNode').UnionAst = {
+        kind: 'Union',
+        queries,
+        all,
+      };
+
+      // Ensure no intermediate query has ORDER BY, SKIP, or LIMIT
+      for (let i = 0; i < queries.length - 1; i++) {
+        if (queries[i].orderBy || queries[i].skip || queries[i].limit) {
+          throw new CypherSyntaxError(
+            `ORDER BY, SKIP and LIMIT are only allowed at the end of a UNION query`,
+            1,
+            1
+          );
+        }
+      }
+
+      // Extract trailing clauses from the final query to apply to the union as a whole
+      const finalQuery = queries[queries.length - 1];
+      if (finalQuery.orderBy) {
+        unionAst.orderBy = finalQuery.orderBy;
+        finalQuery.orderBy = undefined;
+      }
+      if (finalQuery.skip) {
+        unionAst.skip = finalQuery.skip;
+        finalQuery.skip = undefined;
+      }
+      if (finalQuery.limit) {
+        unionAst.limit = finalQuery.limit;
+        finalQuery.limit = undefined;
+      }
+
+      if (!this._isAtEnd()) {
+        const token = this._peek();
+        throw new CypherSyntaxError(
+          `Unexpected token '${token.value}' after query clauses`,
+          token.line,
+          token.col,
+        );
+      }
+      return unionAst;
+    }
+
+    if (!this._isAtEnd()) {
+      const token = this._peek();
+      throw new CypherSyntaxError(
+        `Unexpected token '${token.value}' after query clauses`,
+        token.line,
+        token.col,
+      );
+    }
+    return firstQuery;
+  }
+
+  private _parseSingleQuery(): QueryAst {
     // ── DDL: CREATE INDEX … ──────────────────────────────────────
     if (this._check(TokenKind.CREATE) && this._peek(1)?.kind === TokenKind.INDEX) {
       return this._parseCreateIndex();
@@ -165,7 +237,7 @@ export class Parser {
     }
     const segments: import('./ast/AstNode').QuerySegment[] = [];
 
-    while (!this._isAtEnd()) {
+    while (!this._isAtEnd() && !this._check(TokenKind.UNION)) {
       // Parse a sequence of MATCH / OPTIONAL MATCH clauses (each with embedded WHERE).
       const matches = this._parseMatchClauses();
 
@@ -202,12 +274,13 @@ export class Parser {
           ? this._parseReturnClause()
           : { kind: 'Return', distinct: false, items: [] };
         const having = this._check(TokenKind.HAVING) ? this._parseHavingClause() : undefined;
+        
         const orderBy = this._check(TokenKind.ORDER) ? this._parseOrderByClause() : undefined;
         const skip = this._check(TokenKind.SKIP) ? this._parseSkipClause() : undefined;
         const limit = this._check(TokenKind.LIMIT) ? this._parseLimitClause() : undefined;
 
-        // Ensure no trailing tokens beyond the supported clauses.
-        if (!this._isAtEnd()) {
+        // Ensure no trailing tokens beyond the supported clauses unless we are inside a UNION statement
+        if (!this._check(TokenKind.UNION) && !this._isAtEnd()) {
           const token = this._peek();
           throw new CypherSyntaxError(
             `Unexpected token '${token.value}' after query clauses`,

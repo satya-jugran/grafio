@@ -82,7 +82,7 @@ export class PipelineStepExecutor {
       const keyParts: string[] = [];
       const keys = step.star ? Array.from(row.keys()).sort() : step.columns.map(c => c.alias);
       for (const colName of keys) {
-        keyParts.push(this._distinctKey(row.get(colName)));
+        keyParts.push(getDistinctKey(row.get(colName)));
       }
       const key = keyParts.join('\x00');
 
@@ -95,30 +95,7 @@ export class PipelineStepExecutor {
     return deduped;
   }
 
-  /**
-   * Serialize a single value into a stable, collision-free string key
-   * for DISTINCT deduplication.
-   *
-   * Handles primitives, entities (nodes/edges with `.id`), arrays of
-   * entities (e.g. result of `nodes(path)` / `relationships(path)`),
-   * and arbitrary objects.
-   */
-  private _distinctKey(value: unknown): string {
-    if (value === null) return '\x00null';
-    if (value === undefined) return '\x00undef';
 
-    if (typeof value === 'object') {
-      if ('id' in (value as object)) {
-        return (value as { id: string }).id;
-      }
-
-      if (Array.isArray(value)) {
-        return value.map((el) => this._distinctKey(el)).join('\x1F');
-      }
-    }
-
-    return String(value);
-  }
 
   // ── SortStep ───────────────────────────────────────────────────
 
@@ -156,4 +133,29 @@ export class PipelineStepExecutor {
     const end = limitVal === Infinity ? undefined : start + limitVal;
     return rows.slice(start, end);
   }
+}
+
+/**
+ * Serialize a single value into a stable, collision-free string key
+ * for DISTINCT deduplication.
+ *
+ * Handles primitives, entities (nodes/edges with `.id`), arrays of
+ * entities (e.g. result of `nodes(path)` / `relationships(path)`),
+ * and arbitrary objects.
+ */
+export function getDistinctKey(value: unknown): string {
+  if (value === null) return '\x00null';
+  if (value === undefined) return '\x00undef';
+
+  if (typeof value === 'object') {
+    if ('id' in (value as object)) {
+      return (value as { id: string }).id;
+    }
+
+    if (Array.isArray(value)) {
+      return value.map((el) => getDistinctKey(el)).join('\x1F');
+    }
+  }
+
+  return String(value);
 }
