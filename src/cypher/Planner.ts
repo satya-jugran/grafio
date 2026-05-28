@@ -61,7 +61,8 @@ export class Planner {
   /**
    * Translate a typed AST into a {@link QueryPlan}.
    */
-  public async plan(ast: import('./ast/AstNode').Statement): Promise<QueryPlan> {
+  public async plan(originalAst: import('./ast/AstNode').Statement): Promise<QueryPlan> {
+    const ast = JSON.parse(JSON.stringify(originalAst)) as import('./ast/AstNode').Statement;
     if (ast.kind === 'Union') {
       const plans: QueryPlan[] = [];
       for (const query of ast.queries) {
