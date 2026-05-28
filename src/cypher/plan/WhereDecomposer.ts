@@ -202,10 +202,13 @@ export class WhereDecomposer {
           return;
         case 'ExistsSubquery':
           if (e.match.where) walk(e.match.where.expression);
-          // Variables used in subquery patterns are usually new bindings or outer bindings.
-          // To be safe and ensure the EXISTS goes to crossVar, we can just let it have no explicit variables 
-          // or all variables in the expression. Since it never becomes a PropertyFilter, it will go to crossVar
-          // as long as it has multiple vars or 0 vars.
+          for (const pattern of e.match.patterns) {
+            const segments = getPatternSegments(pattern);
+            if (pattern.kind === 'NamedPath' && pattern.name) vars.add(pattern.name);
+            for (const seg of segments) {
+              if (seg.variable) vars.add(seg.variable);
+            }
+          }
           return;
         default:
           // Literal, Parameter — no variables.

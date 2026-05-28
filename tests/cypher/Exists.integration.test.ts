@@ -46,6 +46,25 @@ describe('Cypher EXISTS Subquery', () => {
     expect(result.rows[0].name).toBe('Alice');
   });
 
+  it('should evaluate EXISTS combined with other conditions correctly', async () => {
+    const result = await engine.execute(`
+      MATCH (p:Person)
+      WHERE EXISTS { (p)-[:KNOWS]->() } AND p.name = 'Alice'
+      RETURN p.name AS name
+    `);
+
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0].name).toBe('Alice');
+
+    const result2 = await engine.execute(`
+      MATCH (p:Person)
+      WHERE EXISTS { (p)-[:KNOWS]->() } AND p.name = 'Bob'
+      RETURN p.name AS name
+    `);
+
+    expect(result2.rows).toHaveLength(0); // Bob exists but does not know anyone
+  });
+
   it('should allow EXISTS in RETURN clause', async () => {
     const result = await engine.execute(`
       MATCH (p:Person)
