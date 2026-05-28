@@ -24,6 +24,7 @@ export const enum TokenKind {
   LIMIT = 'LIMIT',
   AS = 'AS',
   DISTINCT = 'DISTINCT',
+  EXISTS = 'EXISTS',
   IN = 'IN',
   IS = 'IS',
   NULL = 'NULL',

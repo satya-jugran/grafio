@@ -393,6 +393,8 @@ export class Semantic {
     // Check RETURN items.
     for (const item of ast.return.items) {
       this._checkExpressionVars(item.expression, 'RETURN', extraScope);
+      const alias = item.alias ?? this._deriveReturnAlias(item.expression);
+      extraScope.add(alias);
     }
 
     // Check ORDER BY items.
@@ -495,6 +497,24 @@ export class Semantic {
         }
         return;
 
+      case 'ExistsSubquery': {
+        const localScope = new Set(restrictScope ?? this._scope.keys());
+        if (extraScope) {
+          for (const v of extraScope) localScope.add(v);
+        }
+        for (const pattern of expr.match.patterns) {
+          const segments = getPatternSegments(pattern);
+          if (pattern.kind === 'NamedPath' && pattern.name) localScope.add(pattern.name);
+          for (const seg of segments) {
+            if (seg.variable) localScope.add(seg.variable);
+          }
+        }
+        if (expr.match.where) {
+          this._checkExpressionVars(expr.match.where.expression, 'EXISTS subquery WHERE', undefined, localScope);
+        }
+        return;
+      }
+
       case 'Literal':
       case 'Parameter':
         // No variable references — safe.
@@ -579,6 +599,25 @@ export class Semantic {
           this._checkExpressionVarsWithAllowed(arg, clause, allowed, extraScope);
         }
         return;
+
+      case 'ExistsSubquery': {
+        const localAllowed = new Set(allowed);
+        if (extraScope) {
+          for (const v of extraScope) localAllowed.add(v);
+        }
+        for (const v of this._scope.keys()) localAllowed.add(v);
+        for (const pattern of expr.match.patterns) {
+          const segments = getPatternSegments(pattern);
+          if (pattern.kind === 'NamedPath' && pattern.name) localAllowed.add(pattern.name);
+          for (const seg of segments) {
+            if (seg.variable) localAllowed.add(seg.variable);
+          }
+        }
+        if (expr.match.where) {
+          this._checkExpressionVarsWithAllowed(expr.match.where.expression, 'EXISTS subquery WHERE', localAllowed, undefined);
+        }
+        return;
+      }
 
       case 'Literal':
       case 'Parameter':
@@ -812,6 +851,21 @@ export class Semantic {
           this._collectUnresolvedPostAggIdentifiers(arg, allowed),
         );
 
+      case 'ExistsSubquery': {
+        const localAllowed = new Set(allowed);
+        for (const pattern of expr.match.patterns) {
+          const segments = getPatternSegments(pattern);
+          if (pattern.kind === 'NamedPath' && pattern.name) localAllowed.add(pattern.name);
+          for (const seg of segments) {
+            if (seg.variable) localAllowed.add(seg.variable);
+          }
+        }
+        if (expr.match.where) {
+          return this._collectUnresolvedPostAggIdentifiers(expr.match.where.expression, localAllowed);
+        }
+        return [];
+      }
+
       case 'Literal':
       case 'Parameter':
         return [];
@@ -853,6 +907,9 @@ export class Semantic {
 
       case 'Map':
         return Object.values(expr.props).some(e => this._containsAggregate(e));
+
+      case 'ExistsSubquery':
+        return expr.match.where ? this._containsAggregate(expr.match.where.expression) : false;
 
       case 'Identifier':
       case 'Literal':
@@ -1328,6 +1385,9 @@ export class Semantic {
         return expr.args.some(a =>
           this._expressionReferencesAny(a, varNames),
         );
+
+      case 'ExistsSubquery':
+        return expr.match.where ? this._expressionReferencesAny(expr.match.where.expression, varNames) : false;
 
       case 'Literal':
       case 'Parameter':

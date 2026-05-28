@@ -36,6 +36,7 @@ const KEYWORDS: Record<string, TokenKind> = {
   limit: TokenKind.LIMIT,
   as: TokenKind.AS,
   distinct: TokenKind.DISTINCT,
+  exists: TokenKind.EXISTS,
   in: TokenKind.IN,
   is: TokenKind.IS,
   null: TokenKind.NULL,

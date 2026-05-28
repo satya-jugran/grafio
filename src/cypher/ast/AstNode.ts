@@ -349,7 +349,8 @@ export type Expression =
   | IsNullExpr
   | ListExpr
   | MapExpr
-  | FunctionCallExpr;
+  | FunctionCallExpr
+  | ExistsSubqueryExpr;
 
 // -- Literals --
 
@@ -425,6 +426,12 @@ export interface IsNullExpr {
   expression: Expression;
   /** Whether this is `IS NOT NULL`. */
   not: boolean;
+}
+
+export interface ExistsSubqueryExpr {
+  kind: 'ExistsSubquery';
+  /** The inner MATCH clause of the EXISTS subquery. */
+  match: MatchClause;
 }
 
 // -- Lists & function calls (for future use) --

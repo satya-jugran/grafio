@@ -1137,6 +1137,25 @@ export class Parser {
         this._advance();
         return { kind: 'Parameter', name: token.value };
 
+      case TokenKind.EXISTS: {
+        this._advance();
+        this._consume(TokenKind.LBRACE, "Expected '{' after EXISTS");
+        
+        let match: import('./ast/AstNode').MatchClause;
+        if (this._check(TokenKind.MATCH)) {
+            match = this._parseMatchClause(false);
+        } else {
+            const pattern = this._parsePatternPath();
+            let where: import('./ast/AstNode').WhereClause | undefined;
+            if (this._check(TokenKind.WHERE)) {
+                where = this._parseWhereClause();
+            }
+            match = { kind: 'Match', optional: false, patterns: [pattern], where };
+        }
+        this._consume(TokenKind.RBRACE, "Expected '}' after EXISTS subquery");
+        return { kind: 'ExistsSubquery', match };
+      }
+
       case TokenKind.IDENT: {
         this._advance();
 
