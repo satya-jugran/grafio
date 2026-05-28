@@ -393,8 +393,6 @@ export class Semantic {
     // Check RETURN items.
     for (const item of ast.return.items) {
       this._checkExpressionVars(item.expression, 'RETURN', extraScope);
-      const alias = item.alias ?? this._deriveReturnAlias(item.expression);
-      extraScope.add(alias);
     }
 
     // Check ORDER BY items.
