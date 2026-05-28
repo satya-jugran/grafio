@@ -40,6 +40,7 @@ import {
 import { CypherResult, CypherRow, CypherSummary } from '../Result';
 import { CypherRuntimeError } from '../errors';
 import { Row, ExpressionEvaluator } from './ExpressionEvaluator';
+import { ExistsSubqueryStep } from '../plan/QueryPlan';
 
 import { ReadStepExecutor } from './steps/ReadStepExecutors';
 import { PipelineStepExecutor, getDistinctKey } from './steps/PipelineStepExecutors';
@@ -291,6 +292,23 @@ export class Executor {
             }
             resultRows.push(nullRow);
           }
+        }
+        return resultRows;
+      }
+
+      case 'ExistsSubqueryStep': {
+        const existsStep = step as ExistsSubqueryStep;
+        const resultRows: Row[] = [];
+        for (const row of rows) {
+          let matchRows: Row[] = [row];
+          for (const subStep of existsStep.subPlan) {
+            matchRows = await this._executeStep(subStep, matchRows, params, transaction);
+            if (matchRows.length === 0) break;
+          }
+          const hasMatch = matchRows.length > 0;
+          const outRow = new Map(row);
+          outRow.set(existsStep.resultVariable, hasMatch);
+          resultRows.push(outRow);
         }
         return resultRows;
       }

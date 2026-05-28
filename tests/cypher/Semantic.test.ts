@@ -166,28 +166,7 @@ describe('Semantic', () => {
     });
   });
 
-  // ── HAVING validation ────────────────────────────────────────────
-  describe('HAVING validation', () => {
-    it('allows HAVING with valid aggregate alias reference', () => {
-      expect(() => analyse('MATCH (p:Person) RETURN p.city, COUNT(*) AS cnt HAVING cnt > 5'))
-        .not.toThrow();
-    });
 
-    it('allows HAVING with aggregate function call', () => {
-      expect(() => analyse('MATCH (p:Person) RETURN COUNT(*) AS cnt HAVING COUNT(*) > 5'))
-        .not.toThrow();
-    });
-
-    it('rejects HAVING with undefined variable', () => {
-      expect(() => analyse('MATCH (p:Person) RETURN COUNT(*) AS cnt HAVING x > 5'))
-        .toThrow(CypherSemanticError);
-    });
-
-    it('allows HAVING with MATCH-scope variable (no aggregates)', () => {
-      expect(() => analyse("MATCH (p:Person) RETURN p.name HAVING p.name = 'Alice'"))
-        .not.toThrow();
-    });
-  });
 
   // ── ORDER BY with aggregate aliases ──────────────────────────────
   describe('ORDER BY with aggregate aliases', () => {

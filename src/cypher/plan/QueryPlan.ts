@@ -63,7 +63,8 @@ export type PlanStep =
   | MergeStep
   | OptionalMatchStep
   | VerifyNodeStep
-  | UnionStep;
+  | UnionStep
+  | ExistsSubqueryStep;
 
 // ── Individual step types ─────────────────────────────────────────
 
@@ -405,6 +406,18 @@ export interface UnionStep {
   plans: QueryPlan[];
   /** all[i] is true if plans[i] is joined with UNION ALL to the next plan. */
   all: boolean[];
+}
+
+/** 
+ * Evaluates an EXISTS subquery.
+ * For each row, runs subPlan and assigns a boolean to resultVariable.
+ */
+export interface ExistsSubqueryStep {
+  kind: 'ExistsSubqueryStep';
+  /** The inner execution plan for the subquery */
+  subPlan: PlanStep[];
+  /** The temporary variable name to store the boolean result */
+  resultVariable: string;
 }
 
 // ── Index DDL steps ────────────────────────────────────────────────

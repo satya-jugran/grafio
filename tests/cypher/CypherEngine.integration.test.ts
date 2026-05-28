@@ -422,8 +422,8 @@ describe('CypherEngine Integration', () => {
 
   });
 
-  // ── HAVING, ORDER BY, Aggregate Expressions, DISTINCT ────────────
-  describe('HAVING, ORDER BY, Aggregate Expressions, DISTINCT', () => {
+  // ── ORDER BY, Aggregate Expressions, DISTINCT ────────────
+  describe('ORDER BY, Aggregate Expressions, DISTINCT', () => {
     let graph: Graph;
     let engine: CypherEngine;
 
@@ -433,19 +433,7 @@ describe('CypherEngine Integration', () => {
       engine = new CypherEngine(graph);
     });
 
-    it('filters groups with HAVING cnt > 1', async () => {
-      const result = await engine.execute(
-        'MATCH (p:Person) RETURN p.occupation, COUNT(*) AS cnt HAVING cnt > 1',
-      );
-      // Occupations with more than 1 person: Engineer (Alice, Henry), Designer (Bob, Grace)
-      const occupations = result.rows.map((r) => r.p_occupation);
-      expect(occupations).toContain('Engineer');
-      expect(occupations).toContain('Designer');
-      // Each returned row should have cnt > 1
-      for (const row of result.rows) {
-        expect(row.cnt).toBeGreaterThan(1);
-      }
-    });
+
 
     it('orders by aggregate alias DESC', async () => {
       const result = await engine.execute(
@@ -478,34 +466,9 @@ describe('CypherEngine Integration', () => {
       ]);
     });
 
-    it('combines HAVING, ORDER BY, and multiple aggregates', async () => {
-      const result = await engine.execute(
-        'MATCH (p:Person) RETURN p.occupation, COUNT(*) AS cnt, AVG(p.age) AS avg_age HAVING cnt > 1 ORDER BY avg_age DESC',
-      );
-      // Occupations with more than 1 person: Engineer(2), Designer(2)
-      expect(result.rows.length).toBeGreaterThanOrEqual(1);
-      // Verify descending order by avg_age
-      for (let i = 1; i < result.rows.length; i++) {
-        expect(result.rows[i - 1].avg_age as number).toBeGreaterThanOrEqual(result.rows[i].avg_age as number);
-      }
-      // Verify all rows have cnt > 1
-      for (const row of result.rows) {
-        expect(row.cnt).toBeGreaterThan(1);
-      }
-    });
 
-    it('filters groups with raw aggregate HAVING COUNT(*) > 1', async () => {
-      const result = await engine.execute(
-        'MATCH (p:Person) RETURN p.occupation, COUNT(*) AS cnt HAVING COUNT(*) > 1',
-      );
-      // Occupations with more than 1 person: Engineer (Alice, Henry), Designer (Bob, Grace)
-      const occupations = result.rows.map((r) => r.p_occupation);
-      expect(occupations).toContain('Engineer');
-      expect(occupations).toContain('Designer');
-      for (const row of result.rows) {
-        expect(row.cnt).toBeGreaterThan(1);
-      }
-    });
+
+
 
   });
 

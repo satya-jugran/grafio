@@ -251,7 +251,7 @@ export class ProjectionPlanner {
   }
 
   /**
-   * Rewrite HAVING / ORDER BY expressions that contain aggregate
+   * Rewrite ORDER BY expressions that contain aggregate
    * FunctionCalls, extracting them into AggregateSpec entries.
    */
   extractAndRewriteAggregates(

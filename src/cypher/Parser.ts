@@ -62,7 +62,6 @@ import {
   DropIndexClause,
   ShowIndexesClause,
   WhereClause,
-  HavingClause,
   ReturnClause,
   ReturnItem,
   OrderByClause,
@@ -273,7 +272,6 @@ export class Parser {
         const ret: ReturnClause = this._check(TokenKind.RETURN)
           ? this._parseReturnClause()
           : { kind: 'Return', distinct: false, items: [] };
-        const having = this._check(TokenKind.HAVING) ? this._parseHavingClause() : undefined;
         
         const orderBy = this._check(TokenKind.ORDER) ? this._parseOrderByClause() : undefined;
         const skip = this._check(TokenKind.SKIP) ? this._parseSkipClause() : undefined;
@@ -317,7 +315,6 @@ export class Parser {
           delete: del,
           remove,
           return: ret,
-          having,
           orderBy,
           skip,
           limit,
@@ -370,12 +367,7 @@ export class Parser {
     return { kind: 'Where', expression };
   }
 
-  /** HAVING expression */
-  private _parseHavingClause(): HavingClause {
-    this._consume(TokenKind.HAVING, "Expected 'HAVING'");
-    const expression = this._parseExpression();
-    return { kind: 'Having', expression };
-  }
+
 
   /** WITH [DISTINCT] ('*' | returnItem) (',' returnItem)* [ORDER BY ...] [SKIP ...] [LIMIT ...] [WHERE ...] */
   private _parseWithClause(): import('./ast/AstNode').WithClause {
@@ -1136,6 +1128,25 @@ export class Parser {
       case TokenKind.PARAM:
         this._advance();
         return { kind: 'Parameter', name: token.value };
+
+      case TokenKind.EXISTS: {
+        this._advance();
+        this._consume(TokenKind.LBRACE, "Expected '{' after EXISTS");
+        
+        let match: import('./ast/AstNode').MatchClause;
+        if (this._check(TokenKind.MATCH)) {
+            match = this._parseMatchClause(false);
+        } else {
+            const pattern = this._parsePatternPath();
+            let where: import('./ast/AstNode').WhereClause | undefined;
+            if (this._check(TokenKind.WHERE)) {
+                where = this._parseWhereClause();
+            }
+            match = { kind: 'Match', optional: false, patterns: [pattern], where };
+        }
+        this._consume(TokenKind.RBRACE, "Expected '}' after EXISTS subquery");
+        return { kind: 'ExistsSubquery', match };
+      }
 
       case TokenKind.IDENT: {
         this._advance();

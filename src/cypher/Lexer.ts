@@ -36,6 +36,7 @@ const KEYWORDS: Record<string, TokenKind> = {
   limit: TokenKind.LIMIT,
   as: TokenKind.AS,
   distinct: TokenKind.DISTINCT,
+  exists: TokenKind.EXISTS,
   in: TokenKind.IN,
   is: TokenKind.IS,
   null: TokenKind.NULL,
@@ -44,7 +45,6 @@ const KEYWORDS: Record<string, TokenKind> = {
   or: TokenKind.OR,
   asc: TokenKind.ASC,
   desc: TokenKind.DESC,
-  having: TokenKind.HAVING,
   union: TokenKind.UNION,
   all: TokenKind.ALL,
   // Future keywords

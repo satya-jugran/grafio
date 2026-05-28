@@ -17,7 +17,6 @@
  * | 6 | `checkDeleteSafety`      | Detect deleted vars used in RETURN/SET             |
  * | 7 | `checkSetTypes`          | Validate SET values are primitives                 |
  * | 8 | `checkAggregateGrouping` | Validate aggregate + grouping key rules            |
- * | 9 | `checkHavingClause`      | Validate HAVING clause                             |
  *
  * ### Extensibility
  * New semantic rules are added by appending a pass function to the `_passes`
@@ -115,7 +114,6 @@ export class Semantic {
     this._checkDeleteSafety.bind(this),
     this._checkSetTypes.bind(this),
     this._checkAggregateGrouping.bind(this),
-    this._checkHavingClause.bind(this),
     this._checkIndexDdlValidity.bind(this),
   ];
 
@@ -495,6 +493,24 @@ export class Semantic {
         }
         return;
 
+      case 'ExistsSubquery': {
+        const localScope = new Set(restrictScope ?? this._scope.keys());
+        if (extraScope) {
+          for (const v of extraScope) localScope.add(v);
+        }
+        for (const pattern of expr.match.patterns) {
+          const segments = getPatternSegments(pattern);
+          if (pattern.kind === 'NamedPath' && pattern.name) localScope.add(pattern.name);
+          for (const seg of segments) {
+            if (seg.variable) localScope.add(seg.variable);
+          }
+        }
+        if (expr.match.where) {
+          this._checkExpressionVars(expr.match.where.expression, 'EXISTS subquery WHERE', undefined, localScope);
+        }
+        return;
+      }
+
       case 'Literal':
       case 'Parameter':
         // No variable references — safe.
@@ -522,7 +538,7 @@ export class Semantic {
     switch (expr.kind) {
       case 'Identifier': {
         if (allowed.size > 0) {
-          // Post-aggregation context (ORDER BY / HAVING with aggregates):
+          // Post-aggregation context (ORDER BY with aggregates):
           // only RETURN aliases are available — MATCH-scope variables like
           // 'p' from MATCH (p:Person) no longer exist in the row buffer
           // after AggregateStep.
@@ -579,6 +595,25 @@ export class Semantic {
           this._checkExpressionVarsWithAllowed(arg, clause, allowed, extraScope);
         }
         return;
+
+      case 'ExistsSubquery': {
+        const localAllowed = new Set(allowed);
+        if (extraScope) {
+          for (const v of extraScope) localAllowed.add(v);
+        }
+        for (const v of this._scope.keys()) localAllowed.add(v);
+        for (const pattern of expr.match.patterns) {
+          const segments = getPatternSegments(pattern);
+          if (pattern.kind === 'NamedPath' && pattern.name) localAllowed.add(pattern.name);
+          for (const seg of segments) {
+            if (seg.variable) localAllowed.add(seg.variable);
+          }
+        }
+        if (expr.match.where) {
+          this._checkExpressionVarsWithAllowed(expr.match.where.expression, 'EXISTS subquery WHERE', localAllowed, undefined);
+        }
+        return;
+      }
 
       case 'Literal':
       case 'Parameter':
@@ -812,6 +847,21 @@ export class Semantic {
           this._collectUnresolvedPostAggIdentifiers(arg, allowed),
         );
 
+      case 'ExistsSubquery': {
+        const localAllowed = new Set(allowed);
+        for (const pattern of expr.match.patterns) {
+          const segments = getPatternSegments(pattern);
+          if (pattern.kind === 'NamedPath' && pattern.name) localAllowed.add(pattern.name);
+          for (const seg of segments) {
+            if (seg.variable) localAllowed.add(seg.variable);
+          }
+        }
+        if (expr.match.where) {
+          return this._collectUnresolvedPostAggIdentifiers(expr.match.where.expression, localAllowed);
+        }
+        return [];
+      }
+
       case 'Literal':
       case 'Parameter':
         return [];
@@ -853,6 +903,9 @@ export class Semantic {
 
       case 'Map':
         return Object.values(expr.props).some(e => this._containsAggregate(e));
+
+      case 'ExistsSubquery':
+        return expr.match.where ? this._containsAggregate(expr.match.where.expression) : false;
 
       case 'Identifier':
       case 'Literal':
@@ -899,61 +952,6 @@ export class Semantic {
     }
   }
 
-  // ── Pass 5: HAVING clause validation ────────────────────────────
-
-  /**
-   * Validate the HAVING clause when present.
-   *
-   * Rules enforced:
-   * 1. HAVING without aggregates is unusual but not invalid per openCypher
-   *    — it behaves like an additional WHERE filter.
-   * 2. Variables referenced in HAVING must be defined in the scope or
-   *    be aggregate aliases. Aggregate functions ARE allowed in HAVING
-   *    (e.g., `HAVING COUNT(*) > 5`).
-   *
-   * @throws {CypherSemanticError} if HAVING references undefined variables
-   *         or contains aggregates but no aggregates are present in RETURN.
-   */
-  private _checkHavingClause(ast: QueryAst): QueryAst {
-    if (!ast.having) return ast;
-
-    // When aggregates are present, HAVING can reference aggregate
-    // aliases and group-by key aliases that aren't in the MATCH scope.
-    // Aggregate functions ARE allowed in HAVING (e.g., HAVING COUNT(*) > 5).
-    const hasAggregate = ast.return.items.some(
-      item => this._containsAggregate(item.expression),
-    );
-
-    const allowedAliases = hasAggregate
-      ? this._collectReturnAliases(ast)
-      : undefined;
-
-    if (allowedAliases) {
-      this._checkExpressionVarsWithAllowed(
-        ast.having.expression,
-        'HAVING',
-        allowedAliases,
-      );
-    } else {
-      // No aggregates in RETURN, but HAVING may still contain aggregate
-      // functions (e.g. MATCH ... RETURN p.name HAVING COUNT(*) > 5).
-      // Aggregates are only executable with an AggregateStep in the plan;
-      // without aggregates in RETURN, the Planner takes the non-aggregate
-      // path and the Executor will fail on raw FunctionCall nodes.
-      if (this._containsAggregate(ast.having.expression)) {
-        throw new CypherSemanticError(
-          'HAVING contains aggregate functions but RETURN has no ' +
-          'aggregates. Add an aggregate (e.g. COUNT(*)) to RETURN, ' +
-          'or remove the aggregate from HAVING.',
-        );
-      }
-
-      // HAVING without aggregates is essentially an additional WHERE filter.
-      this._checkExpressionVars(ast.having.expression, 'HAVING');
-    }
-
-    return ast;
-  }
 
   // ── Pass 6: CREATE uniqueness ───────────────────────────────────
 
@@ -1328,6 +1326,9 @@ export class Semantic {
         return expr.args.some(a =>
           this._expressionReferencesAny(a, varNames),
         );
+
+      case 'ExistsSubquery':
+        return expr.match.where ? this._expressionReferencesAny(expr.match.where.expression, varNames) : false;
 
       case 'Literal':
       case 'Parameter':

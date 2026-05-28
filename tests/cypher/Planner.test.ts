@@ -533,24 +533,7 @@ describe('Aggregate Planning', () => {
   });
 });
 
-// ── HAVING plan shape ────────────────────────────────────────────
-describe('HAVING plan shape', () => {
-  it('places FilterStep after AggregateStep when HAVING exists', async () => {
-    const p = await plan('MATCH (p:Person) RETURN p.city, COUNT(*) AS cnt HAVING cnt > 5');
-    const aggIdx = p.steps.findIndex((s) => s.kind === 'AggregateStep');
-    const filterIdx = p.steps.findIndex((s) => s.kind === 'FilterStep');
-    expect(aggIdx).toBeGreaterThanOrEqual(0);
-    expect(filterIdx).toBeGreaterThan(aggIdx);
-  });
 
-  it('places FilterStep before ProjectStep for HAVING without aggregates', async () => {
-    const p = await plan("MATCH (p:Person) RETURN p.name HAVING p.name = 'Alice'");
-    const filterIdx = p.steps.findIndex((s) => s.kind === 'FilterStep');
-    const projectIdx = p.steps.findIndex((s) => s.kind === 'ProjectStep');
-    expect(filterIdx).toBeGreaterThanOrEqual(0);
-    expect(filterIdx).toBeLessThan(projectIdx);
-  });
-});
 
 // ── ORDER BY with aggregates plan shape ──────────────────────────
 describe('ORDER BY with aggregates plan shape', () => {

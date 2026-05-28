@@ -222,6 +222,11 @@ export class PlanFormatter {
         return 'MergeStep { read: [' + readDesc + '], create: [' + createDesc + '] }' + onMatch + onCreate;
       }
 
+      case 'ExistsSubqueryStep': {
+        const subStepsDesc = step.subPlan.map(s => this.describeStepForMermaid(s, _params)).join(', ');
+        return 'ExistsSubqueryStep [' + step.resultVariable + '] { ' + subStepsDesc + ' }';
+      }
+
       default:
         return (step as PlanStep).kind;
     }
@@ -326,6 +331,11 @@ export class PlanFormatter {
         return 'MergeStep { read: [' + readDesc + '], create: [' + createDesc + '] }' + onMatch + onCreate;
       }
 
+      case 'ExistsSubqueryStep': {
+        const subStepsDesc = step.subPlan.map(s => this.describeStep(s, params)).join(', ');
+        return 'ExistsSubqueryStep [' + step.resultVariable + '] { ' + subStepsDesc + ' }';
+      }
+
       default:
         return (step as PlanStep).kind;
     }
@@ -366,6 +376,8 @@ export class PlanFormatter {
       case 'FunctionCall':
         const args = expr.args.map(a => this.getExpressionDescription(a)).join(', ');
         return expr.name + '(' + (expr.distinct ? 'DISTINCT ' : '') + args + ')';
+      case 'ExistsSubquery':
+        return 'EXISTS { ... }';
       case 'Map':
         return '{' + Object.entries(expr.props).map(([k, v]) => k + ': ' + this.getExpressionDescription(v)).join(', ') + '}';
     }

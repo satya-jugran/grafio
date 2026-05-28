@@ -140,8 +140,7 @@ export interface QueryAst {
   showIndexes?: ShowIndexesClause;
   /** The RETURN clause (required). */
   return: ReturnClause;
-  /** Optional HAVING clause (post-aggregation filter). */
-  having?: HavingClause;
+  /** Optional ORDER BY clause */
   /** Optional ORDER BY clause. */
   orderBy?: OrderByClause;
   /** Optional SKIP expression. */
@@ -178,12 +177,6 @@ export interface MatchClause {
 export interface WhereClause {
   kind: 'Where';
   /** The boolean expression that filters rows. */
-  expression: Expression;
-}
-
-export interface HavingClause {
-  kind: 'Having';
-  /** The boolean expression to evaluate against post-aggregation rows. */
   expression: Expression;
 }
 
@@ -349,7 +342,8 @@ export type Expression =
   | IsNullExpr
   | ListExpr
   | MapExpr
-  | FunctionCallExpr;
+  | FunctionCallExpr
+  | ExistsSubqueryExpr;
 
 // -- Literals --
 
@@ -425,6 +419,12 @@ export interface IsNullExpr {
   expression: Expression;
   /** Whether this is `IS NOT NULL`. */
   not: boolean;
+}
+
+export interface ExistsSubqueryExpr {
+  kind: 'ExistsSubquery';
+  /** The inner MATCH clause of the EXISTS subquery. */
+  match: MatchClause;
 }
 
 // -- Lists & function calls (for future use) --

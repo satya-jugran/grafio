@@ -265,6 +265,12 @@ export class ExpressionEvaluator {
         }
       }
 
+      case 'ExistsSubquery': {
+        throw new CypherRuntimeError(
+          `ExistsSubquery must be extracted by Planner into ExistsSubqueryStep before evaluation`,
+        );
+      }
+
       default:
         throw new CypherRuntimeError(
           `Unsupported expression kind: '${(expr as Expression).kind}'`,

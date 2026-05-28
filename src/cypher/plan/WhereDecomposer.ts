@@ -200,6 +200,16 @@ export class WhereDecomposer {
         case 'FunctionCall':
           for (const arg of e.args) walk(arg);
           return;
+        case 'ExistsSubquery':
+          if (e.match.where) walk(e.match.where.expression);
+          for (const pattern of e.match.patterns) {
+            const segments = getPatternSegments(pattern);
+            if (pattern.kind === 'NamedPath' && pattern.name) vars.add(pattern.name);
+            for (const seg of segments) {
+              if (seg.variable) vars.add(seg.variable);
+            }
+          }
+          return;
         default:
           // Literal, Parameter — no variables.
           return;

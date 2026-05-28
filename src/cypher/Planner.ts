@@ -61,7 +61,8 @@ export class Planner {
   /**
    * Translate a typed AST into a {@link QueryPlan}.
    */
-  public async plan(ast: import('./ast/AstNode').Statement): Promise<QueryPlan> {
+  public async plan(originalAst: import('./ast/AstNode').Statement): Promise<QueryPlan> {
+    const ast = JSON.parse(JSON.stringify(originalAst)) as import('./ast/AstNode').Statement;
     if (ast.kind === 'Union') {
       const plans: QueryPlan[] = [];
       for (const query of ast.queries) {
@@ -101,9 +102,10 @@ export class Planner {
         await this._planSegment(fakeAst, steps, knownVars, segment.with.star);
 
         if (segment.with.where) {
+          const rewritten = await this._extractSubqueries(segment.with.where.expression, steps, knownVars);
           steps.push({
             kind: 'FilterStep',
-            predicate: segment.with.where.expression,
+            predicate: rewritten,
           });
         }
         if (segment.with.orderBy) {
@@ -119,6 +121,89 @@ export class Planner {
     await this._planSegment(ast, steps, knownVars, false);
 
     return { steps };
+  }
+
+  private async _extractSubqueries(expr: Expression, steps: PlanStep[], knownVars: Set<string>): Promise<Expression> {
+    switch (expr.kind) {
+      case 'ExistsSubquery': {
+        const varName = this._patternPlanner._syntheticVar('exists', steps.length);
+        const subPlanSteps: PlanStep[] = [];
+        
+        const fakeAst: QueryAst = {
+          kind: 'Query',
+          matches: [expr.match],
+          return: { kind: 'Return', distinct: false, items: [] },
+          segments: [],
+        };
+        
+        await this._planSegment(fakeAst, subPlanSteps, new Set(knownVars), false);
+        
+        if (subPlanSteps.length > 0 && subPlanSteps[subPlanSteps.length - 1].kind === 'ProjectStep') {
+          subPlanSteps.pop();
+        }
+        
+        subPlanSteps.push({ kind: 'LimitStep', limitExpr: { kind: 'Literal', value: 1 } });
+        
+        steps.push({
+          kind: 'ExistsSubqueryStep',
+          subPlan: subPlanSteps,
+          resultVariable: varName,
+        } as import('./plan/QueryPlan').ExistsSubqueryStep);
+        
+        knownVars.add(varName);
+
+        return { kind: 'Identifier', name: varName };
+      }
+      
+      case 'PropertyAccess': {
+        const obj = await this._extractSubqueries(expr.object, steps, knownVars);
+        return { ...expr, object: obj };
+      }
+      case 'Binary': {
+        const left = await this._extractSubqueries(expr.left, steps, knownVars);
+        const right = await this._extractSubqueries(expr.right, steps, knownVars);
+        return { ...expr, left, right };
+      }
+      case 'Unary': {
+        const operand = await this._extractSubqueries(expr.operand, steps, knownVars);
+        return { ...expr, operand };
+      }
+      case 'In': {
+        const e1 = await this._extractSubqueries(expr.expression, steps, knownVars);
+        const e2 = await this._extractSubqueries(expr.list, steps, knownVars);
+        return { ...expr, expression: e1, list: e2 };
+      }
+      case 'IsNull': {
+        const e = await this._extractSubqueries(expr.expression, steps, knownVars);
+        return { ...expr, expression: e };
+      }
+      case 'List': {
+        const elems: import('./ast/AstNode').Expression[] = [];
+        for (const e of expr.elements) {
+          elems.push(await this._extractSubqueries(e, steps, knownVars));
+        }
+        return { ...expr, elements: elems };
+      }
+      case 'Map': {
+        const props: Record<string, Expression> = {};
+        for (const [k, v] of Object.entries(expr.props)) {
+          props[k] = await this._extractSubqueries(v, steps, knownVars);
+        }
+        return { ...expr, props };
+      }
+      case 'FunctionCall': {
+        const args: import('./ast/AstNode').Expression[] = [];
+        for (const a of expr.args) {
+          args.push(await this._extractSubqueries(a, steps, knownVars));
+        }
+        return { ...expr, args };
+      }
+      case 'Identifier':
+      case 'Literal':
+      case 'Parameter':
+      default:
+        return expr;
+    }
   }
 
   private async _planSegment(ast: QueryAst, steps: PlanStep[], knownVars: Set<string>, isWithStar: boolean): Promise<void> {
@@ -143,7 +228,7 @@ export class Planner {
         for (const action of mergeClause.actions) {
           const arr = action.onMatch ? onMatchItems : onCreateItems;
           for (const item of action.items) {
-            // Parser enforces item.variable is an IdentifierExpr
+            item.value = await this._extractSubqueries(item.value, steps, knownVars);
             const varName = (item.variable as IdentifierExpr).name;
             const entityKind = this._resolveEntityKind(varName, ast);
             arr.push({
@@ -184,6 +269,7 @@ export class Planner {
     // ── NEW: Emit SET steps ────────────────────────────────────────
     if (ast.set) {
       for (const item of ast.set.items) {
+        item.value = await this._extractSubqueries(item.value, steps, knownVars);
         const varName =
           item.variable.kind === 'Identifier'
             ? (item.variable as IdentifierExpr).name
@@ -266,17 +352,13 @@ export class Planner {
 
       this._projPlanner.planAggregation(ast, steps);
 
-      // Post-aggregation HAVING / ORDER BY
+      // Post-aggregation ORDER BY
       const aggStep = steps[steps.length - 1] as import('./plan/QueryPlan').AggregateStep;
 
-      if (ast.having) {
-        const { rewritten, extracted } =
-          this._projPlanner.extractAndRewriteAggregates(ast.having.expression);
-        aggStep.aggregates.push(...extracted);
-        steps.push({ kind: 'FilterStep', predicate: rewritten });
-      }
-
       if (ast.orderBy) {
+        for (let i = 0; i < ast.orderBy.items.length; i++) {
+          ast.orderBy.items[i].expression = await this._extractSubqueries(ast.orderBy.items[i].expression, steps, knownVars);
+        }
         const items = ast.orderBy.items.map((item) => {
           const { rewritten, extracted } =
             this._projPlanner.extractAndRewriteAggregates(item.expression);
@@ -288,12 +370,12 @@ export class Planner {
     } else {
       // Plain (non-aggregate) path
       if (ast.orderBy) {
+        for (let i = 0; i < ast.orderBy.items.length; i++) {
+          ast.orderBy.items[i].expression = await this._extractSubqueries(ast.orderBy.items[i].expression, steps, knownVars);
+        }
         steps.push(this._projPlanner.planSort(ast));
       }
 
-      if (ast.having) {
-        steps.push({ kind: 'FilterStep', predicate: ast.having.expression });
-      }
 
       if (ast.skip || ast.limit) {
         steps.push(this._projPlanner.planLimit(ast));
@@ -301,6 +383,9 @@ export class Planner {
     }
 
     // ── 7. Projection — always last ───────────────────────────────
+    for (let i = 0; i < ast.return.items.length; i++) {
+      ast.return.items[i].expression = await this._extractSubqueries(ast.return.items[i].expression, steps, knownVars);
+    }
     const projStep = this._projPlanner.planProjection(ast, hasAggregates);
     // If it's a WITH *, flag it so the Executor knows to preserve all rows
     if (isWithStar) {
@@ -547,23 +632,29 @@ export class Planner {
       this._reorderer.removeIdLookups(crossVar, lookupExprs);
     }
 
+    // Compute newVars BEFORE updating knownVars
+    const newVars: string[] = [];
+    for (const v of varRegistry.keys()) {
+      if (!knownVars.has(v)) {
+        newVars.push(v);
+      }
+    }
+
+    // Update knownVars with all variables from this match clause before WHERE
+    for (const v of newVars) knownVars.add(v);
+
     // 7. Emit remaining cross-variable filter
     if (crossVar.length > 0) {
+      const predicate = this._whereDecomposer.andAll(crossVar);
+      const rewritten = await this._extractSubqueries(predicate, targetSteps, knownVars);
       targetSteps.push({
         kind: 'FilterStep',
-        predicate: this._whereDecomposer.andAll(crossVar),
+        predicate: rewritten,
       });
     }
 
     // 8. For OPTIONAL MATCH, wrap in OptionalMatchStep
     if (matchClause.optional) {
-      // Identify new variables introduced by this match clause
-      const newVars: string[] = [];
-      for (const v of varRegistry.keys()) {
-        if (!knownVars.has(v)) {
-          newVars.push(v);
-        }
-      }
       steps.push({
         kind: 'OptionalMatchStep',
         readSteps: targetSteps,
@@ -571,8 +662,7 @@ export class Planner {
       });
     }
 
-    // Update knownVars with all variables from this match clause
-    for (const v of varRegistry.keys()) knownVars.add(v);
+    // (knownVars already updated above)
   }
 
 }

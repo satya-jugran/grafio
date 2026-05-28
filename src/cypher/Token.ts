@@ -24,6 +24,7 @@ export const enum TokenKind {
   LIMIT = 'LIMIT',
   AS = 'AS',
   DISTINCT = 'DISTINCT',
+  EXISTS = 'EXISTS',
   IN = 'IN',
   IS = 'IS',
   NULL = 'NULL',
@@ -32,7 +33,6 @@ export const enum TokenKind {
   OR = 'OR',
   ASC = 'ASC',
   DESC = 'DESC',
-  HAVING = 'HAVING',
   UNION = 'UNION',
   ALL = 'ALL',
 
