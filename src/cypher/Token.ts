@@ -33,7 +33,6 @@ export const enum TokenKind {
   OR = 'OR',
   ASC = 'ASC',
   DESC = 'DESC',
-  HAVING = 'HAVING',
   UNION = 'UNION',
   ALL = 'ALL',
 

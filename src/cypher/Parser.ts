@@ -62,7 +62,6 @@ import {
   DropIndexClause,
   ShowIndexesClause,
   WhereClause,
-  HavingClause,
   ReturnClause,
   ReturnItem,
   OrderByClause,
@@ -273,7 +272,6 @@ export class Parser {
         const ret: ReturnClause = this._check(TokenKind.RETURN)
           ? this._parseReturnClause()
           : { kind: 'Return', distinct: false, items: [] };
-        const having = this._check(TokenKind.HAVING) ? this._parseHavingClause() : undefined;
         
         const orderBy = this._check(TokenKind.ORDER) ? this._parseOrderByClause() : undefined;
         const skip = this._check(TokenKind.SKIP) ? this._parseSkipClause() : undefined;
@@ -317,7 +315,6 @@ export class Parser {
           delete: del,
           remove,
           return: ret,
-          having,
           orderBy,
           skip,
           limit,
@@ -370,12 +367,7 @@ export class Parser {
     return { kind: 'Where', expression };
   }
 
-  /** HAVING expression */
-  private _parseHavingClause(): HavingClause {
-    this._consume(TokenKind.HAVING, "Expected 'HAVING'");
-    const expression = this._parseExpression();
-    return { kind: 'Having', expression };
-  }
+
 
   /** WITH [DISTINCT] ('*' | returnItem) (',' returnItem)* [ORDER BY ...] [SKIP ...] [LIMIT ...] [WHERE ...] */
   private _parseWithClause(): import('./ast/AstNode').WithClause {

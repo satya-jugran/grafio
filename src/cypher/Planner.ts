@@ -352,16 +352,8 @@ export class Planner {
 
       this._projPlanner.planAggregation(ast, steps);
 
-      // Post-aggregation HAVING / ORDER BY
+      // Post-aggregation ORDER BY
       const aggStep = steps[steps.length - 1] as import('./plan/QueryPlan').AggregateStep;
-
-      if (ast.having) {
-        ast.having.expression = await this._extractSubqueries(ast.having.expression, steps, knownVars);
-        const { rewritten, extracted } =
-          this._projPlanner.extractAndRewriteAggregates(ast.having.expression);
-        aggStep.aggregates.push(...extracted);
-        steps.push({ kind: 'FilterStep', predicate: rewritten });
-      }
 
       if (ast.orderBy) {
         for (let i = 0; i < ast.orderBy.items.length; i++) {
@@ -384,10 +376,6 @@ export class Planner {
         steps.push(this._projPlanner.planSort(ast));
       }
 
-      if (ast.having) {
-        ast.having.expression = await this._extractSubqueries(ast.having.expression, steps, knownVars);
-        steps.push({ kind: 'FilterStep', predicate: ast.having.expression });
-      }
 
       if (ast.skip || ast.limit) {
         steps.push(this._projPlanner.planLimit(ast));

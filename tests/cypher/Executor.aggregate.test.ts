@@ -46,7 +46,7 @@ async function buildAggregateGraph(): Promise<Graph> {
   return g;
 }
 
-describe('Executor – Aggregates & HAVING', () => {
+describe('Executor – Aggregates', () => {
   // ── Storage-level aggregation (Path A) ────────────────────────────
 
   describe('storage-level aggregation (Path A)', () => {
@@ -339,66 +339,7 @@ describe('Executor – Aggregates & HAVING', () => {
     });
   });
 
-  // ── HAVING execution ──────────────────────────────────────────────
 
-  describe('HAVING execution', () => {
-    it('filters grouped rows with HAVING cnt > 1', async () => {
-      const graph = await buildAggregateGraph();
-      const result = await executeQuery(
-        'MATCH (p:Person) RETURN p.city, COUNT(*) AS cnt HAVING cnt > 1',
-        {},
-        graph,
-      );
-      expect(result.rows).toHaveLength(2);
-      const byCity = new Map(result.rows.map((r) => [r.p_city, r.cnt]));
-      expect(byCity.get('NYC')).toBe(2);
-      expect(byCity.get('LA')).toBe(2);
-    });
-
-    it('returns empty result when HAVING matches no groups', async () => {
-      const graph = await buildAggregateGraph();
-      const result = await executeQuery(
-        'MATCH (p:Person) RETURN p.city, COUNT(*) AS cnt HAVING cnt > 10',
-        {},
-        graph,
-      );
-      expect(result.rows).toHaveLength(0);
-    });
-
-    it('filters non-aggregate query with HAVING', async () => {
-      const graph = await buildAggregateGraph();
-      const result = await executeQuery(
-        "MATCH (p:Person) RETURN p.name HAVING p.name = 'Alice'",
-        {},
-        graph,
-      );
-      expect(result.rows).toHaveLength(1);
-      expect(result.rows[0].p_name).toBe('Alice');
-    });
-
-    it('filters groups with raw aggregate HAVING COUNT(*) > 1', async () => {
-      const graph = await buildAggregateGraph();
-      const result = await executeQuery(
-        'MATCH (p:Person) RETURN p.city, COUNT(*) AS cnt HAVING COUNT(*) > 1',
-        {},
-        graph,
-      );
-      expect(result.rows).toHaveLength(2);
-      const byCity = new Map(result.rows.map((r) => [r.p_city, r.cnt]));
-      expect(byCity.get('NYC')).toBe(2);
-      expect(byCity.get('LA')).toBe(2);
-    });
-
-    it('filters groups with raw aggregate HAVING COUNT(*) > 10', async () => {
-      const graph = await buildAggregateGraph();
-      const result = await executeQuery(
-        'MATCH (p:Person) RETURN p.city, COUNT(*) AS cnt HAVING COUNT(*) > 10',
-        {},
-        graph,
-      );
-      expect(result.rows).toHaveLength(0);
-    });
-  });
 
   // ── ORDER BY with aggregates execution ────────────────────────────
 
