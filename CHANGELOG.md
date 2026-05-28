@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.9.0] - 2026-05-28
+
+### ✨ New Features
+
+1. **UNION and UNION ALL Clause Support**
+   - Added support for openCypher `UNION` and `UNION ALL` clauses.
+   - Allows combining results of multiple queries into a single result set.
+   - Enforces strict semantic analysis matching the exact number of columns and identical column aliases across all unioned queries.
+   - `UNION ALL` retains all results including duplicates.
+   - `UNION` implicitly performs hash-based deduplication on the combined row set.
+   - Supports global `ORDER BY`, `SKIP`, and `LIMIT` appended to the final query of the union chain.
+
 ## [7.8.0] - 2026-05-27
 
 ### ✨ New Features
