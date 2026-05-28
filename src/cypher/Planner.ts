@@ -201,6 +201,7 @@ export class Planner {
       case 'Identifier':
       case 'Literal':
       case 'Parameter':
+      default:
         return expr;
     }
   }
