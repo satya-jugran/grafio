@@ -209,8 +209,13 @@ export class Lexer {
         continue;
       }
       if (ch === '=') {
-        tokens.push(this._makeToken(TokenKind.EQ, '='));
-        this._advance();
+        if (this._peek(1) === '~') {
+          tokens.push(this._makeToken(TokenKind.REGEX_MATCH, '=~'));
+          this._advance(2);
+        } else {
+          tokens.push(this._makeToken(TokenKind.EQ, '='));
+          this._advance();
+        }
         continue;
       }
       if (ch === '<') {

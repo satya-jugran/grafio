@@ -343,7 +343,8 @@ export type Expression =
   | ListExpr
   | MapExpr
   | FunctionCallExpr
-  | ExistsSubqueryExpr;
+  | ExistsSubqueryExpr
+  | ListComprehensionExpr;
 
 // -- Literals --
 
@@ -377,7 +378,7 @@ export interface PropertyAccessExpr {
 
 // -- Binary expressions --
 
-export type BinaryOp = 'AND' | 'OR' | '=' | '<>' | '<' | '<=' | '>' | '>=' | '+' | '-' | '*' | '/';
+export type BinaryOp = 'AND' | 'OR' | '=' | '<>' | '<' | '<=' | '>' | '>=' | '+' | '-' | '*' | '/' | '=~';
 
 export interface BinaryExpr {
   kind: 'Binary';
@@ -433,6 +434,18 @@ export interface ListExpr {
   kind: 'List';
   /** The elements of the list. */
   elements: Expression[];
+}
+
+export interface ListComprehensionExpr {
+  kind: 'ListComprehension';
+  /** The variable name bound to each element. */
+  variable: string;
+  /** The list being iterated over. */
+  list: Expression;
+  /** Optional WHERE clause to filter elements. */
+  where?: Expression;
+  /** Optional projection expression. */
+  projection?: Expression;
 }
 
 export interface FunctionCallExpr {
