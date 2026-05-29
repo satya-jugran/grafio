@@ -123,6 +123,10 @@ export class ProjectionPlanner {
         return expr.args.some((arg) => this._hasAggregateFunction(arg));
       case 'List':
         return expr.elements.some((el) => this._hasAggregateFunction(el));
+      case 'ListComprehension':
+        return this._hasAggregateFunction(expr.list) ||
+          (expr.where ? this._hasAggregateFunction(expr.where) : false) ||
+          (expr.projection ? this._hasAggregateFunction(expr.projection) : false);
       default:
         return false;
     }
@@ -295,6 +299,12 @@ export class ProjectionPlanner {
           if (found) return found;
         }
         return null;
+      case 'ListComprehension':
+        return (
+          this._extractAggregateFunctionCall(expr.list) ??
+          (expr.where ? this._extractAggregateFunctionCall(expr.where) : null) ??
+          (expr.projection ? this._extractAggregateFunctionCall(expr.projection) : null)
+        );
       default:
         return null;
     }
@@ -369,6 +379,13 @@ export class ProjectionPlanner {
           return { ...e, expression: rewrite(e.expression) };
         case 'List':
           return { ...e, elements: e.elements.map(rewrite) };
+        case 'ListComprehension':
+          return {
+            ...e,
+            list: rewrite(e.list),
+            where: e.where ? rewrite(e.where) : undefined,
+            projection: e.projection ? rewrite(e.projection) : undefined,
+          };
         default:
           return e;
       }

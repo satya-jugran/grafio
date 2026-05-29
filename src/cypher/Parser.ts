@@ -112,6 +112,7 @@ const BINARY_PREC: Partial<Record<TokenKind, Prec>> = {
   [TokenKind.AND]: Prec.AND,
   [TokenKind.EQ]: Prec.COMPARISON,
   [TokenKind.NEQ]: Prec.COMPARISON,
+  [TokenKind.REGEX_MATCH]: Prec.COMPARISON,
   [TokenKind.LT]: Prec.COMPARISON,
   [TokenKind.LTE]: Prec.COMPARISON,
   [TokenKind.GT]: Prec.COMPARISON,
@@ -1190,9 +1191,33 @@ export class Parser {
         return expr;
       }
 
-      // List literal [expr, expr, ...]
+      // List literal [expr, expr, ...] or List Comprehension [var IN list WHERE exp | exp]
       case TokenKind.LBRACKET: {
         this._advance();
+
+        // Check for list comprehension: [IDENT IN ... ]
+        if (this._check(TokenKind.IDENT) && this._peek(1).kind === TokenKind.IN) {
+          const variable = this._advance().value; // consume IDENT
+          this._advance(); // consume IN
+          const list = this._parseExpression();
+
+          let where: Expression | undefined;
+          if (this._check(TokenKind.WHERE)) {
+            this._advance();
+            where = this._parseExpression();
+          }
+
+          let projection: Expression | undefined;
+          if (this._check(TokenKind.PIPE)) {
+            this._advance();
+            projection = this._parseExpression();
+          }
+
+          this._consume(TokenKind.RBRACKET, "Expected ']' at the end of list comprehension");
+          return { kind: 'ListComprehension', variable, list, where, projection };
+        }
+
+        // Standard list literal
         const elements: Expression[] = [];
 
         if (!this._check(TokenKind.RBRACKET)) {
@@ -1300,6 +1325,7 @@ export class Parser {
       [TokenKind.AND]: 'AND',
       [TokenKind.EQ]: '=',
       [TokenKind.NEQ]: '<>',
+      [TokenKind.REGEX_MATCH]: '=~',
       [TokenKind.LT]: '<',
       [TokenKind.LTE]: '<=',
       [TokenKind.GT]: '>',

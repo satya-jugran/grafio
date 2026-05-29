@@ -629,6 +629,28 @@ describe('Executor', () => {
       expect(result.rows).toHaveLength(2);
     });
 
+    it('evaluates =~ (regex match)', async () => {
+      const graph = await buildSocialGraph();
+      const result = await executeQuery(
+        "MATCH (p:Person) WHERE p.name =~ 'A.*' RETURN p.name AS name",
+        {},
+        graph,
+      );
+      expect(result.rows).toHaveLength(1);
+      expect(result.rows[0].name).toBe('Alice');
+    });
+
+    it('evaluates list comprehension', async () => {
+      const graph = await buildSocialGraph();
+      const result = await executeQuery(
+        "RETURN [x IN [1, 2, 3] WHERE x > 1 | x * 2] AS list",
+        {},
+        graph,
+      );
+      expect(result.rows).toHaveLength(1);
+      expect(result.rows[0].list).toEqual([4, 6]);
+    });
+
     it('evaluates < (less than)', async () => {
       const graph = await buildSocialGraph();
       const result = await executeQuery(

@@ -86,6 +86,7 @@ export const enum TokenKind {
   ARROW_LEFT = 'ARROW_LEFT',
   EQ = 'EQ',
   NEQ = 'NEQ',
+  REGEX_MATCH = 'REGEX_MATCH',
   LT = 'LT',
   LTE = 'LTE',
   GT = 'GT',

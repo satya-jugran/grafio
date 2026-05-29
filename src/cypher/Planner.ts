@@ -184,6 +184,12 @@ export class Planner {
         }
         return { ...expr, elements: elems };
       }
+      case 'ListComprehension': {
+        const list = await this._extractSubqueries(expr.list, steps, knownVars);
+        const where = expr.where ? await this._extractSubqueries(expr.where, steps, knownVars) : undefined;
+        const projection = expr.projection ? await this._extractSubqueries(expr.projection, steps, knownVars) : undefined;
+        return { ...expr, list, where, projection };
+      }
       case 'Map': {
         const props: Record<string, Expression> = {};
         for (const [k, v] of Object.entries(expr.props)) {

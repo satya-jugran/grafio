@@ -166,6 +166,37 @@ export class ExpressionEvaluator {
         return result;
       }
 
+      case 'ListComprehension': {
+        const listValue = this.evaluate(expr.list, row, params);
+        if (listValue === null || listValue === undefined) {
+          return null;
+        }
+        if (!Array.isArray(listValue)) {
+          throw new TypeMismatchError(`List comprehension requires a list, got ${typeof listValue}`);
+        }
+
+        const result: unknown[] = [];
+        for (const item of listValue) {
+          // Create a new row binding the variable to the current item
+          const newRow = new Map(row);
+          newRow.set(expr.variable, item);
+
+          // Evaluate WHERE if present
+          if (expr.where) {
+            const whereResult = this.evaluate(expr.where, newRow, params);
+            if (!whereResult) continue; // Skip if where condition is falsy
+          }
+
+          // Evaluate projection if present, otherwise use the item
+          if (expr.projection) {
+            result.push(this.evaluate(expr.projection, newRow, params));
+          } else {
+            result.push(item);
+          }
+        }
+        return result;
+      }
+
       case 'FunctionCall': {
         switch (expr.name.toUpperCase()) {
           // ── id(node|relationship) → internal UUID ─────────────
@@ -290,6 +321,23 @@ export class ExpressionEvaluator {
         return this.eq(left, right);
       case '<>':
         return !this.eq(left, right);
+      case '=~':
+        if (left == null || right == null) {
+          return null;
+        }
+        if (typeof left !== 'string' || typeof right !== 'string') {
+          return false;
+        }
+        try {
+          // OpenCypher requires regex to match the entire string.
+          // Add ^ and $ if not present, unless we assume user regex already has them or we want to do strict full match
+          let pattern = right;
+          if (!pattern.startsWith('^')) pattern = '^' + pattern;
+          if (!pattern.endsWith('$')) pattern = pattern + '$';
+          return new RegExp(pattern).test(left);
+        } catch (e) {
+          throw new CypherRuntimeError(`Invalid regular expression: ${right}`);
+        }
       case '<':
         return (left as number) < (right as number);
       case '<=':

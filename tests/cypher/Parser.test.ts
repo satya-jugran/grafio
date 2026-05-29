@@ -348,6 +348,32 @@ describe('Parser', () => {
       // Should be: OR(=, AND(=))
       expect((expr as any).op).toBe('OR');
     });
+
+    it('parses =~ operator', () => {
+      const ast = parse("MATCH (p) WHERE p.name =~ '^A.*' RETURN p");
+      const expr = ast.matches[0].where!.expression;
+      expect(expr.kind).toBe('Binary');
+      expect((expr as any).op).toBe('=~');
+    });
+
+    it('parses list comprehension', () => {
+      const ast = parse("RETURN [x IN [1,2,3] WHERE x > 1 | x * 2] AS result");
+      const expr = ast.return.items[0].expression;
+      expect(expr.kind).toBe('ListComprehension');
+      expect((expr as any).variable).toBe('x');
+      expect((expr as any).list.kind).toBe('List');
+      expect((expr as any).where).toBeDefined();
+      expect((expr as any).projection).toBeDefined();
+    });
+
+    it('parses simple list comprehension', () => {
+      const ast = parse("RETURN [x IN [1,2,3]] AS result");
+      const expr = ast.return.items[0].expression;
+      expect(expr.kind).toBe('ListComprehension');
+      expect((expr as any).variable).toBe('x');
+      expect((expr as any).where).toBeUndefined();
+      expect((expr as any).projection).toBeUndefined();
+    });
   });
 
   // ── Function Calls / Aggregates ─────────────────────────────────

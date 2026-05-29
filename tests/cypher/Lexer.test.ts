@@ -256,6 +256,11 @@ describe('Lexer', () => {
       expect(t[0].kind).toBe(TokenKind.EQ);
     });
 
+    it('tokenises =~', () => {
+      const t = new Lexer('=~').tokenise();
+      expect(t[0].kind).toBe(TokenKind.REGEX_MATCH);
+    });
+
     it('tokenises <>', () => {
       const t = new Lexer('<>').tokenise();
       expect(t[0].kind).toBe(TokenKind.NEQ);

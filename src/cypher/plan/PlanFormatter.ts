@@ -380,6 +380,17 @@ export class PlanFormatter {
         return 'EXISTS { ... }';
       case 'Map':
         return '{' + Object.entries(expr.props).map(([k, v]) => k + ': ' + this.getExpressionDescription(v)).join(', ') + '}';
+      case 'ListComprehension': {
+        let desc = '[' + expr.variable + ' IN ' + this.getExpressionDescription(expr.list);
+        if (expr.where) {
+          desc += ' WHERE ' + this.getExpressionDescription(expr.where);
+        }
+        if (expr.projection) {
+          desc += ' | ' + this.getExpressionDescription(expr.projection);
+        }
+        desc += ']';
+        return desc;
+      }
     }
   }
 
