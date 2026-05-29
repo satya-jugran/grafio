@@ -37,11 +37,10 @@ Grafio's Cypher engine supports a comprehensive subset of openCypher.
 - `UNWIND`
 - `CALL`
 - `YIELD`
-- `LOAD CSV`
 - `FOREACH`
 
 ## Coverage
 
-Grafio currently covers **84%** of standard openCypher clauses (21 out of 25 core clauses are either fully or partially supported).
+Grafio currently covers **83%** of standard openCypher clauses (20 out of 24 core clauses are either fully or partially supported).
 
 <CoverageChart />
