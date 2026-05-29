@@ -57,6 +57,7 @@ export type PlanStep =
   | SetPropertyStep
   | DeleteEntityStep
   | RemovePropertyStep
+  | RemoveLabelStep
   | CreateIndexStep
   | DropIndexStep
   | ShowIndexesStep
@@ -395,6 +396,15 @@ export interface RemovePropertyStep {
   entityKind: 'node' | 'edge';
   /** Property key to remove. */
   property: string;
+}
+
+/** Remove labels from a matched node. */
+export interface RemoveLabelStep {
+  kind: 'RemoveLabelStep';
+  /** The variable name of the node. */
+  variable: string;
+  /** Labels to remove. */
+  labels: string[];
 }
 
 /** 

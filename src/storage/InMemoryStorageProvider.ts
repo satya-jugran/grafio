@@ -1254,6 +1254,70 @@ export class InMemoryStorageProvider implements IStorageProvider {
   }
 
   // ---------------------------------------------------------------------------
+  // Label mutations
+  // ---------------------------------------------------------------------------
+
+  async removeNodeLabels(nodeId: string, labelsToRemove: string[], transaction?: ITransactionHandle): Promise<void> {
+    const overlay = this._getOverlay(transaction?.id);
+    let record: NodeData | null = null;
+    let isOverlay = false;
+
+    if (overlay) {
+      const overlayRecord = overlay.nodes.get(nodeId);
+      if (overlayRecord !== undefined) {
+        if (overlayRecord === null) {
+          throw new NodeNotFoundError(nodeId);
+        }
+        record = overlayRecord;
+        isOverlay = true;
+      }
+    }
+
+    if (record === null) {
+      record = this._nodes.get(nodeId) ?? null;
+    }
+
+    if (record === null) {
+      throw new NodeNotFoundError(nodeId);
+    }
+
+    // Clone before mutating to avoid affecting original storage
+    if (overlay) {
+      record = deepClone(record);
+      isOverlay = true; // After cloning, treat as overlay for index updates
+    }
+
+    const labelsSet = new Set(record.labels);
+    for (const label of labelsToRemove) {
+      if (labelsSet.has(label)) {
+        labelsSet.delete(label);
+        // Unindex
+        if (isOverlay && overlay) {
+          const typeSet = overlay.nodesByType.get(label);
+          if (typeSet) {
+            typeSet.delete(nodeId);
+          }
+        } else {
+          const typeSet = this._nodesByType.get(label);
+          if (typeSet) {
+            typeSet.delete(nodeId);
+            if (typeSet.size === 0) {
+              this._nodesByType.delete(label);
+            }
+          }
+        }
+      }
+    }
+
+    record.labels = Array.from(labelsSet);
+    record.updatedOn = Date.now();
+
+    if (isOverlay && overlay) {
+      overlay.nodes.set(nodeId, record);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Data portability
   // ---------------------------------------------------------------------------
 

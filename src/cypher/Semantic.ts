@@ -234,8 +234,8 @@ export class Semantic {
         for (const [name, entry] of this._scope.entries()) {
           nextScope.set(name, entry);
         }
-        for (const name of extraScope) {
-          nextScope.set(name, { name, patternIndex: -1, bindingKind: 'node' });
+        for (const [name, kind] of extraScope) {
+          nextScope.set(name, { name, patternIndex: -1, bindingKind: kind });
         }
       }
 
@@ -443,8 +443,8 @@ export class Semantic {
   private _checkExpressionVars(
     expr: Expression,
     clause: string,
-    extraScope?: ReadonlySet<string>,
-    restrictScope?: ReadonlySet<string>,
+    extraScope?: ReadonlySet<string> | ReadonlyMap<string, unknown>,
+    restrictScope?: ReadonlySet<string> | ReadonlyMap<string, unknown>,
   ): void {
     switch (expr.kind) {
       case 'Identifier': {
@@ -489,9 +489,9 @@ export class Semantic {
 
       case 'ListComprehension': {
         this._checkExpressionVars(expr.list, clause, extraScope, restrictScope);
-        const localScope = new Set(restrictScope ?? this._scope.keys());
+        const localScope = new Set(restrictScope ? restrictScope.keys() : this._scope.keys());
         if (extraScope) {
-          for (const v of extraScope) localScope.add(v);
+          for (const v of extraScope.keys()) localScope.add(v);
         }
         localScope.add(expr.variable);
         if (expr.where) this._checkExpressionVars(expr.where, 'list comprehension WHERE', undefined, localScope);
@@ -506,9 +506,9 @@ export class Semantic {
         return;
 
       case 'ExistsSubquery': {
-        const localScope = new Set(restrictScope ?? this._scope.keys());
+        const localScope = new Set(restrictScope ? restrictScope.keys() : this._scope.keys());
         if (extraScope) {
-          for (const v of extraScope) localScope.add(v);
+          for (const v of extraScope.keys()) localScope.add(v);
         }
         for (const pattern of expr.match.patterns) {
           const segments = getPatternSegments(pattern);
@@ -545,7 +545,7 @@ export class Semantic {
     expr: Expression,
     clause: string,
     allowed: ReadonlySet<string>,
-    extraScope?: ReadonlySet<string>,
+    extraScope?: ReadonlySet<string> | ReadonlyMap<string, unknown>,
   ): void {
     switch (expr.kind) {
       case 'Identifier': {
@@ -606,7 +606,7 @@ export class Semantic {
         this._checkExpressionVarsWithAllowed(expr.list, clause, allowed, extraScope);
         const localAllowed = new Set(allowed);
         if (extraScope) {
-          for (const v of extraScope) localAllowed.add(v);
+          for (const v of extraScope.keys()) localAllowed.add(v);
         }
         for (const v of this._scope.keys()) localAllowed.add(v);
         localAllowed.add(expr.variable);
@@ -624,7 +624,7 @@ export class Semantic {
       case 'ExistsSubquery': {
         const localAllowed = new Set(allowed);
         if (extraScope) {
-          for (const v of extraScope) localAllowed.add(v);
+          for (const v of extraScope.keys()) localAllowed.add(v);
         }
         for (const v of this._scope.keys()) localAllowed.add(v);
         for (const pattern of expr.match.patterns) {
@@ -1072,8 +1072,17 @@ export class Semantic {
 
     // Build the full set of known variables: MATCH scope ∪ CREATE/MERGE scope.
     const knownVars = new Set(this._scope.keys());
+    const knownBindings = new Map<string, 'node' | 'edge' | 'path' | 'unknown'>();
+    
+    for (const [v, binding] of this._scope) {
+      knownBindings.set(v, binding.bindingKind);
+    }
+    
     const writeScope = this._collectWriteScope(ast);
-    for (const v of writeScope) knownVars.add(v);
+    for (const [v, kind] of writeScope) {
+      knownVars.add(v);
+      knownBindings.set(v, kind);
+    }
 
     // MERGE clause: SET variable must be in scope.
     if (ast.merge) {
@@ -1106,6 +1115,7 @@ export class Semantic {
     }
 
     // REMOVE clause: each target variable must be in scope.
+    // Also, labels cannot be removed from edges.
     if (ast.remove) {
       for (const item of ast.remove.items) {
         if (!knownVars.has(item.variable.name)) {
@@ -1113,6 +1123,14 @@ export class Semantic {
             `Variable '${item.variable.name}' not defined in REMOVE clause. ` +
             `Defined variables: ${[...knownVars].join(', ') || '(none)'}`,
           );
+        }
+        if (item.labels && item.labels.length > 0) {
+          const binding = knownBindings.get(item.variable.name);
+          if (binding === 'edge') {
+            throw new CypherSemanticError(
+              `Cannot remove labels from edge '${item.variable.name}'. Labels can only be removed from nodes.`
+            );
+          }
         }
       }
     }
@@ -1234,21 +1252,21 @@ export class Semantic {
    * Walks the pattern paths in the CREATE and MERGE clauses the same way
    * {@link _resolveScopes} walks MATCH patterns.
    */
-  private _collectWriteScope(ast: QueryAst): Set<string> {
-    const vars = new Set<string>();
+  private _collectWriteScope(ast: QueryAst): Map<string, 'node' | 'edge' | 'path'> {
+    const vars = new Map<string, 'node' | 'edge' | 'path'>();
 
     if (ast.create) {
       for (const pattern of ast.create.patterns) {
         // Handle NamedPath binding.
         if (pattern.kind === 'NamedPath' && pattern.name) {
-          vars.add(pattern.name);
+          vars.set(pattern.name, 'path');
         }
         const segments = getPatternSegments(pattern);
         for (const segment of segments) {
           if (segment.kind === 'NodePattern' && segment.variable) {
-            vars.add(segment.variable);
+            vars.set(segment.variable, 'node');
           } else if (segment.kind === 'EdgePattern' && segment.variable) {
-            vars.add(segment.variable);
+            vars.set(segment.variable, 'edge');
           }
         }
       }
@@ -1257,14 +1275,14 @@ export class Semantic {
     if (ast.merge) {
       for (const merge of ast.merge) {
         if (merge.pattern.kind === 'NamedPath' && merge.pattern.name) {
-          vars.add(merge.pattern.name);
+          vars.set(merge.pattern.name, 'path');
         }
         const segments = getPatternSegments(merge.pattern);
         for (const segment of segments) {
           if (segment.kind === 'NodePattern' && segment.variable) {
-            vars.add(segment.variable);
+            vars.set(segment.variable, 'node');
           } else if (segment.kind === 'EdgePattern' && segment.variable) {
-            vars.add(segment.variable);
+            vars.set(segment.variable, 'edge');
           }
         }
       }

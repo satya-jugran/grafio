@@ -602,13 +602,30 @@ export class Parser {
     return { kind: 'Remove', items };
   }
 
-  /** REMOVE item: IDENT '.' IDENT */
+  /** REMOVE item: IDENT '.' IDENT or IDENT ':' IDENT (':' IDENT)* */
   private _parseRemoveItem(): RemoveItem {
     const varToken = this._consume(TokenKind.IDENT, 'Expected variable name in REMOVE');
     const variable: IdentifierExpr = { kind: 'Identifier', name: varToken.value };
-    this._consume(TokenKind.DOT, "Expected '.' in REMOVE property reference");
-    const propToken = this._consume(TokenKind.IDENT, 'Expected property name');
-    return { kind: 'RemoveItem', variable, property: propToken.value };
+
+    if (this._check(TokenKind.DOT)) {
+      this._advance(); // consume '.'
+      const propToken = this._consume(TokenKind.IDENT, 'Expected property name');
+      return { kind: 'RemoveItem', variable, property: propToken.value };
+    } else if (this._check(TokenKind.COLON)) {
+      const labels: string[] = [];
+      do {
+        this._advance(); // consume ':'
+        labels.push(this._consume(TokenKind.IDENT, 'Expected label name').value);
+      } while (this._check(TokenKind.COLON));
+      return { kind: 'RemoveItem', variable, labels };
+    } else {
+      const token = this._peek();
+      throw new CypherSyntaxError(
+        `Expected '.' or ':' after variable name in REMOVE, found '${token.value}'`,
+        token.line,
+        token.col
+      );
+    }
   }
 
   /** CREATE INDEX index_name FOR pattern ON (var.prop [, var.prop]*) */

@@ -193,6 +193,8 @@ export class PlanFormatter {
       
       case 'RemovePropertyStep':
         return 'RemovePropertyStep ' + step.variable + '.' + step.entityKind + ' ' + step.property;
+      case 'RemoveLabelStep':
+        return 'RemoveLabelStep ' + step.variable + ':' + step.labels.join(':');
 
       case 'CreateIndexStep':
         return 'CreateIndexStep ' + step.name + ' target=' + step.target + ' keys=[' + step.propertyKeys.join(', ') + ']';
@@ -302,6 +304,8 @@ export class PlanFormatter {
 
       case 'RemovePropertyStep':
         return 'RemovePropertyStep [' + step.variable + '.' + step.entityKind + ' ' + step.property + ']';
+      case 'RemoveLabelStep':
+        return 'RemoveLabelStep [' + step.variable + ':' + step.labels.join(':') + ']';
 
       case 'CreateIndexStep':
         return 'CreateIndexStep [' + step.name + ' target=' + step.target + ' keys=(' + step.propertyKeys.join(', ') + ')]';

@@ -190,14 +190,11 @@ MATCH p = (a:Person)-[:KNOWS]->(b:Person)-[:KNOWS]->(c:Person) RETURN p
 
 ## Unsupported Clauses
 
-The following clauses are **rejected** by the read-only Cypher engine:
+The following clauses are not yet fully supported by the engine:
 
 | Clause | Reason |
 |--------|--------|
-| `CREATE` | Write operations not supported |
-| `DELETE` | Write operations not supported |
-| `SET` | Write operations not supported |
-| `REMOVE` | Write operations not supported |
-| `MERGE` | Write operations not supported |
-| `WITH` | Complex queries not supported |
 | `UNWIND` | Complex queries not supported |
+| `CALL` | Procedures not supported |
+| `YIELD` | Procedures not supported |
+| `FOREACH` | Complex queries not supported |

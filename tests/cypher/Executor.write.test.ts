@@ -304,6 +304,32 @@ describe('Executor – Write Operations', () => {
       expect(updated!.properties.temp).toBeUndefined();
       expect(updated!.properties.name).toBe('Alice');
     });
+
+    it('REMOVE single label from node', async () => {
+      const node = await graph.addNode(['Person', 'Employee'], { name: 'Alice' });
+
+      await executeQuery(
+        'MATCH (n:Person) REMOVE n:Employee RETURN n',
+        {},
+        graph,
+      );
+
+      const updated = await graph.getNode(node.id);
+      expect(updated!.labels).toEqual(['Person']);
+    });
+
+    it('REMOVE multiple labels from node', async () => {
+      const node = await graph.addNode(['Person', 'Employee', 'Manager'], { name: 'Alice' });
+
+      await executeQuery(
+        'MATCH (n:Person) REMOVE n:Employee:Manager RETURN n',
+        {},
+        graph,
+      );
+
+      const updated = await graph.getNode(node.id);
+      expect(updated!.labels).toEqual(['Person']);
+    });
   });
 
   // ── Index DDL ───────────────────────────────────────────────────
