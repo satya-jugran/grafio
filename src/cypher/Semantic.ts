@@ -487,6 +487,18 @@ export class Semantic {
         }
         return;
 
+      case 'ListComprehension': {
+        this._checkExpressionVars(expr.list, clause, extraScope, restrictScope);
+        const localScope = new Set(restrictScope ?? this._scope.keys());
+        if (extraScope) {
+          for (const v of extraScope) localScope.add(v);
+        }
+        localScope.add(expr.variable);
+        if (expr.where) this._checkExpressionVars(expr.where, 'list comprehension WHERE', undefined, localScope);
+        if (expr.projection) this._checkExpressionVars(expr.projection, 'list comprehension projection', undefined, localScope);
+        return;
+      }
+
       case 'FunctionCall':
         for (const arg of expr.args) {
           this._checkExpressionVars(arg, clause, extraScope, restrictScope);
@@ -589,6 +601,19 @@ export class Semantic {
           this._checkExpressionVarsWithAllowed(elem, clause, allowed, extraScope);
         }
         return;
+
+      case 'ListComprehension': {
+        this._checkExpressionVarsWithAllowed(expr.list, clause, allowed, extraScope);
+        const localAllowed = new Set(allowed);
+        if (extraScope) {
+          for (const v of extraScope) localAllowed.add(v);
+        }
+        for (const v of this._scope.keys()) localAllowed.add(v);
+        localAllowed.add(expr.variable);
+        if (expr.where) this._checkExpressionVarsWithAllowed(expr.where, 'list comprehension WHERE', localAllowed, undefined);
+        if (expr.projection) this._checkExpressionVarsWithAllowed(expr.projection, 'list comprehension projection', localAllowed, undefined);
+        return;
+      }
 
       case 'FunctionCall':
         for (const arg of expr.args) {
@@ -837,6 +862,15 @@ export class Semantic {
           this._collectUnresolvedPostAggIdentifiers(elem, allowed),
         );
 
+      case 'ListComprehension': {
+        const unresolved = [...this._collectUnresolvedPostAggIdentifiers(expr.list, allowed)];
+        const localAllowed = new Set(allowed);
+        localAllowed.add(expr.variable);
+        if (expr.where) unresolved.push(...this._collectUnresolvedPostAggIdentifiers(expr.where, localAllowed));
+        if (expr.projection) unresolved.push(...this._collectUnresolvedPostAggIdentifiers(expr.projection, localAllowed));
+        return unresolved;
+      }
+
       case 'Map':
         return Object.values(expr.props).flatMap((elem) =>
           this._collectUnresolvedPostAggIdentifiers(elem, allowed),
@@ -900,6 +934,11 @@ export class Semantic {
 
       case 'List':
         return expr.elements.some(e => this._containsAggregate(e));
+
+      case 'ListComprehension':
+        return this._containsAggregate(expr.list) ||
+               (expr.where ? this._containsAggregate(expr.where) : false) ||
+               (expr.projection ? this._containsAggregate(expr.projection) : false);
 
       case 'Map':
         return Object.values(expr.props).some(e => this._containsAggregate(e));
@@ -1271,7 +1310,7 @@ export class Semantic {
         return;
 
       default:
-        // Binary, Unary, In, IsNull, FunctionCall, List — complex
+        // Binary, Unary, In, IsNull, FunctionCall, List, ListComprehension — complex
         // expressions; allow them (runtime will catch type issues).
         return;
     }
@@ -1313,9 +1352,15 @@ export class Semantic {
         return this._expressionReferencesAny(expr.expression, varNames);
 
       case 'List':
-        return expr.elements.some(e =>
+        return expr.elements.some((e) =>
           this._expressionReferencesAny(e, varNames),
         );
+
+      case 'ListComprehension':
+        if (this._expressionReferencesAny(expr.list, varNames)) return true;
+        if (expr.where && this._expressionReferencesAny(expr.where, varNames)) return true;
+        if (expr.projection && this._expressionReferencesAny(expr.projection, varNames)) return true;
+        return false;
 
       case 'Map':
         return Object.values(expr.props).some(e =>

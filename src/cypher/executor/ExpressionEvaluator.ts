@@ -322,10 +322,11 @@ export class ExpressionEvaluator {
       case '<>':
         return !this.eq(left, right);
       case '=~':
+        if (left == null || right == null) {
+          return null;
+        }
         if (typeof left !== 'string' || typeof right !== 'string') {
-           // Neo4j returns null if any operand is null, but if type mismatch usually it fails or returns false/null.
-           if (left === null || right === null) return null;
-           return false;
+          return false;
         }
         try {
           // OpenCypher requires regex to match the entire string.
