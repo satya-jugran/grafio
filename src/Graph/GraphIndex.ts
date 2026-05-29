@@ -413,6 +413,23 @@ export class GraphIndex {
   }
 
   // ---------------------------------------------------------------------------
+  // Node label mutations
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Removes labels from a node.
+   */
+  async removeNodeLabels(nodeId: string, labels: string[], transaction?: GraphTransaction): Promise<void> {
+    const handle = transaction?._getHandle();
+    try {
+      await this._store.removeNodeLabels(nodeId, labels, handle);
+    } catch (error) {
+      transaction?.markFailed();
+      throw error;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Edge property mutations
   // ---------------------------------------------------------------------------
 

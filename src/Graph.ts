@@ -340,6 +340,16 @@ export class Graph {
     return this._index.clearNodeProperties(nodeId, transaction);
   }
 
+  /**
+   * Removes labels from a node.
+   * @param nodeId - The id of the node
+   * @param labels - The labels to remove
+   * @param transaction - Optional transaction to use for this operation
+   */
+  async removeNodeLabels(nodeId: string, labels: string[], transaction?: GraphTransaction): Promise<void> {
+    return this._index.removeNodeLabels(nodeId, labels, transaction);
+  }
+
   // ---------------------------------------------------------------------------
   // Edge property mutations
   // ---------------------------------------------------------------------------

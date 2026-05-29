@@ -36,6 +36,7 @@ import {
   SetPropertyStep,
   CreateNodeStep,
   CreateEdgeStep,
+  RemoveLabelStep,
 } from '../plan/QueryPlan';
 import { CypherResult, CypherRow, CypherSummary } from '../Result';
 import { CypherRuntimeError } from '../errors';
@@ -257,6 +258,12 @@ export class Executor {
       case 'RemovePropertyStep': {
         const result = await this._deleteExecutor.executeRemoveProperty(step, rows, transaction);
         this._propertiesSet += result.propertiesSet ?? 0;
+        return result.rows;
+      }
+      case 'RemoveLabelStep': {
+        const result = await this._deleteExecutor.executeRemoveLabel(step as RemoveLabelStep, rows, transaction);
+        // We do not have a specific counter for labels removed in the summary yet,
+        // but we could track it if added to CypherSummary.
         return result.rows;
       }
 

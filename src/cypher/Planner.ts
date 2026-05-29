@@ -308,12 +308,20 @@ export class Planner {
     if (ast.remove) {
       for (const item of ast.remove.items) {
         const entityKind = this._resolveEntityKind(item.variable.name, ast);
-        steps.push({
-          kind: 'RemovePropertyStep',
-          variable: item.variable.name,
-          entityKind,
-          property: item.property,
-        });
+        if (item.labels && item.labels.length > 0) {
+          steps.push({
+            kind: 'RemoveLabelStep',
+            variable: item.variable.name,
+            labels: item.labels,
+          } as import('./plan/QueryPlan').RemoveLabelStep);
+        } else if (item.property) {
+          steps.push({
+            kind: 'RemovePropertyStep',
+            variable: item.variable.name,
+            entityKind,
+            property: item.property,
+          });
+        }
       }
     }
 

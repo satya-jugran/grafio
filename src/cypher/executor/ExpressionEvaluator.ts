@@ -30,6 +30,7 @@ export interface StepResult {
   edgesCreated?: number;
   edgesDeleted?: number;
   propertiesSet?: number;
+  labelsRemoved?: number;
   indexesCreated?: number;
   indexesDeleted?: number;
 }

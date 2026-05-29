@@ -82,10 +82,12 @@ export interface RemoveClause {
 
 export interface RemoveItem {
   kind: 'RemoveItem';
-  /** The variable whose property is being removed. */
+  /** The variable whose property or label is being removed. */
   variable: IdentifierExpr;
   /** The property key to remove. */
-  property: string;
+  property?: string;
+  /** The labels to remove. */
+  labels?: string[];
 }
 
 // ── Index DDL clauses ──────────────────────────────────────────────

@@ -394,6 +394,13 @@ export class CachedStorageProvider implements IStorageProvider {
     await this._invalidate(target, id);
   }
 
+  // ─── Label mutations ────────────────────────────────────────────────────────
+
+  async removeNodeLabels(nodeId: string, labels: string[], transaction?: ITransactionHandle): Promise<void> {
+    await this._underlying.removeNodeLabels(nodeId, labels, transaction);
+    await this._invalidate('node', nodeId);
+  }
+
   // ─── Index management ────────────────────────────────────────────────────────
 
   async createIndex(

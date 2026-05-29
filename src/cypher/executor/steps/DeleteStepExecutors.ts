@@ -14,6 +14,7 @@ import { GraphTransaction } from '../../../Graph/GraphTransaction';
 import {
   DeleteEntityStep,
   RemovePropertyStep,
+  RemoveLabelStep,
 } from '../../plan/QueryPlan';
 import { NodeHasEdgesError } from '../../../errors';
 import { CypherRuntimeError } from '../../errors';
@@ -99,5 +100,24 @@ export class DeleteStepExecutor {
       propertiesSet++;
     }
     return { rows, propertiesSet };
+  }
+
+  // ── RemoveLabelStep ────────────────────────────────────────────
+
+  async executeRemoveLabel(
+    step: RemoveLabelStep,
+    rows: Row[],
+    transaction?: GraphTransaction,
+  ): Promise<StepResult> {
+    let labelsRemoved = 0;
+
+    for (const row of rows) {
+      const entity = row.get(step.variable);
+      if (!entity) continue;
+      // Step validation ensures entityKind is node
+      await this._graph.removeNodeLabels((entity as Node).id, step.labels, transaction);
+      labelsRemoved += step.labels.length;
+    }
+    return { rows, labelsRemoved };
   }
 }

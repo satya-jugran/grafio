@@ -236,8 +236,17 @@ export interface IStorageProvider {
   getEdgesByTarget(nodeId: string, options?: StorageQueryOptions): Promise<EdgeData[]>;
 
   // ---------------------------------------------------------------------------
-  // Property mutations
+  // Property and Label mutations
   // ---------------------------------------------------------------------------
+
+  /**
+   * Removes labels from a node.
+   * @param nodeId - The id of the node
+   * @param labels - Array of labels to remove
+   * @param transaction - Optional transaction handle for transactional storage providers
+   * @throws NodeNotFoundError if the node doesn't exist
+   */
+  removeNodeLabels(nodeId: string, labels: string[], transaction?: ITransactionHandle): Promise<void>;
 
   /**
    * Adds a property to a node or edge. Fails if the property key already exists.
