@@ -247,4 +247,32 @@ describe('Semantic', () => {
         .toThrow(CypherSyntaxError);
     });
   });
+
+  // ── Comprehension Aggregates ──────────────────────────────────────────
+  describe('comprehension aggregates', () => {
+    it('rejects aggregates inside list comprehension projection', () => {
+      expect(() => analyse('MATCH (n) RETURN [x IN [1,2,3] | COUNT(x)]'))
+        .toThrow(CypherSemanticError);
+    });
+
+    it('rejects aggregates inside list comprehension WHERE clause', () => {
+      expect(() => analyse('MATCH (n) RETURN [x IN [1,2,3] WHERE COUNT(x) > 0 | x]'))
+        .toThrow(CypherSemanticError);
+    });
+
+    it('allows aggregates in the list part of list comprehension', () => {
+      expect(() => analyse('MATCH (n) RETURN [x IN COUNT(n) | x]'))
+        .not.toThrow();
+    });
+
+    it('rejects aggregates inside pattern comprehension projection', () => {
+      expect(() => analyse('MATCH (a) RETURN [(a)-[r]->(b) | COUNT(b)]'))
+        .toThrow(CypherSemanticError);
+    });
+
+    it('rejects aggregates inside pattern comprehension WHERE clause', () => {
+      expect(() => analyse('MATCH (a) RETURN [(a)-[r]->(b) WHERE COUNT(b) > 0 | b]'))
+        .toThrow(CypherSemanticError);
+    });
+  });
 });

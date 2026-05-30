@@ -489,6 +489,9 @@ export class Semantic {
 
       case 'ListComprehension': {
         this._checkExpressionVars(expr.list, clause, extraScope, restrictScope);
+        if ((expr.where && this._containsAggregate(expr.where)) || (expr.projection && this._containsAggregate(expr.projection))) {
+          throw new CypherSemanticError(`Aggregate functions cannot be used inside ListComprehension`);
+        }
         const localScope = new Set(restrictScope ? restrictScope.keys() : this._scope.keys());
         if (extraScope) {
           for (const v of extraScope.keys()) localScope.add(v);
@@ -524,6 +527,9 @@ export class Semantic {
       }
 
       case 'PatternComprehension': {
+        if ((expr.where && this._containsAggregate(expr.where)) || this._containsAggregate(expr.projection)) {
+          throw new CypherSemanticError(`Aggregate functions cannot be used inside PatternComprehension`);
+        }
         const localScope = new Set(restrictScope ? restrictScope.keys() : this._scope.keys());
         if (extraScope) {
           for (const v of extraScope.keys()) localScope.add(v);
@@ -632,6 +638,9 @@ export class Semantic {
 
       case 'ListComprehension': {
         this._checkExpressionVarsWithAllowed(expr.list, clause, allowed, extraScope);
+        if ((expr.where && this._containsAggregate(expr.where)) || (expr.projection && this._containsAggregate(expr.projection))) {
+          throw new CypherSemanticError(`Aggregate functions cannot be used inside ListComprehension`);
+        }
         const localAllowed = new Set(allowed);
         if (extraScope) {
           for (const v of extraScope.keys()) localAllowed.add(v);
@@ -669,6 +678,9 @@ export class Semantic {
       }
 
       case 'PatternComprehension': {
+        if ((expr.where && this._containsAggregate(expr.where)) || this._containsAggregate(expr.projection)) {
+          throw new CypherSemanticError(`Aggregate functions cannot be used inside PatternComprehension`);
+        }
         const localAllowed = new Set(allowed);
         if (extraScope) {
           for (const v of extraScope.keys()) localAllowed.add(v);
@@ -1011,9 +1023,7 @@ export class Semantic {
         return expr.elements.some(e => this._containsAggregate(e));
 
       case 'ListComprehension':
-        return this._containsAggregate(expr.list) ||
-               (expr.where ? this._containsAggregate(expr.where) : false) ||
-               (expr.projection ? this._containsAggregate(expr.projection) : false);
+        return this._containsAggregate(expr.list);
 
       case 'Map':
         return Object.values(expr.props).some(e => this._containsAggregate(e));
@@ -1022,8 +1032,7 @@ export class Semantic {
         return expr.match.where ? this._containsAggregate(expr.match.where.expression) : false;
 
       case 'PatternComprehension':
-        return (expr.where ? this._containsAggregate(expr.where) : false) ||
-               this._containsAggregate(expr.projection);
+        return false;
 
       case 'PatternExpr':
         return false;
