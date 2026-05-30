@@ -499,6 +499,47 @@ describe('Parser', () => {
   });
 
   // ── Write clause parsing ───────────────────────────────────────
+  describe('Pattern Comprehensions and Expressions', () => {
+    it('parses pattern comprehension without WHERE', () => {
+      const ast = parse("RETURN [ (a)-[r]->(b) | b.name ] AS names");
+      const retItem = ast.return.items[0];
+      expect(retItem.expression.kind).toBe('PatternComprehension');
+      const comp = retItem.expression as any;
+      expect(comp.pattern.kind).toBe('PatternPath');
+      expect(comp.pattern.segments.length).toBe(3);
+      expect(comp.where).toBeUndefined();
+      expect(comp.projection.kind).toBe('PropertyAccess');
+      expect(comp.projection.property).toBe('name');
+    });
+
+    it('parses pattern comprehension with WHERE', () => {
+      const ast = parse("RETURN [ (a)-[r]->(b) WHERE b.age > 20 | b.name ] AS names");
+      const retItem = ast.return.items[0];
+      expect(retItem.expression.kind).toBe('PatternComprehension');
+      const comp = retItem.expression as any;
+      expect(comp.where.kind).toBe('Binary');
+      expect(comp.where.op).toBe('>');
+    });
+
+    it('parses pattern expression', () => {
+      const ast = parse("MATCH (n) WHERE (n)-[:KNOWS]->() RETURN n");
+      const where = ast.matches[0].where!;
+      expect(where.expression.kind).toBe('PatternExpr');
+      const pExpr = where.expression as any;
+      expect(pExpr.pattern.kind).toBe('PatternPath');
+      expect(pExpr.pattern.segments.length).toBe(3);
+    });
+
+    it('parses pattern expression with function call', () => {
+      const ast = parse("RETURN size((a)-[:KNOWS]->(b)) AS c");
+      const retItem = ast.return.items[0];
+      expect(retItem.expression.kind).toBe('FunctionCall');
+      const fn = retItem.expression as any;
+      expect(fn.name).toBe('SIZE');
+      expect(fn.args[0].kind).toBe('PatternExpr');
+    });
+  });
+
   describe('write clause parsing', () => {
     it('parses CREATE node', () => {
       const ast = parse("CREATE (n:Person {name: 'Alice'}) RETURN n");

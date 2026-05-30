@@ -523,6 +523,34 @@ export class Semantic {
         return;
       }
 
+      case 'PatternComprehension': {
+        const localScope = new Set(restrictScope ? restrictScope.keys() : this._scope.keys());
+        if (extraScope) {
+          for (const v of extraScope.keys()) localScope.add(v);
+        }
+        const segments = getPatternSegments(expr.pattern);
+        if (expr.pattern.kind === 'NamedPath' && expr.pattern.name) localScope.add(expr.pattern.name);
+        for (const seg of segments) {
+          if (seg.variable) localScope.add(seg.variable);
+        }
+        if (expr.where) this._checkExpressionVars(expr.where, 'pattern comprehension WHERE', undefined, localScope);
+        this._checkExpressionVars(expr.projection, 'pattern comprehension projection', undefined, localScope);
+        return;
+      }
+
+      case 'PatternExpr': {
+        const localScope = new Set(restrictScope ? restrictScope.keys() : this._scope.keys());
+        if (extraScope) {
+          for (const v of extraScope.keys()) localScope.add(v);
+        }
+        const segments = getPatternSegments(expr.pattern);
+        if (expr.pattern.kind === 'NamedPath' && expr.pattern.name) localScope.add(expr.pattern.name);
+        for (const seg of segments) {
+          if (seg.variable) localScope.add(seg.variable);
+        }
+        return;
+      }
+
       case 'Literal':
       case 'Parameter':
         // No variable references — safe.
@@ -636,6 +664,36 @@ export class Semantic {
         }
         if (expr.match.where) {
           this._checkExpressionVarsWithAllowed(expr.match.where.expression, 'EXISTS subquery WHERE', localAllowed, undefined);
+        }
+        return;
+      }
+
+      case 'PatternComprehension': {
+        const localAllowed = new Set(allowed);
+        if (extraScope) {
+          for (const v of extraScope.keys()) localAllowed.add(v);
+        }
+        for (const v of this._scope.keys()) localAllowed.add(v);
+        const segments = getPatternSegments(expr.pattern);
+        if (expr.pattern.kind === 'NamedPath' && expr.pattern.name) localAllowed.add(expr.pattern.name);
+        for (const seg of segments) {
+          if (seg.variable) localAllowed.add(seg.variable);
+        }
+        if (expr.where) this._checkExpressionVarsWithAllowed(expr.where, 'pattern comprehension WHERE', localAllowed, undefined);
+        this._checkExpressionVarsWithAllowed(expr.projection, 'pattern comprehension projection', localAllowed, undefined);
+        return;
+      }
+
+      case 'PatternExpr': {
+        const localAllowed = new Set(allowed);
+        if (extraScope) {
+          for (const v of extraScope.keys()) localAllowed.add(v);
+        }
+        for (const v of this._scope.keys()) localAllowed.add(v);
+        const segments = getPatternSegments(expr.pattern);
+        if (expr.pattern.kind === 'NamedPath' && expr.pattern.name) localAllowed.add(expr.pattern.name);
+        for (const seg of segments) {
+          if (seg.variable) localAllowed.add(seg.variable);
         }
         return;
       }
@@ -896,6 +954,23 @@ export class Semantic {
         return [];
       }
 
+      case 'PatternComprehension': {
+        const localAllowed = new Set(allowed);
+        const segments = getPatternSegments(expr.pattern);
+        if (expr.pattern.kind === 'NamedPath' && expr.pattern.name) localAllowed.add(expr.pattern.name);
+        for (const seg of segments) {
+          if (seg.variable) localAllowed.add(seg.variable);
+        }
+        const unresolved = [];
+        if (expr.where) unresolved.push(...this._collectUnresolvedPostAggIdentifiers(expr.where, localAllowed));
+        unresolved.push(...this._collectUnresolvedPostAggIdentifiers(expr.projection, localAllowed));
+        return unresolved;
+      }
+
+      case 'PatternExpr': {
+        return [];
+      }
+
       case 'Literal':
       case 'Parameter':
         return [];
@@ -945,6 +1020,13 @@ export class Semantic {
 
       case 'ExistsSubquery':
         return expr.match.where ? this._containsAggregate(expr.match.where.expression) : false;
+
+      case 'PatternComprehension':
+        return (expr.where ? this._containsAggregate(expr.where) : false) ||
+               this._containsAggregate(expr.projection);
+
+      case 'PatternExpr':
+        return false;
 
       case 'Identifier':
       case 'Literal':

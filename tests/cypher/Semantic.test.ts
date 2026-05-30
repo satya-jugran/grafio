@@ -122,6 +122,34 @@ describe('Semantic', () => {
     });
   });
 
+  // ── Pattern Comprehensions and Expressions ─────────────────────
+  describe('Pattern Comprehensions and Expressions', () => {
+    it('allows pattern comprehension referencing outer scope', () => {
+      expect(() => analyse('MATCH (a) RETURN [ (a)-[:KNOWS]->(b) WHERE b.age > 18 | b.name ] AS names'))
+        .not.toThrow();
+    });
+
+    it('rejects pattern comprehension projection referencing undefined var', () => {
+      expect(() => analyse('MATCH (a) RETURN [ (a)-[:KNOWS]->(b) | c.name ] AS names'))
+        .toThrow(CypherSemanticError);
+    });
+
+    it('rejects outer scope referencing comprehension var', () => {
+      expect(() => analyse('MATCH (a) RETURN [ (a)-[:KNOWS]->(b) | b.name ] AS names, b.age'))
+        .toThrow(CypherSemanticError);
+    });
+
+    it('allows pattern expression referencing outer scope', () => {
+      expect(() => analyse('MATCH (a) WHERE (a)-[:KNOWS]->(:Person) RETURN a'))
+        .not.toThrow();
+    });
+
+    it('rejects outer scope referencing pattern expression var', () => {
+      expect(() => analyse('MATCH (a) WHERE (a)-[:KNOWS]->(b:Person) RETURN b'))
+        .toThrow(CypherSemanticError);
+    });
+  });
+
   // ── Semantic Analysis for Aggregates ────────────────────────────
   describe('Semantic Analysis for Aggregates', () => {
     // -- Valid aggregate queries --

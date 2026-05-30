@@ -190,6 +190,58 @@ export class Planner {
         const projection = expr.projection ? await this._extractSubqueries(expr.projection, steps, knownVars) : undefined;
         return { ...expr, list, where, projection };
       }
+      case 'PatternComprehension': {
+        const where = expr.where ? await this._extractSubqueries(expr.where, steps, knownVars) : undefined;
+        const projection = await this._extractSubqueries(expr.projection, steps, knownVars);
+        const varName = this._patternPlanner._syntheticVar('comp', steps.length);
+        const subPlanSteps: PlanStep[] = [];
+        
+        const fakeAst: QueryAst = {
+          kind: 'Query',
+          matches: [],
+          return: { kind: 'Return', distinct: false, items: [] },
+          segments: [],
+        };
+        
+        this._patternPlanner.planPath(expr.pattern, subPlanSteps, fakeAst, new Map(), undefined, undefined, knownVars);
+        if (where) {
+          subPlanSteps.push({ kind: 'FilterStep', predicate: where });
+        }
+        
+        steps.push({
+          kind: 'PatternComprehensionStep',
+          subPlan: subPlanSteps,
+          projection,
+          resultVariable: varName,
+        } as import('./plan/QueryPlan').PatternComprehensionStep);
+        
+        knownVars.add(varName);
+        return { kind: 'Identifier', name: varName };
+      }
+      case 'PatternExpr': {
+        const varName = this._patternPlanner._syntheticVar('pexpr', steps.length);
+        const subPlanSteps: PlanStep[] = [];
+        const pathVariables = this._patternPlanner.assignAndExtractPathVariables(expr.pattern, subPlanSteps);
+        
+        const fakeAst: QueryAst = {
+          kind: 'Query',
+          matches: [],
+          return: { kind: 'Return', distinct: false, items: [] },
+          segments: [],
+        };
+        
+        this._patternPlanner.planPath(expr.pattern, subPlanSteps, fakeAst, new Map(), undefined, undefined, knownVars);
+        
+        steps.push({
+          kind: 'PatternExprStep',
+          subPlan: subPlanSteps,
+          pathVariables,
+          resultVariable: varName,
+        } as import('./plan/QueryPlan').PatternExprStep);
+        
+        knownVars.add(varName);
+        return { kind: 'Identifier', name: varName };
+      }
       case 'Map': {
         const props: Record<string, Expression> = {};
         for (const [k, v] of Object.entries(expr.props)) {
