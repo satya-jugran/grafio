@@ -747,4 +747,54 @@ describe('Executor', () => {
       expect(result.summary.propertiesSet).toBe(0);
     });
   });
+  // ── PatternExprStep predicate correctness ──────────────────────
+  describe('pattern expression in WHERE predicate', () => {
+    async function buildPredicateGraph(): Promise<Graph> {
+      // alice -[:KNOWS]-> bob   (alice has an outgoing KNOWS edge)
+      // charlie                 (charlie has NO outgoing KNOWS edge)
+      const g = new Graph();
+      const alice   = await g.addNode('Person', { name: 'Alice' });
+      const bob     = await g.addNode('Person', { name: 'Bob' });
+      const charlie = await g.addNode('Person', { name: 'Charlie' });
+      await g.addEdge(alice.id, bob.id, 'KNOWS', {});
+      // charlie intentionally has no KNOWS edge
+      void charlie;
+      return g;
+    }
+
+    it('filters out nodes with zero pattern matches (regression: empty array was truthy)', async () => {
+      const graph = await buildPredicateGraph();
+      // Only Alice has an outgoing KNOWS edge to a Person; Charlie must be excluded.
+      const result = await executeQuery(
+        'MATCH (p:Person) WHERE (p)-[:KNOWS]->(:Person) RETURN p.name AS name',
+        {},
+        graph,
+      );
+      const names = result.rows.map((r) => r.name as string).sort();
+      expect(names).toEqual(['Alice']);
+    });
+
+    it('includes nodes that satisfy the pattern predicate', async () => {
+      const graph = await buildPredicateGraph();
+      const result = await executeQuery(
+        'MATCH (p:Person) WHERE (p)-[:KNOWS]->(:Person) RETURN p.name AS name',
+        {},
+        graph,
+      );
+      expect(result.rows).toHaveLength(1);
+      expect(result.rows[0].name).toBe('Alice');
+    });
+
+    it('negated pattern expression excludes nodes with matches', async () => {
+      const graph = await buildPredicateGraph();
+      // NOT (p)-[:KNOWS]->(:Person) should keep Bob and Charlie (no outgoing KNOWS to Person)
+      const result = await executeQuery(
+        'MATCH (p:Person) WHERE NOT (p)-[:KNOWS]->(:Person) RETURN p.name AS name',
+        {},
+        graph,
+      );
+      const names = result.rows.map((r) => r.name as string).sort();
+      expect(names).toEqual(['Bob', 'Charlie']);
+    });
+  });
 });

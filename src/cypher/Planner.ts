@@ -102,10 +102,11 @@ export class Planner {
         await this._planSegment(fakeAst, steps, knownVars, segment.with.star);
 
         if (segment.with.where) {
-          const rewritten = await this._extractSubqueries(segment.with.where.expression, steps, knownVars);
+          const patternExprVars = new Set<string>();
+          const rewritten = await this._extractSubqueries(segment.with.where.expression, steps, knownVars, patternExprVars);
           steps.push({
             kind: 'FilterStep',
-            predicate: rewritten,
+            predicate: this._rewritePatternExprsAsPredicate(rewritten, patternExprVars),
           });
         }
         if (segment.with.orderBy) {
@@ -123,7 +124,7 @@ export class Planner {
     return { steps };
   }
 
-  private async _extractSubqueries(expr: Expression, steps: PlanStep[], knownVars: Set<string>): Promise<Expression> {
+  private async _extractSubqueries(expr: Expression, steps: PlanStep[], knownVars: Set<string>, patternExprVars?: Set<string>): Promise<Expression> {
     switch (expr.kind) {
       case 'ExistsSubquery': {
         const varName = this._patternPlanner._syntheticVar('exists', steps.length);
@@ -156,38 +157,38 @@ export class Planner {
       }
       
       case 'PropertyAccess': {
-        const obj = await this._extractSubqueries(expr.object, steps, knownVars);
+        const obj = await this._extractSubqueries(expr.object, steps, knownVars, patternExprVars);
         return { ...expr, object: obj };
       }
       case 'Binary': {
-        const left = await this._extractSubqueries(expr.left, steps, knownVars);
-        const right = await this._extractSubqueries(expr.right, steps, knownVars);
+        const left = await this._extractSubqueries(expr.left, steps, knownVars, patternExprVars);
+        const right = await this._extractSubqueries(expr.right, steps, knownVars, patternExprVars);
         return { ...expr, left, right };
       }
       case 'Unary': {
-        const operand = await this._extractSubqueries(expr.operand, steps, knownVars);
+        const operand = await this._extractSubqueries(expr.operand, steps, knownVars, patternExprVars);
         return { ...expr, operand };
       }
       case 'In': {
-        const e1 = await this._extractSubqueries(expr.expression, steps, knownVars);
-        const e2 = await this._extractSubqueries(expr.list, steps, knownVars);
+        const e1 = await this._extractSubqueries(expr.expression, steps, knownVars, patternExprVars);
+        const e2 = await this._extractSubqueries(expr.list, steps, knownVars, patternExprVars);
         return { ...expr, expression: e1, list: e2 };
       }
       case 'IsNull': {
-        const e = await this._extractSubqueries(expr.expression, steps, knownVars);
+        const e = await this._extractSubqueries(expr.expression, steps, knownVars, patternExprVars);
         return { ...expr, expression: e };
       }
       case 'List': {
         const elems: import('./ast/AstNode').Expression[] = [];
         for (const e of expr.elements) {
-          elems.push(await this._extractSubqueries(e, steps, knownVars));
+          elems.push(await this._extractSubqueries(e, steps, knownVars, patternExprVars));
         }
         return { ...expr, elements: elems };
       }
       case 'ListComprehension': {
-        const list = await this._extractSubqueries(expr.list, steps, knownVars);
-        const where = expr.where ? await this._extractSubqueries(expr.where, steps, knownVars) : undefined;
-        const projection = expr.projection ? await this._extractSubqueries(expr.projection, steps, knownVars) : undefined;
+        const list = await this._extractSubqueries(expr.list, steps, knownVars, patternExprVars);
+        const where = expr.where ? await this._extractSubqueries(expr.where, steps, knownVars, patternExprVars) : undefined;
+        const projection = expr.projection ? await this._extractSubqueries(expr.projection, steps, knownVars, patternExprVars) : undefined;
         return { ...expr, list, where, projection };
       }
       case 'PatternComprehension': {
@@ -244,19 +245,21 @@ export class Planner {
         } as import('./plan/QueryPlan').PatternExprStep);
         
         knownVars.add(varName);
+        // Track this variable so predicate call sites can rewrite it to size(x) > 0
+        patternExprVars?.add(varName);
         return { kind: 'Identifier', name: varName };
       }
       case 'Map': {
         const props: Record<string, Expression> = {};
         for (const [k, v] of Object.entries(expr.props)) {
-          props[k] = await this._extractSubqueries(v, steps, knownVars);
+          props[k] = await this._extractSubqueries(v, steps, knownVars, patternExprVars);
         }
         return { ...expr, props };
       }
       case 'FunctionCall': {
         const args: import('./ast/AstNode').Expression[] = [];
         for (const a of expr.args) {
-          args.push(await this._extractSubqueries(a, steps, knownVars));
+          args.push(await this._extractSubqueries(a, steps, knownVars, patternExprVars));
         }
         return { ...expr, args };
       }
@@ -266,6 +269,48 @@ export class Planner {
       default:
         return expr;
     }
+  }
+
+  /**
+   * Walk a predicate expression and replace any identifier that is the
+   * result variable of a {@link PatternExprStep} with `size(x) > 0`.
+   *
+   * Per openCypher spec a bare pattern expression evaluates to a list of
+   * paths, so `size(paths) > 0` is the correct existence check.  Without
+   * this rewrite, `Boolean([])` in the FilterStep executor returns `true`
+   * for an empty list, letting non-matching rows through.
+   */
+  private _rewritePatternExprsAsPredicate(expr: Expression, patternExprVars: Set<string>): Expression {
+    if (patternExprVars.size === 0) return expr;
+
+    const rewrite = (e: Expression): Expression => {
+      switch (e.kind) {
+        case 'Identifier':
+          if (patternExprVars.has(e.name)) {
+            // Replace bare pattern-expr variable with size(x) > 0
+            return {
+              kind: 'Binary',
+              op: '>',
+              left: {
+                kind: 'FunctionCall',
+                name: 'size',
+                args: [e],
+                distinct: false,
+              },
+              right: { kind: 'Literal', value: 0 },
+            };
+          }
+          return e;
+        case 'Binary':
+          return { ...e, left: rewrite(e.left), right: rewrite(e.right) };
+        case 'Unary':
+          return { ...e, operand: rewrite(e.operand) };
+        default:
+          return e;
+      }
+    };
+
+    return rewrite(expr);
   }
 
   private async _planSegment(ast: QueryAst, steps: PlanStep[], knownVars: Set<string>, isWithStar: boolean): Promise<void> {
@@ -716,10 +761,11 @@ export class Planner {
     // 7. Emit remaining cross-variable filter
     if (crossVar.length > 0) {
       const predicate = this._whereDecomposer.andAll(crossVar);
-      const rewritten = await this._extractSubqueries(predicate, targetSteps, knownVars);
+      const patternExprVars = new Set<string>();
+      const rewritten = await this._extractSubqueries(predicate, targetSteps, knownVars, patternExprVars);
       targetSteps.push({
         kind: 'FilterStep',
-        predicate: rewritten,
+        predicate: this._rewritePatternExprsAsPredicate(rewritten, patternExprVars),
       });
     }
 
