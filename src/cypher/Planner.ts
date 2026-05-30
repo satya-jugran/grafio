@@ -191,10 +191,10 @@ export class Planner {
         return { ...expr, list, where, projection };
       }
       case 'PatternComprehension': {
-        const where = expr.where ? await this._extractSubqueries(expr.where, steps, knownVars) : undefined;
-        const projection = await this._extractSubqueries(expr.projection, steps, knownVars);
         const varName = this._patternPlanner._syntheticVar('comp', steps.length);
         const subPlanSteps: PlanStep[] = [];
+        const pathVariables = this._patternPlanner.assignAndExtractPathVariables(expr.pattern, subPlanSteps);
+        const localKnownVars = new Set([...knownVars, ...pathVariables]);
         
         const fakeAst: QueryAst = {
           kind: 'Query',
@@ -204,9 +204,13 @@ export class Planner {
         };
         
         this._patternPlanner.planPath(expr.pattern, subPlanSteps, fakeAst, new Map(), undefined, undefined, knownVars);
+        
+        const where = expr.where ? await this._extractSubqueries(expr.where, subPlanSteps, localKnownVars) : undefined;
         if (where) {
           subPlanSteps.push({ kind: 'FilterStep', predicate: where });
         }
+        
+        const projection = await this._extractSubqueries(expr.projection, subPlanSteps, localKnownVars);
         
         steps.push({
           kind: 'PatternComprehensionStep',

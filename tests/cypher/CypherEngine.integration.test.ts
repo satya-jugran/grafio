@@ -1392,6 +1392,26 @@ describe('CypherEngine Integration', () => {
       expect(friends).toContain('David');
     });
 
+    it('evaluates nested subqueries in Pattern Comprehension WHERE clause', async () => {
+      // Alice knows Bob, Charlie, David.
+      // Bob knows no one (in the graph direction, KNOWS is directed. Wait, Bob knows David).
+      // Let's find friends of Alice who themselves have outgoing KNOWS relationships.
+      // Alice -> Bob, Charlie, David
+      // Bob -> David
+      // Charlie -> Eve
+      // David -> Frank
+      // So all of Alice's friends (Bob, Charlie, David) have outgoing KNOWS relationships!
+      // Let's find friends of Alice who know exactly 1 person.
+      const result = await engine.execute(
+        `MATCH (a:Person {name: 'Alice'})
+         RETURN [(a)-[:KNOWS]->(b:Person) WHERE size((b)-[:KNOWS]->(:Person)) > 0 | b.name] AS friends_with_friends`,
+      );
+      expect(result.rows).toHaveLength(1);
+      const friends = result.rows[0].friends_with_friends as string[];
+      expect(Array.isArray(friends)).toBe(true);
+      expect(friends).toHaveLength(3);
+    });
+
     it('evaluates size() on Pattern Expressions to count matching paths', async () => {
       // Alice has 3 outgoing KNOWS relationships.
       const result = await engine.execute(
