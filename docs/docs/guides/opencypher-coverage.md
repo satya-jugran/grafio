@@ -38,7 +38,7 @@ Grafio's Cypher engine supports a comprehensive subset of openCypher.
 - `CALL`
 - `YIELD`
 
-## Source of Truth
+## openCypher Compliance
 
 Grafio aims to comply strictly with the official openCypher grammar. You can refer to the official specification here:
 [openCypher](https://opencypher.org/)
