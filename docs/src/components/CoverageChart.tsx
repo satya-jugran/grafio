@@ -13,7 +13,7 @@ export default function CoverageChart() {
     labels: ['Fully supported', 'Partially supported', 'Not supported'],
     datasets: [
       {
-        data: [17, 3, 4],
+        data: [15, 2, 3],
         backgroundColor: [
           'rgba(75, 192, 192, 0.8)',
           'rgba(255, 206, 86, 0.8)',
