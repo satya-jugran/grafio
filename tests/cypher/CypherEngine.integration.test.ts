@@ -1350,4 +1350,95 @@ describe('CypherEngine Integration', () => {
       ).rejects.toThrow();
     });
   });
+
+  // ── Pattern Comprehensions and Pattern Expressions ────────────────
+  describe('Pattern Comprehensions and Pattern Expressions', () => {
+    let graph: Graph;
+    let engine: CypherEngine;
+
+    beforeAll(async () => {
+      graph = new Graph();
+      await buildSocialGraph(graph);
+      engine = new CypherEngine(graph);
+    });
+
+    it('evaluates Pattern Comprehensions to a list of projected values', async () => {
+      // Alice has 3 friends: Bob, Charlie, David
+      const result = await engine.execute(
+        `MATCH (a:Person {name: 'Alice'})
+         RETURN [(a)-[:KNOWS]->(b:Person) | b.name] AS friends`,
+      );
+      expect(result.rows).toHaveLength(1);
+      const friends = result.rows[0].friends as string[];
+      expect(Array.isArray(friends)).toBe(true);
+      expect(friends).toHaveLength(3);
+      expect(friends).toContain('Bob');
+      expect(friends).toContain('Charlie');
+      expect(friends).toContain('David');
+    });
+
+    it('evaluates Pattern Comprehensions with WHERE clause', async () => {
+      // Alice has 3 friends: Bob, Charlie, David
+      // Bob is 25, Charlie is 32, David is 29. Friends older than 28: Charlie, David.
+      const result = await engine.execute(
+        `MATCH (a:Person {name: 'Alice'})
+         RETURN [(a)-[:KNOWS]->(b:Person) WHERE b.age > 28 | b.name] AS older_friends`,
+      );
+      expect(result.rows).toHaveLength(1);
+      const friends = result.rows[0].older_friends as string[];
+      expect(Array.isArray(friends)).toBe(true);
+      expect(friends).toHaveLength(2);
+      expect(friends).toContain('Charlie');
+      expect(friends).toContain('David');
+    });
+
+    it('evaluates nested subqueries in Pattern Comprehension WHERE clause', async () => {
+      // Alice knows Bob, Charlie, David.
+      // Bob knows no one (in the graph direction, KNOWS is directed. Wait, Bob knows David).
+      // Let's find friends of Alice who themselves have outgoing KNOWS relationships.
+      // Alice -> Bob, Charlie, David
+      // Bob -> David
+      // Charlie -> Eve
+      // David -> Frank
+      // So all of Alice's friends (Bob, Charlie, David) have outgoing KNOWS relationships!
+      // Let's find friends of Alice who know exactly 1 person.
+      const result = await engine.execute(
+        `MATCH (a:Person {name: 'Alice'})
+         RETURN [(a)-[:KNOWS]->(b:Person) WHERE size((b)-[:KNOWS]->(:Person)) > 0 | b.name] AS friends_with_friends`,
+      );
+      expect(result.rows).toHaveLength(1);
+      const friends = result.rows[0].friends_with_friends as string[];
+      expect(Array.isArray(friends)).toBe(true);
+      expect(friends).toHaveLength(3);
+    });
+
+    it('evaluates size() on Pattern Expressions to count matching paths', async () => {
+      // Alice has 3 outgoing KNOWS relationships.
+      const result = await engine.execute(
+        `MATCH (a:Person {name: 'Alice'})
+         RETURN size((a)-[:KNOWS]->(:Person)) AS friend_count`,
+      );
+      expect(result.rows).toHaveLength(1);
+      expect(result.rows[0].friend_count).toBe(3);
+    });
+
+    it('evaluates size() on Pattern Expressions in WHERE clause', async () => {
+      // Persons with exactly 3 friends: Alice. (Other people have 0, 1 or 2).
+      const result = await engine.execute(
+        `MATCH (p:Person)
+         WHERE size((p)-[:KNOWS]->(:Person)) = 3
+         RETURN p.name AS name`,
+      );
+      expect(result.rows).toHaveLength(1);
+      expect(result.rows[0].name).toBe('Alice');
+    });
+    
+    it('evaluates size() on list', async () => {
+      const result = await engine.execute(
+        `RETURN size([1, 2, 3]) AS len`,
+      );
+      expect(result.rows).toHaveLength(1);
+      expect(result.rows[0].len).toBe(3);
+    });
+  });
 });

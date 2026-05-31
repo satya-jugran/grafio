@@ -346,7 +346,9 @@ export type Expression =
   | MapExpr
   | FunctionCallExpr
   | ExistsSubqueryExpr
-  | ListComprehensionExpr;
+  | ListComprehensionExpr
+  | PatternComprehensionExpr
+  | PatternExpr;
 
 // -- Literals --
 
@@ -448,6 +450,22 @@ export interface ListComprehensionExpr {
   where?: Expression;
   /** Optional projection expression. */
   projection?: Expression;
+}
+
+export interface PatternComprehensionExpr {
+  kind: 'PatternComprehension';
+  /** The pattern path, optionally named (e.g. p = (a)-[]->(b)) */
+  pattern: MatchPattern;
+  /** Optional WHERE clause to filter paths */
+  where?: Expression;
+  /** The expression to yield for each matched path */
+  projection: Expression;
+}
+
+export interface PatternExpr {
+  kind: 'PatternExpr';
+  /** The relationships pattern */
+  pattern: MatchPattern;
 }
 
 export interface FunctionCallExpr {

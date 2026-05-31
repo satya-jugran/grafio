@@ -1202,14 +1202,28 @@ export class Parser {
       }
 
       case TokenKind.LPAREN: {
+        const savedPos = this._pos;
+        try {
+          const pattern = this._parsePatternPath();
+          const segments = pattern.kind === 'NamedPath' ? pattern.pattern.segments : pattern.segments;
+          // A PatternExpression must have at least one relationship (segments > 1)
+          if (segments.length > 1) {
+            return { kind: 'PatternExpr', pattern };
+          }
+        } catch (e) {
+          // Fallback to parenthesized expression
+        }
+        this._pos = savedPos;
+
         this._advance(); // consume (
         const expr = this._parseExpression();
         this._consume(TokenKind.RPAREN, "Expected ')'");
         return expr;
       }
 
-      // List literal [expr, expr, ...] or List Comprehension [var IN list WHERE exp | exp]
+      // List literal [expr, expr, ...] or List/Pattern Comprehension
       case TokenKind.LBRACKET: {
+        const savedPos = this._pos;
         this._advance();
 
         // Check for list comprehension: [IDENT IN ... ]
@@ -1233,6 +1247,27 @@ export class Parser {
           this._consume(TokenKind.RBRACKET, "Expected ']' at the end of list comprehension");
           return { kind: 'ListComprehension', variable, list, where, projection };
         }
+
+        // Check for pattern comprehension: [ pattern WHERE exp | exp ] or [ pattern | exp ]
+        this._pos = savedPos + 1;
+        try {
+          const pattern = this._parsePatternPath();
+          if (this._check(TokenKind.WHERE) || this._check(TokenKind.PIPE)) {
+            let where: Expression | undefined;
+            if (this._check(TokenKind.WHERE)) {
+              this._advance();
+              where = this._parseExpression();
+            }
+            this._consume(TokenKind.PIPE, "Expected '|' in pattern comprehension");
+            const projection = this._parseExpression();
+            this._consume(TokenKind.RBRACKET, "Expected ']' at the end of pattern comprehension");
+            return { kind: 'PatternComprehension', pattern, where, projection };
+          }
+        } catch (e) {
+          // Fallback to standard list literal
+        }
+
+        this._pos = savedPos + 1;
 
         // Standard list literal
         const elements: Expression[] = [];

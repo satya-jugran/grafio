@@ -65,7 +65,9 @@ export type PlanStep =
   | OptionalMatchStep
   | VerifyNodeStep
   | UnionStep
-  | ExistsSubqueryStep;
+  | ExistsSubqueryStep
+  | PatternComprehensionStep
+  | PatternExprStep;
 
 // ── Individual step types ─────────────────────────────────────────
 
@@ -427,6 +429,34 @@ export interface ExistsSubqueryStep {
   /** The inner execution plan for the subquery */
   subPlan: PlanStep[];
   /** The temporary variable name to store the boolean result */
+  resultVariable: string;
+}
+
+/** 
+ * Evaluates a Pattern Comprehension subquery.
+ * For each row, runs subPlan, evaluates projection for each match, and collects results.
+ */
+export interface PatternComprehensionStep {
+  kind: 'PatternComprehensionStep';
+  /** The inner execution plan for the subquery */
+  subPlan: PlanStep[];
+  /** The projection expression to evaluate for each match */
+  projection: Expression;
+  /** The temporary variable name to store the resulting list */
+  resultVariable: string;
+}
+
+/** 
+ * Evaluates a Pattern Expression subquery.
+ * For each row, runs subPlan, collects path variable bindings into a list of paths.
+ */
+export interface PatternExprStep {
+  kind: 'PatternExprStep';
+  /** The inner execution plan for the subquery */
+  subPlan: PlanStep[];
+  /** The ordered list of variable names forming the path segments */
+  pathVariables: string[];
+  /** The temporary variable name to store the resulting list of paths */
   resultVariable: string;
 }
 

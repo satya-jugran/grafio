@@ -290,6 +290,23 @@ export class ExpressionEvaluator {
             );
           }
 
+          // ── size(list) → length of list ──
+          case 'SIZE': {
+            if (expr.args.length !== 1) {
+              throw new CypherRuntimeError(
+                `size() expects exactly 1 argument, got ${expr.args.length}`,
+              );
+            }
+            const arg = this.evaluate(expr.args[0], row, params);
+            if (arg === null || arg === undefined) return null;
+            if (Array.isArray(arg)) {
+              return arg.length;
+            }
+            throw new CypherRuntimeError(
+              `size() requires a list argument, got ${typeof arg}`,
+            );
+          }
+
           default:
             throw new CypherRuntimeError(
               `Function '${expr.name}' is not yet supported`,
@@ -300,6 +317,18 @@ export class ExpressionEvaluator {
       case 'ExistsSubquery': {
         throw new CypherRuntimeError(
           `ExistsSubquery must be extracted by Planner into ExistsSubqueryStep before evaluation`,
+        );
+      }
+
+      case 'PatternComprehension': {
+        throw new CypherRuntimeError(
+          `PatternComprehension must be extracted by Planner into PatternComprehensionStep before evaluation`,
+        );
+      }
+
+      case 'PatternExpr': {
+        throw new CypherRuntimeError(
+          `PatternExpr must be extracted by Planner into PatternExprStep before evaluation`,
         );
       }
 

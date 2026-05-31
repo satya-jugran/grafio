@@ -31,6 +31,19 @@ import {
 // ── PatternPlanner ─────────────────────────────────────────────────
 
 export class PatternPlanner {
+  /** Assigns synthetic variables to any un-named segments in a pattern and returns the ordered list of variable names. */
+  assignAndExtractPathVariables(pattern: PatternPath | NamedPath, steps: PlanStep[]): string[] {
+    const vars: string[] = [];
+    const segments = getPatternSegments(pattern);
+    for (const seg of segments) {
+      if (!seg.variable) {
+        seg.variable = this._syntheticVar(seg.kind === 'NodePattern' ? 'node' : 'edge', steps.length + vars.length);
+      }
+      vars.push(seg.variable);
+    }
+    return vars;
+  }
+
   /**
    * Convert a pattern path (or named path) into plan steps,
    * injecting per-variable WHERE predicates into NodeScanSteps.

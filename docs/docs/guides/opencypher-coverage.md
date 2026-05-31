@@ -23,12 +23,12 @@ Grafio's Cypher engine supports a comprehensive subset of openCypher.
 - `EXISTS`
 - `WHERE`
 - `REMOVE`
+- `MATCH`
 
 ## Partially supported
 
 | Clause | Notes |
 |--------|-------|
-| `MATCH` | Missing pattern comprehensions and paths as expressions |
 | `RETURN` | Missing `CASE WHEN`, `XOR`, `%`, `^`, string matching (`STARTS WITH`, `ENDS WITH`, `CONTAINS`), and list predicates (`ALL`, `ANY`, `NONE`, `SINGLE`) |
 | `CREATE INDEX` | *Note: Index DDL is actually a Grafio extension, not in standard openCypher!* |
 

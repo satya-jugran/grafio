@@ -41,7 +41,11 @@ import {
 import { CypherResult, CypherRow, CypherSummary } from '../Result';
 import { CypherRuntimeError } from '../errors';
 import { Row, ExpressionEvaluator } from './ExpressionEvaluator';
-import { ExistsSubqueryStep } from '../plan/QueryPlan';
+import {
+  ExistsSubqueryStep,
+  PatternComprehensionStep,
+  PatternExprStep,
+} from '../plan/QueryPlan';
 
 import { ReadStepExecutor } from './steps/ReadStepExecutors';
 import { PipelineStepExecutor, getDistinctKey } from './steps/PipelineStepExecutors';
@@ -315,6 +319,55 @@ export class Executor {
           const hasMatch = matchRows.length > 0;
           const outRow = new Map(row);
           outRow.set(existsStep.resultVariable, hasMatch);
+          resultRows.push(outRow);
+        }
+        return resultRows;
+      }
+
+      case 'PatternComprehensionStep': {
+        const compStep = step as PatternComprehensionStep;
+        const resultRows: Row[] = [];
+        for (const row of rows) {
+          let matchRows: Row[] = [row];
+          for (const subStep of compStep.subPlan) {
+            matchRows = await this._executeStep(subStep, matchRows, params, transaction);
+            if (matchRows.length === 0) break;
+          }
+          
+          const results: unknown[] = [];
+          for (const matchRow of matchRows) {
+            const val = this._evaluator.evaluate(compStep.projection, matchRow, params);
+            results.push(val);
+          }
+          
+          const outRow = new Map(row);
+          outRow.set(compStep.resultVariable, results);
+          resultRows.push(outRow);
+        }
+        return resultRows;
+      }
+
+      case 'PatternExprStep': {
+        const exprStep = step as PatternExprStep;
+        const resultRows: Row[] = [];
+        for (const row of rows) {
+          let matchRows: Row[] = [row];
+          for (const subStep of exprStep.subPlan) {
+            matchRows = await this._executeStep(subStep, matchRows, params, transaction);
+            if (matchRows.length === 0) break;
+          }
+          
+          const paths: unknown[][] = [];
+          for (const matchRow of matchRows) {
+            const path: unknown[] = [];
+            for (const v of exprStep.pathVariables) {
+              path.push(matchRow.get(v) ?? null);
+            }
+            paths.push(path);
+          }
+          
+          const outRow = new Map(row);
+          outRow.set(exprStep.resultVariable, paths);
           resultRows.push(outRow);
         }
         return resultRows;
