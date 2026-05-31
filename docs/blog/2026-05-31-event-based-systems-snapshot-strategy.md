@@ -137,7 +137,6 @@ await mongoGraph.importJSON(snapshot);
 
 **Key characteristics:**
 - Bulk import in a single operation
-- Validates referential integrity: throws `NodeNotFoundError` if any edge references a non-existent node
 - Throws `NodeAlreadyExistsError` if node IDs already exist in the target store
 
 ### The GraphData Structure
