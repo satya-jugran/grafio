@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.13.0] - 2026-05-31
+
+### ✨ New Features
+
+1. **Pattern Comprehensions and Paths as Expressions**
+   - Added support for openCypher pattern comprehensions (`[(a)-[:R]->(b) | b.name]`), allowing inline pattern matching that returns a list of projected values.
+   - Added support for path expressions used directly inside `RETURN`, `WITH`, and expression contexts without requiring a named `MATCH` clause.
+   - Integrated semantic validation and query planning for both constructs.
+   - Pattern comprehensions support optional `WHERE` filtering: `[(a)-[:R]->(b) WHERE b.age > 30 | b.name]`.
+
 ## [7.12.0] - 2026-05-29
 
 ### ✨ New Features
