@@ -1,1 +1,0 @@
-"use strict";(globalThis.webpackChunkgrafio_docs=globalThis.webpackChunkgrafio_docs||[]).push([[3401],{7073(a){a.exports=JSON.parse('{"authors":[{"name":"Satya Jugran","title":"Founder Grafio","page":{"permalink":"/grafio/blog/authors/satya-jugran"},"socials":{"github":"https://github.com/satya-jugran"},"key":"satya-jugran","count":2}]}')}}]);
