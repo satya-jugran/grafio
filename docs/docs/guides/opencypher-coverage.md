@@ -12,8 +12,6 @@ Grafio's Cypher engine supports a comprehensive subset of openCypher.
 - `CREATE`
 - `DELETE`
 - `DETACH DELETE`
-- `DROP INDEX`
-- `SHOW INDEXES`
 - `WITH`
 - `MERGE`
 - `SET`
@@ -25,12 +23,16 @@ Grafio's Cypher engine supports a comprehensive subset of openCypher.
 - `REMOVE`
 - `MATCH`
 
+## Additionally supported
+- `CREATE INDEX`
+- `DROP INDEX`
+- `SHOW INDEXES`
+
 ## Partially supported
 
 | Clause | Notes |
 |--------|-------|
 | `RETURN` | Missing `CASE WHEN`, `XOR`, `%`, `^`, string matching (`STARTS WITH`, `ENDS WITH`, `CONTAINS`), and list predicates (`ALL`, `ANY`, `NONE`, `SINGLE`) |
-| `CREATE INDEX` | *Note: Index DDL is actually a Grafio extension, not in standard openCypher!* |
 
 ## Not supported
 
@@ -45,6 +47,6 @@ Grafio aims to comply strictly with the official openCypher grammar. You can ref
 
 ## Coverage
 
-Grafio currently covers **85%** of standard openCypher clauses (17 out of 20 core standard clauses are either fully or partially supported).
+Grafio currently covers **85%** of standard openCypher clauses (16 out of 19 core standard clauses are either fully or partially supported).
 
 <CoverageChart />

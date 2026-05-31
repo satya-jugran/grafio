@@ -395,6 +395,16 @@ export class PlanFormatter {
         desc += ']';
         return desc;
       }
+      case 'PatternComprehension': {
+        let desc = '[';
+        if (expr.where) {
+          desc += ' WHERE ' + this.getExpressionDescription(expr.where);
+        }
+        desc += ' | ' + this.getExpressionDescription(expr.projection) + ']';
+        return desc;
+      }
+      case 'PatternExpr':
+        return '(pattern)';
     }
   }
 
