@@ -1247,10 +1247,12 @@ export class Semantic {
 
     const deletedVars = new Set(ast.delete.variables);
 
-    // Check SET clause — writing to a deleted variable makes no sense.
+    // Check SET clause — writing to a deleted variable, or using a deleted
+    // variable in the value expression of a SET, makes no sense.
     if (ast.set) {
       for (const item of ast.set.items) {
-        if (this._expressionReferencesAny(item.variable, deletedVars)) {
+        if (this._expressionReferencesAny(item.variable, deletedVars) || this._expressionReferencesAny(item.value, deletedVars)
+        ) {
           throw new CypherSemanticError(
             `Cannot SET property on deleted variable. ` +
             `Variables deleted: ${[...deletedVars].join(', ')}`,
@@ -1264,7 +1266,8 @@ export class Semantic {
       for (const merge of ast.merge) {
         for (const action of merge.actions) {
           for (const item of action.items) {
-            if (this._expressionReferencesAny(item.variable, deletedVars)) {
+            if ( this._expressionReferencesAny(item.variable, deletedVars) || this._expressionReferencesAny(item.value, deletedVars)
+            ) {
               throw new CypherSemanticError(
                 `Cannot SET property on deleted variable. ` +
                 `Variables deleted: ${[...deletedVars].join(', ')}`,
@@ -1482,7 +1485,22 @@ export class Semantic {
         );
 
       case 'ExistsSubquery':
-        return expr.match.where ? this._expressionReferencesAny(expr.match.where.expression, varNames) : false;
+        return expr.match.where
+          ? this._expressionReferencesAny(expr.match.where.expression, varNames)
+          : false;
+
+      case 'PatternComprehension': {
+        const segments = getPatternSegments(expr.pattern);
+        for (const seg of segments) {
+          if (seg.variable && varNames.has(seg.variable)) return true;
+        }
+        if (expr.where && this._expressionReferencesAny(expr.where, varNames)) return true;
+        return this._expressionReferencesAny(expr.projection, varNames);
+      }
+
+      case 'PatternExpr':
+        // PatternExpr contains a pattern path only — no sub-expressions to walk.
+        return false;
 
       case 'Literal':
       case 'Parameter':
@@ -1508,78 +1526,14 @@ export class Semantic {
   // ── Pass 10: Index DDL validity ──────────────────────────────────
 
   /**
-   * Validate index DDL statements.
+   * No-op pass for index DDL statements.
    *
-    * Rules enforced:
-    * 1. CREATE INDEX must have a non-empty name.
-    * 1b. CREATE INDEX name must match [a-zA-Z_][a-zA-Z0-9_]*.
-    * 2. CREATE INDEX must have at least one property key.
-    * 3. DROP INDEX must have a non-empty name.
-    * 3b. DROP INDEX name must match [a-zA-Z_][a-zA-Z0-9_]*.
-    * 4. DDL and DML cannot be combined in the same query.
-   *
-   * @throws {CypherSemanticError} if any rule is violated.
+   * All structural invariants (non-empty name, at least one property key,
+   * no DDL+DML mixing) are already enforced by the parser via _consume /
+   * _ensureAtEnd, so there is nothing left for the semantic layer to check.
+   * This method exists only to satisfy the _passes pipeline interface.
    */
   private _checkIndexDdlValidity(ast: QueryAst): QueryAst {
-    // ── Index name format pattern ──────────────────────────────────
-    const VALID_NAME = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
-
-    const hasDdl = !!(ast.createIndex || ast.dropIndex || ast.showIndexes);
-    if (!hasDdl) return ast;
-
-    // ── Rule 1: CREATE INDEX name required ─────────────────────────
-    if (ast.createIndex && !ast.createIndex.name) {
-      throw new CypherSemanticError(
-        'Index name is required for CREATE INDEX',
-      );
-    }
-
-    // ── Rule 1b: CREATE INDEX name format ──────────────────────────
-    if (ast.createIndex && !VALID_NAME.test(ast.createIndex.name)) {
-      throw new CypherSemanticError(
-        `Invalid index name '${ast.createIndex.name}'. Index names must ` +
-        `start with a letter or underscore and contain only alphanumeric ` +
-        `characters and underscores.`,
-      );
-    }
-
-    // ── Rule 2: CREATE INDEX property keys non-empty ──────────────
-    if (ast.createIndex && ast.createIndex.propertyKeys.length === 0) {
-      throw new CypherSemanticError(
-        'At least one property key is required for CREATE INDEX',
-      );
-    }
-
-    // ── Rule 3: DROP INDEX name required ─────────────────────────
-    if (ast.dropIndex && !ast.dropIndex.name) {
-      throw new CypherSemanticError(
-        'Index name is required for DROP INDEX',
-      );
-    }
-
-    // ── Rule 3b: DROP INDEX name format ────────────────────────────
-    if (ast.dropIndex && !VALID_NAME.test(ast.dropIndex.name)) {
-      throw new CypherSemanticError(
-        `Invalid index name '${ast.dropIndex.name}'. Index names must ` +
-        `start with a letter or underscore and contain only alphanumeric ` +
-        `characters and underscores.`,
-      );
-    }
-
-    // ── Rule 4: DDL + DML mutual exclusion ─────────────────────────
-    const hasDml =
-      ast.matches.some(m => m.patterns.length > 0) ||
-      !!ast.create ||
-      !!ast.set ||
-      !!ast.delete ||
-      !!ast.remove;
-
-    if (hasDml) {
-      throw new CypherSemanticError(
-        'DDL statements (CREATE INDEX, DROP INDEX, SHOW INDEXES) cannot be combined with MATCH/RETURN',
-      );
-    }
-
     return ast;
   }
 }

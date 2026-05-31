@@ -275,4 +275,116 @@ describe('Semantic', () => {
         .toThrow(CypherSemanticError);
     });
   });
+
+  // ── _checkDeleteSafety: single omnibus test covering all _expressionReferencesAny branches ──
+  //
+  // _checkDeleteSafety checks both item.variable AND item.value via
+  // _expressionReferencesAny. To reach every switch branch, each SET item
+  // value is a different expression kind. All of these are valid openCypher
+  // SET value expressions. The deleted variable `r` does NOT appear in any
+  // value expression → every branch returns false → no throw.
+  //
+  // Branches exercised via SET value expressions:
+  //   FunctionCall      → SET a.label = toUpper(a.name)
+  //   Binary            → SET a.score2 = a.score + 1
+  //   Unary             → SET a.inactive = NOT a.active
+  //   In                → SET a.isAdmin = a.role IN ["admin","user"]
+  //   IsNull            → SET a.missing = a.tag IS NULL
+  //   ListComprehension → SET a.names = [x IN ["p","q"] | x]
+  //   ExistsSubquery    → SET a.known = EXISTS { MATCH (a)-[:FOLLOWS]->(:Person) }
+  //   PatternComprehension → SET a.friends = [(a)-[:LIKES]->(c) | c.name]
+  //   Identifier        → SET a.self = a
+  //   Literal           → SET a.str = "safe"
+  //   Parameter         → SET a.param = $val
+  //   PropertyAccess    → covered by all property-valued SET items above
+  //   Map               → SET a += { key: "v" }   (map-mutation form)
+  //   PatternExpr       → covered via RETURN (not reachable as SET value)
+  //   List              → covered via ListComprehension list source above
+  describe('_checkDeleteSafety', () => {
+    it('traverses every _expressionReferencesAny branch in SET and MERGE SET values without false-positive on unrelated deleted var', () => {
+      // Parser clause order: MATCH → MERGE → SET → DELETE → RETURN
+      // Covers ast.merge path: MERGE ON MATCH SET with safe value (a.count = a.count + 1).
+      // Covers ast.set path: all expression kinds as SET values; deleted var r absent from all.
+      expect(() =>
+        analyse(
+          'MATCH (a:Person)-[r:KNOWS]->(b:Person) ' +
+          'MERGE (a)-[:FOLLOWS]->(b) ON MATCH SET a.visits = a.visits + 1 ' +
+          'SET a.label    = toUpper(a.name), ' +
+          '    a.score2   = a.score + 1, ' +
+          '    a.inactive = NOT a.active, ' +
+          '    a.isAdmin  = a.role IN ["admin", "user"], ' +
+          '    a.missing  = a.tag IS NULL, ' +
+          '    a.names    = [x IN ["p", "q"] | x], ' +
+          '    a.known    = EXISTS { MATCH (a)-[:FOLLOWS]->(:Person) }, ' +
+          '    a.friends  = [(a)-[:LIKES]->(c) | c.name], ' +
+          '    a.self     = a, ' +
+          '    a.str      = "safe", ' +
+          '    a.param    = $val, ' +
+          '    a         += { key: "v" } ' +
+          'DELETE r ' +
+          'RETURN (a)-[:BLOCKED]->(:Person)',
+        ),
+      ).not.toThrow();
+    });
+
+    it('throws CypherSemanticError when SET references a deleted variable (SET branch) and when MERGE SET references a deleted variable (MERGE branch)', () => {
+      // SET branch throw: r is deleted, SET r.x = 1 references deleted r on LHS
+      expect(() =>
+        analyse(
+          'MATCH (a:Person)-[r:KNOWS]->(b:Person) ' +
+          'SET r.prop = "x" ' +
+          'DELETE r ' +
+          'RETURN a',
+        ),
+      ).toThrow(CypherSemanticError);
+
+      // MERGE SET branch throw: r is deleted, MERGE ON MATCH SET r.prop = 1 references deleted r on LHS
+      expect(() =>
+        analyse(
+          'MATCH (a:Person)-[r:KNOWS]->(b:Person) ' +
+          'MERGE (a)-[:FOLLOWS]->(b) ON MATCH SET r.prop = 1 ' +
+          'DELETE r ' +
+          'RETURN a',
+        ),
+      ).toThrow(CypherSemanticError);
+    });
+  });
+
+  // ── _checkAggregateGrouping: single omnibus test covering all _collectUnresolvedPostAggIdentifiers branches ──
+  //
+  // One ORDER BY + aggregate query whose ORDER BY expression tree packs every
+  // Expression kind so _collectUnresolvedPostAggIdentifiers walks Identifier,
+  // PropertyAccess, FunctionCall, ListComprehension, ExistsSubquery,
+  // PatternComprehension, PatternExpr, Literal, Parameter, Binary branches.
+  // All identifiers resolve to valid post-aggregation aliases → returns [] → no throw.
+  describe('_checkAggregateGrouping', () => {
+    it('traverses all _collectUnresolvedPostAggIdentifiers branches without error when ORDER BY uses valid post-agg aliases', () => {
+      // Post-aggregation aliases: city (from p.city AS city), cnt (from COUNT(*) AS cnt).
+      // ORDER BY expression tree exercises every branch of _collectUnresolvedPostAggIdentifiers:
+      //   cnt                                        → Identifier (valid alias)
+      //   cnt + 0                                    → Binary(Identifier, Literal)
+      //   NOT (cnt IS NULL)                          → Unary(IsNull(Identifier))  covers Unary + IsNull
+      //   cnt IN [1, 2]                              → In(Identifier, List([Literal, Literal]))  covers In + List
+      //   {key: cnt}                                 → Map({key: Identifier})
+      //   toUpper(city)                              → FunctionCall(Identifier)
+      //   [x IN [cnt] | x]                           → ListComprehension(List([Identifier]), local x)
+      //   EXISTS { MATCH (p)-[:KNOWS]->(:Person) }  → ExistsSubquery (no WHERE)
+      //   [(p)-[:LIKES]->(q) | q.name]              → PatternComprehension (local q)
+      //   (p)-[:BLOCKED]->(:Person)                 → PatternExpr
+      //   1                                          → Literal
+      //   $param                                     → Parameter
+      expect(() =>
+        analyse(
+          'MATCH (p:Person) ' +
+          'RETURN p.city AS city, COUNT(*) AS cnt ' +
+          'ORDER BY cnt, cnt + 0, NOT (cnt IS NULL), cnt IN [1, 2], {key: cnt}, ' +
+          'toUpper(city), [x IN [cnt] | x], ' +
+          'EXISTS { MATCH (p)-[:KNOWS]->(:Person) }, ' +
+          '[(p)-[:LIKES]->(q) | q.name], ' +
+          '(p)-[:BLOCKED]->(:Person), ' +
+          '1, $param',
+        ),
+      ).not.toThrow();
+    });
+  });
 });
