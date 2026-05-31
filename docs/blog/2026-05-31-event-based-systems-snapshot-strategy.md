@@ -29,7 +29,7 @@ flowchart LR
 As your event store grows, the naive approach crumbles:
 - **10,000 events** = 10,000 database round-trips
 - **100,000 events** = 100,000 round-trips
-- At even 1ms latency per call, you're looking at **100 seconds** just for event replay
+- At even 10ms latency per call, you're looking at **1,000 seconds** just for event replay
 
 The root cause? Event processing becomes I/O bound, not compute bound. Your graph reconstruction is bottlenecked by the slowest part of your system — the database.
 
@@ -239,7 +239,7 @@ The numbers tell the story:
 
 **Break-even analysis:**
 - InMemory replay: ~500ms for 50K operations (based on [performance benchmarks](/blog/grafio-in-memory-performance-benchmarks))
-- Naive DB replay: Even at 1ms latency per call = 50+ seconds
+- Naive DB replay: Even at 10ms latency per call = 500+ seconds
 - **Speedup: 100x or more**
 
 The gap widens further when you consider:
