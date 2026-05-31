@@ -76,7 +76,6 @@
 <p><strong>Key characteristics:</strong></p>
 <ul>
 <li class="">Bulk import in a single operation</li>
-<li class="">Validates referential integrity: throws <code>NodeNotFoundError</code> if any edge references a non-existent node</li>
 <li class="">Throws <code>NodeAlreadyExistsError</code> if node IDs already exist in the target store</li>
 </ul>
 <h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="the-graphdata-structure">The GraphData Structure<a href="https://satya-jugran.github.io/grafio/blog/event-based-systems-grafio-snapshot-strategy#the-graphdata-structure" class="hash-link" aria-label="Direct link to The GraphData Structure" title="Direct link to The GraphData Structure" translate="no">​</a></h3>
