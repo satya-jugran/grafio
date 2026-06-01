@@ -161,14 +161,15 @@ export class ExpressionEvaluator {
 
       case 'Case': {
         const caseExpr = expr as import('../ast/AstNode').CaseExpr;
+        const hasBase = caseExpr.expression !== undefined;
         let baseValue: unknown = undefined;
-        if (caseExpr.expression) {
-          baseValue = this.evaluate(caseExpr.expression, row, params);
+        if (hasBase) {
+          baseValue = this.evaluate(caseExpr.expression!, row, params);
         }
 
         for (const branch of caseExpr.branches) {
           const whenVal = this.evaluate(branch.when, row, params);
-          const isMatch = baseValue !== undefined ? this.eq(baseValue, whenVal) : Boolean(whenVal);
+          const isMatch = hasBase ? this.eq(baseValue, whenVal) : Boolean(whenVal);
           if (isMatch) {
             return this.evaluate(branch.then, row, params);
           }
