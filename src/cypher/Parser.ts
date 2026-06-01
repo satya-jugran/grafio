@@ -1465,6 +1465,16 @@ export class Parser {
 
 
   private _isIdentifier(token: Token): boolean {
+    if (
+      token.kind === TokenKind.STRING ||
+      token.kind === TokenKind.INTEGER ||
+      token.kind === TokenKind.FLOAT ||
+      token.kind === TokenKind.BOOLEAN ||
+      token.kind === TokenKind.NULL ||
+      token.kind === TokenKind.PARAM
+    ) {
+      return false;
+    }
     return token.kind === TokenKind.IDENT || /^[a-zA-Z_]\w*$/.test(token.value);
   }
 
