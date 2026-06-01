@@ -229,17 +229,20 @@ export class WhereDecomposer {
     // ── Binary comparison: n.key OP literal/param ─────────────────
     if (expr.kind === 'Binary') {
       if (
-        ['=', '<>', '>', '<', '>=', '<='].includes(expr.op) &&
+        ['=', '<>', '>', '<', '>=', '<=', 'STARTS WITH', 'ENDS WITH', 'CONTAINS'].includes(expr.op) &&
         expr.left.kind === 'PropertyAccess' &&
         expr.left.object.kind === 'Identifier'
       ) {
         const key = expr.left.property;
         const rhs = expr.right;
         if (rhs.kind === 'Literal' || rhs.kind === 'Parameter') {
+          let op = expr.op as string;
+          if (op === 'STARTS WITH') op = 'STARTS_WITH';
+          if (op === 'ENDS WITH') op = 'ENDS_WITH';
           return {
             key,
             value: rhs.kind === 'Literal' ? rhs.value : rhs,
-            op: expr.op as PropertyFilter['op'],
+            op: op as PropertyFilter['op'],
           };
         }
         return null;

@@ -428,9 +428,13 @@ export class PatternPlanner {
         ? (f.value as Expression)
         : { kind: 'Literal' as const, value: f.value as string | number | boolean | null };
 
+    let op = f.op as import('../ast/AstNode').BinaryOp;
+    if (f.op === 'STARTS_WITH') op = 'STARTS WITH';
+    if (f.op === 'ENDS_WITH') op = 'ENDS WITH';
+
     return {
       kind: 'Binary',
-      op: f.op as import('../ast/AstNode').BinaryOp,
+      op,
       left: {
         kind: 'PropertyAccess',
         object: { kind: 'Identifier', name: varName },

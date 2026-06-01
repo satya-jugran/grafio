@@ -1441,4 +1441,93 @@ describe('CypherEngine Integration', () => {
       expect(result.rows[0].len).toBe(3);
     });
   });
+
+  describe('New Cypher Expressions', () => {
+    let graph: Graph;
+    let engine: CypherEngine;
+
+    beforeAll(async () => {
+      graph = new Graph();
+      await buildSocialGraph(graph);
+      engine = new CypherEngine(graph);
+    });
+
+    it('evaluates CASE WHEN ... THEN ... ELSE END correctly', async () => {
+      const result = await engine.execute(
+        `MATCH (p:Person)
+         RETURN CASE
+           WHEN p.age < 26 THEN 'Young'
+           WHEN p.age < 30 THEN 'Mid'
+           ELSE 'Old'
+         END AS ageGroup
+         ORDER BY p.name ASC LIMIT 3`
+      );
+      // Alice (28) -> Mid, Bob (25) -> Young, Charlie (32) -> Old
+      expect(result.rows).toHaveLength(3);
+      expect(result.rows[0].ageGroup).toBe('Mid');
+      expect(result.rows[1].ageGroup).toBe('Young');
+      expect(result.rows[2].ageGroup).toBe('Old');
+    });
+
+    it('evaluates CASE expression WHEN ... THEN ... ELSE END correctly', async () => {
+      const result = await engine.execute(
+        `MATCH (p:Person)
+         RETURN CASE p.name
+           WHEN 'Alice' THEN 1
+           WHEN 'Bob' THEN 2
+           ELSE 3
+         END AS nameScore
+         ORDER BY p.name ASC LIMIT 3`
+      );
+      expect(result.rows).toHaveLength(3);
+      expect(result.rows[0].nameScore).toBe(1);
+      expect(result.rows[1].nameScore).toBe(2);
+      expect(result.rows[2].nameScore).toBe(3); // Charlie
+    });
+
+    it('evaluates string matching operators: STARTS WITH, ENDS WITH, CONTAINS', async () => {
+      const result = await engine.execute(
+        `MATCH (p:Person)
+         WHERE p.name STARTS WITH 'A' OR p.name ENDS WITH 'b' OR p.name CONTAINS 'harl'
+         RETURN p.name AS name ORDER BY p.name ASC`
+      );
+      expect(result.rows).toHaveLength(3);
+      const names = result.rows.map(r => r.name);
+      expect(names).toEqual(['Alice', 'Bob', 'Charlie']);
+    });
+
+    it('evaluates math operators: %, ^', async () => {
+      const result = await engine.execute(
+        `RETURN 10 % 3 AS modRes, 2 ^ 3 AS powRes`
+      );
+      expect(result.rows).toHaveLength(1);
+      expect(result.rows[0].modRes).toBe(1);
+      expect(result.rows[0].powRes).toBe(8);
+    });
+
+    it('evaluates logical operator: XOR', async () => {
+      const result = await engine.execute(
+        `RETURN true XOR false AS a, true XOR true AS b, false XOR false AS c`
+      );
+      expect(result.rows).toHaveLength(1);
+      expect(result.rows[0].a).toBe(true);
+      expect(result.rows[0].b).toBe(false);
+      expect(result.rows[0].c).toBe(false);
+    });
+
+    it('evaluates list predicates: ALL, ANY, NONE, SINGLE', async () => {
+      const result = await engine.execute(
+        `RETURN
+          ALL(x IN [2, 4, 6] WHERE x % 2 = 0) AS allRes,
+          ANY(x IN [1, 2, 3] WHERE x % 2 = 0) AS anyRes,
+          NONE(x IN [1, 3, 5] WHERE x % 2 = 0) AS noneRes,
+          SINGLE(x IN [1, 2, 3] WHERE x % 2 = 0) AS singleRes`
+      );
+      expect(result.rows).toHaveLength(1);
+      expect(result.rows[0].allRes).toBe(true);
+      expect(result.rows[0].anyRes).toBe(true);
+      expect(result.rows[0].noneRes).toBe(true);
+      expect(result.rows[0].singleRes).toBe(true);
+    });
+  });
 });

@@ -134,23 +134,34 @@ describe('PlanFormatter', () => {
     it('formats multi-step plans correctly', () => {
       const plan: QueryPlan = {
         steps: [
-          { kind: 'NodeScanStep', label: 'Person', variable: 'p', propertyFilters: [{ key: 'age', op: '>', value: 30, AND: [ { key: 'name', op: '=', value: 'Alice', OR: [ { key: 'city', op: '=', value: 'Wonderland' } ] } ] }] },
+          { kind: 'NodeScanStep', label: 'Person', variable: 'p', propertyFilters: [{ key: 'age', op: '>', value: 30, AND: [{ key: 'name', op: '=', value: 'Alice', OR: [{ key: 'city', op: '=', value: 'Wonderland' }] }] }] },
           { kind: 'NodeSeekStep', index: 'id', variable: 'f', value: "some_id", types: ['Person'] },
           { kind: 'NodeSeekStep', index: 'property', variable: 'f', value: "Alice", types: ['Person'], key: 'name' },
           { kind: 'EdgeExpandStep', source: 'p', target: 'f', types: ['KNOWS'], direction: 'out', minHops: 1, maxHops: 1, strategy: 'single-hop' },
           { kind: 'EdgeExpandStep', source: 'p', target: 'f', types: [], direction: 'in', minHops: 1, maxHops: 1, strategy: 'multi-hop-bfs' },
           { kind: 'FilterStep', predicate: { kind: 'PropertyAccess', object: { kind: 'Identifier', name: 'f' }, property: 'name' } },
           { kind: 'FilterStep', predicate: { kind: 'Binary', op: 'AND', left: { kind: 'PropertyAccess', object: { kind: 'Identifier', name: 'f' }, property: 'age' }, right: { kind: 'Literal', value: 30 } } },
-          { kind: 'FilterStep', predicate: { kind: 'In', not: false, expression: { kind: 'PropertyAccess', object: { kind: 'Identifier', name: 'f' }, property: 'name' }, list: { kind: 'List', elements: [ { kind: 'Literal', value: 'Alice' }, { kind: 'Literal', value: 'Bob' } ] } } },
-          { kind: 'FilterStep', predicate: { kind: 'In', not: true, expression: { kind: 'PropertyAccess', object: { kind: 'Identifier', name: 'f' }, property: 'name' }, list: { kind: 'List', elements: [ { kind: 'Literal', value: 'Alice' }, { kind: 'Literal', value: 'Bob' } ] } } },
+          { kind: 'FilterStep', predicate: { kind: 'In', not: false, expression: { kind: 'PropertyAccess', object: { kind: 'Identifier', name: 'f' }, property: 'name' }, list: { kind: 'List', elements: [{ kind: 'Literal', value: 'Alice' }, { kind: 'Literal', value: 'Bob' }] } } },
+          { kind: 'FilterStep', predicate: { kind: 'In', not: true, expression: { kind: 'PropertyAccess', object: { kind: 'Identifier', name: 'f' }, property: 'name' }, list: { kind: 'List', elements: [{ kind: 'Literal', value: 'Alice' }, { kind: 'Literal', value: 'Bob' }] } } },
           { kind: 'FilterStep', predicate: { kind: 'Unary', op: '-', operand: { kind: 'PropertyAccess', object: { kind: 'Identifier', name: 'f' }, property: 'name' } } },
           { kind: 'FilterStep', predicate: { kind: 'IsNull', not: false, expression: { kind: 'PropertyAccess', object: { kind: 'Identifier', name: 'f' }, property: 'name' } } },
           { kind: 'FilterStep', predicate: { kind: 'IsNull', not: true, expression: { kind: 'PropertyAccess', object: { kind: 'Identifier', name: 'f' }, property: 'name' } } },
-          { kind: 'FilterStep', predicate: { kind: 'FunctionCall', name: 'EXISTS', args: [ { kind: 'PropertyAccess', object: { kind: 'Identifier', name: 'f' }, property: 'name' } ] } },
-          { kind: 'AggregateStep', aggregates: [{ function: 'COUNT', expression: { kind: 'Identifier', name: 'f' }, distinct: false, alias: 'cnt' }], groupBy: [{ kind: 'Identifier', name: 'f' }], groupByAliases: [ 'f' ] },
-          { kind: 'SortStep', items: [{ expression: { kind: 'Identifier', name: 'f' }, direction: 'ASC' }] },
+          { kind: 'FilterStep', predicate: { kind: 'FunctionCall', name: 'EXISTS', args: [{ kind: 'PropertyAccess', object: { kind: 'Identifier', name: 'f' }, property: 'name' }] } },
+          { kind: 'FilterStep', predicate: { kind: 'List', elements: [{ kind: 'Literal', value: 'Alice' }, { kind: 'Literal', value: 'Bob' }] } },
+          { kind: 'FilterStep', predicate: { kind: 'ListComprehension', variable: 'x', list: { kind: 'List', elements: [{ kind: 'Literal', value: 'Alice' }, { kind: 'Literal', value: 'Bob' }] } }},
+          { kind: 'FilterStep', predicate: { kind: 'ListPredicate', list: { kind: 'List', elements: [{ kind: 'Literal', value: 'Alice' }, { kind: 'Literal', value: 'Bob' }] }, variable: 'x', predicate: 'ALL', where: { kind: 'Binary', op: '=', left: { kind: 'Identifier', name: 'x' }, right: { kind: 'Literal', value: 'Alice' } } } },
+          { kind: 'FilterStep', predicate: { kind: 'Case', branches: [{ when: { kind: 'Binary', op: '=', left: { kind: 'Identifier', name: 'f' }, right: { kind: 'Literal', value: 'Alice' } }, then: { kind: 'Literal', value: true } }], else: { kind: 'Literal', value: false } } },
+          { kind: 'AggregateStep', aggregates: [{ function: 'COUNT', expression: { kind: 'Identifier', name: 'f' }, distinct: false, alias: 'cnt' }], groupBy: [{ kind: 'Identifier', name: 'f' }], groupByAliases: ['f'] },
+          { kind: 'SortStep', items: [{ expression: { kind: 'Identifier', name: 'f' }, direction: 'ASC' }, { expression: { kind: 'Parameter', name: 'param1' }, direction: 'DESC' }] },
           { kind: 'LimitStep', skipExpr: { kind: 'Literal', value: 0 }, limitExpr: { kind: 'Literal', value: 10 } },
           { kind: 'ProjectStep', columns: [{ expression: { kind: 'Identifier', name: 'f' }, alias: 'friend' }], distinct: true },
+          { kind: 'ExistsSubqueryStep', subPlan: [{ kind: 'NodeScanStep', label: 'Person', variable: 'g' }], resultVariable: 'exists_res' },
+          { kind: 'VerifyNodeStep', variable: 'v', label: 'V', types: ['Person'], propertyFilters: [{ key: 'active', op: '=', value: true }] },
+          { kind: 'MergeStep', pattern: { kind: 'PatternPath', segments: [{ kind: 'NodePattern', variable: 'n', labels: ['Person'], properties: {} }] }, readSteps: [{ kind: 'NodeScanStep', label: 'Person', variable: 'h' }], createSteps: [], onMatchItems: [], onCreateItems: [] },
+          { kind: 'OptionalMatchStep', newVars: ['opt'], readSteps: [{ kind: 'NodeScanStep', label: 'Person', variable: 'd' }] },
+          { kind: 'PatternComprehensionStep', subPlan: [{ kind: 'NodeScanStep', label: 'Person', variable: 'y' }], projection: { kind: 'Literal', value: 1 }, resultVariable: 'pc_res' },
+          { kind: 'PatternExprStep', subPlan: [{ kind: 'NodeScanStep', label: 'Person', variable: 'y' }], pathVariables: ['a'], resultVariable: 'pe_res' },
+          { kind: 'UnionStep', plans: [{ steps: [{ kind: 'NodeScanStep', label: 'Person', variable: 'e' }] }], all: [] },
         ],
       };
 
@@ -160,9 +171,16 @@ describe('PlanFormatter', () => {
       expect(result).toContain('EdgeExpandStep');
       expect(result).toContain('FilterStep');
       expect(result).toContain('AggregateStep');
-      expect(result).toContain('SortStep'); 
+      expect(result).toContain('SortStep');
       expect(result).toContain('LimitStep');
       expect(result).toContain('ProjectStep');
+      expect(result).toContain('ExistsSubqueryStep');
+      expect(result).toContain('VerifyNodeStep');
+      expect(result).toContain('MergeStep');
+      expect(result).toContain('OptionalMatchStep');
+      expect(result).toContain('PatternComprehensionStep');
+      expect(result).toContain('PatternExprStep');
+      expect(result).toContain('UnionStep');
     });
   });
 
@@ -277,10 +295,10 @@ describe('PlanFormatter', () => {
           {
             kind: 'MergeStep',
             pattern: { kind: 'PatternPath', segments: [{ kind: 'NodePattern', variable: 'n', labels: ['Person'], properties: {} }] },
-            readSteps: [ { kind: 'NodeScanStep', label: 'Person', variable: 'n', types: ['Person'] } ],
-            createSteps: [ { kind: 'CreateNodeStep', variable: 'n', labels: ['Person'], properties: {} } ],
-            onMatchItems: [ { variable: 'n', property: 'age', operator: '=', value: { kind: 'Literal', value: 30 }, entityKind: 'node' } ],
-            onCreateItems: [ { variable: 'n', property: 'name', operator: '=', value: { kind: 'Literal', value: 'Alice' }, entityKind: 'node' } ],
+            readSteps: [{ kind: 'NodeScanStep', label: 'Person', variable: 'n', types: ['Person'] }],
+            createSteps: [{ kind: 'CreateNodeStep', variable: 'n', labels: ['Person'], properties: {} }],
+            onMatchItems: [{ variable: 'n', property: 'age', operator: '=', value: { kind: 'Literal', value: 30 }, entityKind: 'node' }],
+            onCreateItems: [{ variable: 'n', property: 'name', operator: '=', value: { kind: 'Literal', value: 'Alice' }, entityKind: 'node' }],
           },
         ],
       };
@@ -292,23 +310,36 @@ describe('PlanFormatter', () => {
     it('formats multi-step plans correctly', () => {
       const plan: QueryPlan = {
         steps: [
-          { kind: 'NodeScanStep', label: 'Person', variable: 'p', propertyFilters: [{ key: 'age', op: '>', value: 30, AND: [ { key: 'name', op: '=', value: 'Alice', OR: [ { key: 'city', op: '=', value: 'Wonderland' } ] } ] }] },
+          { kind: 'NodeScanStep', label: 'Person', variable: 'p', propertyFilters: [{ key: 'age', op: '>', value: 30, AND: [{ key: 'name', op: '=', value: 'Alice', OR: [{ key: 'city', op: '=', value: 'Wonderland' }] }] }] },
           { kind: 'NodeSeekStep', index: 'id', variable: 'f', value: "some_id", types: ['Person'] },
           { kind: 'NodeSeekStep', index: 'property', variable: 'f', value: "Alice", types: ['Person'], key: 'name' },
           { kind: 'EdgeExpandStep', source: 'p', target: 'f', types: ['KNOWS'], direction: 'out', minHops: 1, maxHops: 1, strategy: 'single-hop' },
           { kind: 'EdgeExpandStep', source: 'p', target: 'f', types: [], direction: 'in', minHops: 1, maxHops: 1, strategy: 'multi-hop-bfs' },
           { kind: 'FilterStep', predicate: { kind: 'PropertyAccess', object: { kind: 'Identifier', name: 'f' }, property: 'name' } },
           { kind: 'FilterStep', predicate: { kind: 'Binary', op: 'AND', left: { kind: 'PropertyAccess', object: { kind: 'Identifier', name: 'f' }, property: 'age' }, right: { kind: 'Literal', value: 30 } } },
-          { kind: 'FilterStep', predicate: { kind: 'In', not: false, expression: { kind: 'PropertyAccess', object: { kind: 'Identifier', name: 'f' }, property: 'name' }, list: { kind: 'List', elements: [ { kind: 'Literal', value: 'Alice' }, { kind: 'Literal', value: 'Bob' } ] } } },
-          { kind: 'FilterStep', predicate: { kind: 'In', not: true, expression: { kind: 'PropertyAccess', object: { kind: 'Identifier', name: 'f' }, property: 'name' }, list: { kind: 'List', elements: [ { kind: 'Literal', value: 'Alice' }, { kind: 'Literal', value: 'Bob' } ] } } },
+          { kind: 'FilterStep', predicate: { kind: 'In', not: false, expression: { kind: 'PropertyAccess', object: { kind: 'Identifier', name: 'f' }, property: 'name' }, list: { kind: 'List', elements: [{ kind: 'Literal', value: 'Alice' }, { kind: 'Literal', value: 'Bob' }] } } },
+          { kind: 'FilterStep', predicate: { kind: 'In', not: true, expression: { kind: 'PropertyAccess', object: { kind: 'Identifier', name: 'f' }, property: 'name' }, list: { kind: 'List', elements: [{ kind: 'Literal', value: 'Alice' }, { kind: 'Literal', value: 'Bob' }] } } },
           { kind: 'FilterStep', predicate: { kind: 'Unary', op: '-', operand: { kind: 'PropertyAccess', object: { kind: 'Identifier', name: 'f' }, property: 'name' } } },
           { kind: 'FilterStep', predicate: { kind: 'IsNull', not: false, expression: { kind: 'PropertyAccess', object: { kind: 'Identifier', name: 'f' }, property: 'name' } } },
           { kind: 'FilterStep', predicate: { kind: 'IsNull', not: true, expression: { kind: 'PropertyAccess', object: { kind: 'Identifier', name: 'f' }, property: 'name' } } },
-          { kind: 'FilterStep', predicate: { kind: 'FunctionCall', name: 'EXISTS', args: [ { kind: 'PropertyAccess', object: { kind: 'Identifier', name: 'f' }, property: 'name' } ] } },
-          { kind: 'AggregateStep', aggregates: [{ function: 'COUNT', expression: { kind: 'Identifier', name: 'f' }, distinct: false, alias: 'cnt' }], groupBy: [{ kind: 'Identifier', name: 'f' }], groupByAliases: [ 'f' ] },
-          { kind: 'SortStep', items: [{ expression: { kind: 'Identifier', name: 'f' }, direction: 'ASC' }] },
+          { kind: 'FilterStep', predicate: { kind: 'FunctionCall', name: 'EXISTS', args: [{ kind: 'PropertyAccess', object: { kind: 'Identifier', name: 'f' }, property: 'name' }] } },
+          { kind: 'FilterStep', predicate: { kind: 'FunctionCall', distinct: true, name: 'EXISTS', args: [{ kind: 'PropertyAccess', object: { kind: 'Identifier', name: 'f' }, property: 'name' }] } },
+          { kind: 'FilterStep', predicate: { kind: 'List', elements: [{ kind: 'Literal', value: 'Alice' }, { kind: 'Literal', value: 'Bob' }] } },
+          { kind: 'FilterStep', predicate: { kind: 'ListComprehension', variable: 'x', list: { kind: 'List', elements: [{ kind: 'Literal', value: 'Alice' }, { kind: 'Literal', value: 'Bob' }] }, where: { kind: 'Binary', op: '=', left: { kind: 'Identifier', name: 'x' }, right: { kind: 'Literal', value: 'Alice' } }, projection: { kind: 'Literal', value: 1 } } },
+          { kind: 'FilterStep', predicate: { kind: 'ListPredicate', list: { kind: 'List', elements: [{ kind: 'Literal', value: 'Alice' }, { kind: 'Literal', value: 'Bob' }] }, variable: 'x', predicate: 'ALL', where: { kind: 'Binary', op: '=', left: { kind: 'Identifier', name: 'x' }, right: { kind: 'Literal', value: 'Alice' } } } },
+          { kind: 'FilterStep', predicate: { kind: 'Case', branches: [{ when: { kind: 'Binary', op: '=', left: { kind: 'Identifier', name: 'f' }, right: { kind: 'Literal', value: 'Alice' } }, then: { kind: 'Literal', value: true } }], else: { kind: 'Literal', value: false } } },
+          { kind: 'FilterStep', predicate: { kind: 'PatternComprehension', pattern: { kind: 'PatternPath', segments: [{ kind: 'NodePattern', variable: 'n', labels: ['Person'], properties: {} }] }, where: { kind: 'Binary', op: '=', left: { kind: 'Identifier', name: 'n' }, right: { kind: 'Literal', value: 'Alice' } }, projection: { kind: 'Literal', value: 1 } } },
+          { kind: 'AggregateStep', aggregates: [{ function: 'COUNT', expression: { kind: 'Identifier', name: 'f' }, distinct: false, alias: 'cnt' }], groupBy: [{ kind: 'Identifier', name: 'f' }], groupByAliases: ['f'] },
+          { kind: 'SortStep', items: [{ expression: { kind: 'Identifier', name: 'f' }, direction: 'ASC' }, { expression: { kind: 'Parameter', name: 'param1' }, direction: 'DESC' }] },
           { kind: 'LimitStep', skipExpr: { kind: 'Literal', value: 0 }, limitExpr: { kind: 'Literal', value: 10 } },
           { kind: 'ProjectStep', columns: [{ expression: { kind: 'Identifier', name: 'f' }, alias: 'friend' }], distinct: true },
+          { kind: 'ExistsSubqueryStep', subPlan: [{ kind: 'NodeScanStep', label: 'Person', variable: 'g' }, { kind: 'ExistsSubqueryStep', subPlan: [], resultVariable: 'nested_exists' }], resultVariable: 'exists_res' },
+          { kind: 'VerifyNodeStep', variable: 'v', label: 'V', types: ['Person'], propertyFilters: [{ key: 'active', op: '=', value: true }] },
+          { kind: 'MergeStep', pattern: { kind: 'PatternPath', segments: [{ kind: 'NodePattern', variable: 'n', labels: ['Person'], properties: {} }] }, readSteps: [{ kind: 'NodeScanStep', label: 'Person', variable: 'h' }], createSteps: [], onMatchItems: [], onCreateItems: [] },
+          { kind: 'OptionalMatchStep', newVars: ['opt'], readSteps: [{ kind: 'NodeScanStep', label: 'Person', variable: 'd' }] },
+          { kind: 'PatternComprehensionStep', subPlan: [{ kind: 'NodeScanStep', label: 'Person', variable: 'y' }], projection: { kind: 'Literal', value: 1 }, resultVariable: 'pc_res' },
+          { kind: 'PatternExprStep', subPlan: [{ kind: 'NodeScanStep', label: 'Person', variable: 'y' }], pathVariables: ['a'], resultVariable: 'pe_res' },
+          { kind: 'UnionStep', plans: [{ steps: [{ kind: 'NodeScanStep', label: 'Person', variable: 'e' }] }], all: [] },
         ],
       };
 
@@ -318,9 +349,16 @@ describe('PlanFormatter', () => {
       expect(result).toContain('EdgeExpandStep');
       expect(result).toContain('FilterStep');
       expect(result).toContain('AggregateStep');
-      expect(result).toContain('SortStep'); 
+      expect(result).toContain('SortStep');
       expect(result).toContain('LimitStep');
       expect(result).toContain('ProjectStep');
+      expect(result).toContain('ExistsSubqueryStep');
+      expect(result).toContain('VerifyNodeStep');
+      expect(result).toContain('MergeStep');
+      expect(result).toContain('OptionalMatchStep');
+      expect(result).toContain('PatternComprehensionStep');
+      expect(result).toContain('PatternExprStep');
+      expect(result).toContain('UnionStep');
     });
   });
 
@@ -481,23 +519,35 @@ describe('PlanFormatter', () => {
     it('formats multi-step plans correctly', () => {
       const plan: QueryPlan = {
         steps: [
-          { kind: 'NodeScanStep', label: 'Person', variable: 'p', propertyFilters: [{ key: 'age', op: '>', value: 30, AND: [ { key: 'name', op: '=', value: 'Alice', OR: [ { key: 'city', op: '=', value: 'Wonderland' } ] } ] }] },
+          { kind: 'NodeScanStep', label: 'Person', variable: 'p', propertyFilters: [{ key: 'age', op: '>', value: 30, AND: [{ key: 'name', op: '=', value: 'Alice', OR: [{ key: 'city', op: '=', value: 'Wonderland' }] }] }] },
           { kind: 'NodeSeekStep', index: 'id', variable: 'f', value: "some_id", types: ['Person'] },
           { kind: 'NodeSeekStep', index: 'property', variable: 'f', value: "Alice", types: ['Person'], key: 'name' },
+          { kind: 'NodeSeekStep', index: 'property', variable: 'f', value: "some_id", types: ['Person'], key: 'id' },
           { kind: 'EdgeExpandStep', source: 'p', target: 'f', types: ['KNOWS'], direction: 'out', minHops: 1, maxHops: 1, strategy: 'single-hop' },
           { kind: 'EdgeExpandStep', source: 'p', target: 'f', types: [], direction: 'in', minHops: 1, maxHops: 1, strategy: 'multi-hop-bfs' },
           { kind: 'FilterStep', predicate: { kind: 'PropertyAccess', object: { kind: 'Identifier', name: 'f' }, property: 'name' } },
           { kind: 'FilterStep', predicate: { kind: 'Binary', op: 'AND', left: { kind: 'PropertyAccess', object: { kind: 'Identifier', name: 'f' }, property: 'age' }, right: { kind: 'Literal', value: 30 } } },
-          { kind: 'FilterStep', predicate: { kind: 'In', not: false, expression: { kind: 'PropertyAccess', object: { kind: 'Identifier', name: 'f' }, property: 'name' }, list: { kind: 'List', elements: [ { kind: 'Literal', value: 'Alice' }, { kind: 'Literal', value: 'Bob' } ] } } },
-          { kind: 'FilterStep', predicate: { kind: 'In', not: true, expression: { kind: 'PropertyAccess', object: { kind: 'Identifier', name: 'f' }, property: 'name' }, list: { kind: 'List', elements: [ { kind: 'Literal', value: 'Alice' }, { kind: 'Literal', value: 'Bob' } ] } } },
+          { kind: 'FilterStep', predicate: { kind: 'In', not: false, expression: { kind: 'PropertyAccess', object: { kind: 'Identifier', name: 'f' }, property: 'name' }, list: { kind: 'List', elements: [{ kind: 'Literal', value: 'Alice' }, { kind: 'Literal', value: 'Bob' }] } } },
+          { kind: 'FilterStep', predicate: { kind: 'In', not: true, expression: { kind: 'PropertyAccess', object: { kind: 'Identifier', name: 'f' }, property: 'name' }, list: { kind: 'List', elements: [{ kind: 'Literal', value: 'Alice' }, { kind: 'Literal', value: 'Bob' }] } } },
           { kind: 'FilterStep', predicate: { kind: 'Unary', op: '-', operand: { kind: 'PropertyAccess', object: { kind: 'Identifier', name: 'f' }, property: 'name' } } },
           { kind: 'FilterStep', predicate: { kind: 'IsNull', not: false, expression: { kind: 'PropertyAccess', object: { kind: 'Identifier', name: 'f' }, property: 'name' } } },
           { kind: 'FilterStep', predicate: { kind: 'IsNull', not: true, expression: { kind: 'PropertyAccess', object: { kind: 'Identifier', name: 'f' }, property: 'name' } } },
-          { kind: 'FilterStep', predicate: { kind: 'FunctionCall', name: 'EXISTS', args: [ { kind: 'PropertyAccess', object: { kind: 'Identifier', name: 'f' }, property: 'name' } ] } },
-          { kind: 'AggregateStep', aggregates: [{ function: 'COUNT', expression: { kind: 'Identifier', name: 'f' }, distinct: false, alias: 'cnt' }], groupBy: [{ kind: 'Identifier', name: 'f' }], groupByAliases: [ 'f' ] },
-          { kind: 'SortStep', items: [{ expression: { kind: 'Identifier', name: 'f' }, direction: 'ASC' }] },
+          { kind: 'FilterStep', predicate: { kind: 'FunctionCall', name: 'EXISTS', args: [{ kind: 'PropertyAccess', object: { kind: 'Identifier', name: 'f' }, property: 'name' }] } },
+          { kind: 'FilterStep', predicate: { kind: 'List', elements: [{ kind: 'Literal', value: 'Alice' }, { kind: 'Literal', value: 'Bob' }] } },
+          { kind: 'FilterStep', predicate: { kind: 'ListComprehension', variable: 'x', list: { kind: 'List', elements: [{ kind: 'Literal', value: 'Alice' }, { kind: 'Literal', value: 'Bob' }] } }},
+          { kind: 'FilterStep', predicate: { kind: 'ListPredicate', list: { kind: 'List', elements: [{ kind: 'Literal', value: 'Alice' }, { kind: 'Literal', value: 'Bob' }] }, variable: 'x', predicate: 'ALL', where: { kind: 'Binary', op: '=', left: { kind: 'Identifier', name: 'x' }, right: { kind: 'Literal', value: 'Alice' } } } },
+          { kind: 'FilterStep', predicate: { kind: 'Case', branches: [{ when: { kind: 'Binary', op: '=', left: { kind: 'Identifier', name: 'f' }, right: { kind: 'Literal', value: 'Alice' } }, then: { kind: 'Literal', value: true } }], else: { kind: 'Literal', value: false } } },
+          { kind: 'AggregateStep', aggregates: [{ function: 'COUNT', expression: { kind: 'Identifier', name: 'f' }, distinct: false, alias: 'cnt' }], groupBy: [{ kind: 'Identifier', name: 'f' }], groupByAliases: ['f'] },
+          { kind: 'SortStep', items: [{ expression: { kind: 'Identifier', name: 'f' }, direction: 'ASC' }, { expression: { kind: 'Parameter', name: 'param1' }, direction: 'DESC' }] },
           { kind: 'LimitStep', skipExpr: { kind: 'Literal', value: 0 }, limitExpr: { kind: 'Literal', value: 10 } },
           { kind: 'ProjectStep', columns: [{ expression: { kind: 'Identifier', name: 'f' }, alias: 'friend' }], distinct: true },
+          { kind: 'ExistsSubqueryStep', subPlan: [{ kind: 'NodeScanStep', label: 'Person', variable: 'g' }], resultVariable: 'exists_res' },
+          { kind: 'VerifyNodeStep', variable: 'v', label: 'V', types: ['Person'], propertyFilters: [{ key: 'active', op: '=', value: true }] },
+          { kind: 'MergeStep', pattern: { kind: 'PatternPath', segments: [{ kind: 'NodePattern', variable: 'n', labels: ['Person'], properties: {} }] }, readSteps: [{ kind: 'NodeScanStep', label: 'Person', variable: 'h' }], createSteps: [], onMatchItems: [], onCreateItems: [] },
+          { kind: 'OptionalMatchStep', newVars: ['opt'], readSteps: [{ kind: 'NodeScanStep', label: 'Person', variable: 'd' }] },
+          { kind: 'PatternComprehensionStep', subPlan: [{ kind: 'NodeScanStep', label: 'Person', variable: 'y' }], projection: { kind: 'Literal', value: 1 }, resultVariable: 'pc_res' },
+          { kind: 'PatternExprStep', subPlan: [{ kind: 'NodeScanStep', label: 'Person', variable: 'y' }], pathVariables: ['a'], resultVariable: 'pe_res' },
+          { kind: 'UnionStep', plans: [{ steps: [{ kind: 'NodeScanStep', label: 'Person', variable: 'e' }] }], all: [] },
         ],
       };
 
@@ -507,9 +557,16 @@ describe('PlanFormatter', () => {
       expect(result).toContain('EdgeExpandStep');
       expect(result).toContain('FilterStep');
       expect(result).toContain('AggregateStep');
-      expect(result).toContain('SortStep'); 
+      expect(result).toContain('SortStep');
       expect(result).toContain('LimitStep');
       expect(result).toContain('ProjectStep');
+      expect(result).toContain('ExistsSubqueryStep');
+      expect(result).toContain('VerifyNodeStep');
+      expect(result).toContain('MergeStep');
+      expect(result).toContain('OptionalMatchStep');
+      expect(result).toContain('PatternComprehensionStep');
+      expect(result).toContain('PatternExprStep');
+      expect(result).toContain('UnionStep');
     });
   });
 });

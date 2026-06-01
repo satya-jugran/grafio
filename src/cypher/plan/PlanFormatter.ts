@@ -39,7 +39,7 @@ export class PlanFormatter {
       case 'mermaid':
         return this.toMermaid(plan, executionStats, params);
       default:
-         throw new Error(`Unsupported plan format: ${String(format)}`);
+        throw new Error(`Unsupported plan format: ${String(format)}`);
     }
   }
 
@@ -187,10 +187,10 @@ export class PlanFormatter {
       case 'SetPropertyStep':
         const assignments = step.assignments.map(a => (a.key ? a.key + ' ' + a.operator + ' ' : a.operator + ' ') + this.getExpressionDescription(a.value)).join(', ');
         return 'SetPropertyStep ' + step.variable + '.' + step.entityKind + ' ' + assignments;
-      
+
       case 'DeleteEntityStep':
         return 'DeleteEntityStep ' + step.variable + '.' + step.entityKind + (step.detach ? ' DETACH' : '');
-      
+
       case 'RemovePropertyStep':
         return 'RemovePropertyStep ' + step.variable + '.' + step.entityKind + ' ' + step.property;
       case 'RemoveLabelStep':
@@ -215,11 +215,11 @@ export class PlanFormatter {
         const createDesc = step.createSteps.map(s => this.describeStepForMermaid(s, _params)).join(', ');
         let onMatch = '';
         if (step.onMatchItems && step.onMatchItems.length > 0) {
-            onMatch = ' ON MATCH SET ' + step.onMatchItems.map(a => (a.property ? a.variable + '.' + a.property : a.variable) + ' ' + a.operator + ' ' + this.getExpressionDescription(a.value)).join(', ');
+          onMatch = ' ON MATCH SET ' + step.onMatchItems.map(a => (a.property ? a.variable + '.' + a.property : a.variable) + ' ' + a.operator + ' ' + this.getExpressionDescription(a.value)).join(', ');
         }
         let onCreate = '';
         if (step.onCreateItems && step.onCreateItems.length > 0) {
-            onCreate = ' ON CREATE SET ' + step.onCreateItems.map(a => (a.property ? a.variable + '.' + a.property : a.variable) + ' ' + a.operator + ' ' + this.getExpressionDescription(a.value)).join(', ');
+          onCreate = ' ON CREATE SET ' + step.onCreateItems.map(a => (a.property ? a.variable + '.' + a.property : a.variable) + ' ' + a.operator + ' ' + this.getExpressionDescription(a.value)).join(', ');
         }
         return 'MergeStep { read: [' + readDesc + '], create: [' + createDesc + '] }' + onMatch + onCreate;
       }
@@ -227,6 +227,31 @@ export class PlanFormatter {
       case 'ExistsSubqueryStep': {
         const subStepsDesc = step.subPlan.map(s => this.describeStepForMermaid(s, _params)).join(', ');
         return 'ExistsSubqueryStep [' + step.resultVariable + '] { ' + subStepsDesc + ' }';
+      }
+
+      case 'VerifyNodeStep': {
+        const types = step.types?.length ? ':' + step.types.join('|') : (step.label ? ':' + step.label : '');
+        const filters = step.propertyFilters?.map(f => this.getPropertyFilterDescription(f)).join(', ') || '';
+        return 'VerifyNodeStep ' + step.variable + types + (filters ? ' { ' + filters + ' }' : '');
+      }
+
+      case 'PatternComprehensionStep': {
+        const subStepsDesc = step.subPlan.map(s => this.describeStepForMermaid(s, _params)).join(', ');
+        return 'PatternComprehensionStep [' + step.resultVariable + '] { ' + subStepsDesc + ' | ' + this.getExpressionDescription(step.projection) + ' }';
+      }
+
+      case 'PatternExprStep': {
+        const subStepsDesc = step.subPlan.map(s => this.describeStepForMermaid(s, _params)).join(', ');
+        return 'PatternExprStep [' + step.resultVariable + '=(' + step.pathVariables.join(', ') + ')] { ' + subStepsDesc + ' }';
+      }
+
+      case 'UnionStep': {
+        const desc = step.plans.map((p, i) => {
+          const subStepsDesc = p.steps.map(s => this.describeStepForMermaid(s, _params)).join(', ');
+          const unionType = i > 0 ? (step.all[i - 1] ? ' UNION ALL ' : ' UNION ') : '';
+          return unionType + '{ ' + subStepsDesc + ' }';
+        }).join('');
+        return 'UnionStep ' + desc;
       }
 
       default:
@@ -259,7 +284,7 @@ export class PlanFormatter {
           ? (step.minHops === 1 ? '' : '[*' + step.minHops + ']')
           : '[*' + step.minHops + '..' + (step.maxHops === Infinity ? '*' : step.maxHops) + ']';
         const strategy = step.strategy !== 'single-hop' ? ' ' + step.strategy : '';
-        return 'EdgeExpandStep (' + dir + ')' + edgeVar + edgeTypes + ' \u2192 ' + step.target + targetTypes + hops +  strategy;
+        return 'EdgeExpandStep (' + dir + ')' + edgeVar + edgeTypes + ' \u2192 ' + step.target + targetTypes + hops + strategy;
       }
 
       case 'FilterStep':
@@ -326,11 +351,11 @@ export class PlanFormatter {
         const createDesc = step.createSteps.map(s => this.describeStep(s, params)).join(', ');
         let onMatch = '';
         if (step.onMatchItems && step.onMatchItems.length > 0) {
-            onMatch = ' ON MATCH SET ' + step.onMatchItems.map(a => (a.property ? a.variable + '.' + a.property : a.variable) + ' ' + a.operator + ' ' + this.getExpressionDescription(a.value)).join(', ');
+          onMatch = ' ON MATCH SET ' + step.onMatchItems.map(a => (a.property ? a.variable + '.' + a.property : a.variable) + ' ' + a.operator + ' ' + this.getExpressionDescription(a.value)).join(', ');
         }
         let onCreate = '';
         if (step.onCreateItems && step.onCreateItems.length > 0) {
-            onCreate = ' ON CREATE SET ' + step.onCreateItems.map(a => (a.property ? a.variable + '.' + a.property : a.variable) + ' ' + a.operator + ' ' + this.getExpressionDescription(a.value)).join(', ');
+          onCreate = ' ON CREATE SET ' + step.onCreateItems.map(a => (a.property ? a.variable + '.' + a.property : a.variable) + ' ' + a.operator + ' ' + this.getExpressionDescription(a.value)).join(', ');
         }
         return 'MergeStep { read: [' + readDesc + '], create: [' + createDesc + '] }' + onMatch + onCreate;
       }
@@ -338,6 +363,31 @@ export class PlanFormatter {
       case 'ExistsSubqueryStep': {
         const subStepsDesc = step.subPlan.map(s => this.describeStep(s, params)).join(', ');
         return 'ExistsSubqueryStep [' + step.resultVariable + '] { ' + subStepsDesc + ' }';
+      }
+
+      case 'VerifyNodeStep': {
+        const types = step.types?.length ? ':' + step.types.join('|') : (step.label ? ':' + step.label : '');
+        const filters = step.propertyFilters?.map(f => this.getPropertyFilterDescription(f)).join(', ') || '';
+        return 'VerifyNodeStep [' + step.variable + types + (filters ? ' { ' + filters + ' }' : '') + ']';
+      }
+
+      case 'PatternComprehensionStep': {
+        const subStepsDesc = step.subPlan.map(s => this.describeStep(s, params)).join(', ');
+        return 'PatternComprehensionStep [' + step.resultVariable + '] { ' + subStepsDesc + ' | ' + this.getExpressionDescription(step.projection) + ' }';
+      }
+
+      case 'PatternExprStep': {
+        const subStepsDesc = step.subPlan.map(s => this.describeStep(s, params)).join(', ');
+        return 'PatternExprStep [' + step.resultVariable + '=(' + step.pathVariables.join(', ') + ')] { ' + subStepsDesc + ' }';
+      }
+
+      case 'UnionStep': {
+        const desc = step.plans.map((p, i) => {
+          const subStepsDesc = p.steps.map(s => this.describeStep(s, params)).join(', ');
+          const unionType = i > 0 ? (step.all[i - 1] ? ' UNION ALL ' : ' UNION ') : '';
+          return unionType + '{ ' + subStepsDesc + ' }';
+        }).join('');
+        return 'UnionStep ' + desc;
       }
 
       default:
@@ -405,6 +455,21 @@ export class PlanFormatter {
       }
       case 'PatternExpr':
         return '(pattern)';
+      case 'Case': {
+        let desc = 'CASE';
+        if (expr.expression) desc += ' ' + this.getExpressionDescription(expr.expression);
+        for (const branch of expr.branches) {
+          desc += ' WHEN ' + this.getExpressionDescription(branch.when) + ' THEN ' + this.getExpressionDescription(branch.then);
+        }
+        if (expr.else) desc += ' ELSE ' + this.getExpressionDescription(expr.else);
+        desc += ' END';
+        return desc;
+      }
+      case 'ListPredicate': {
+        let desc = expr.predicate;
+        desc += '(' + expr.variable + ' IN ' + this.getExpressionDescription(expr.list) + ' WHERE ' + this.getExpressionDescription(expr.where) + ')';
+        return desc;
+      }
     }
   }
 
