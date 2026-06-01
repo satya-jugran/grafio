@@ -470,8 +470,6 @@ export class PlanFormatter {
         desc += '(' + expr.variable + ' IN ' + this.getExpressionDescription(expr.list) + ' WHERE ' + this.getExpressionDescription(expr.where) + ')';
         return desc;
       }
-      default:
-        return expr.kind;
     }
   }
 
