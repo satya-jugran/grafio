@@ -22,17 +22,12 @@ Grafio's Cypher engine supports a comprehensive subset of openCypher.
 - `WHERE`
 - `REMOVE`
 - `MATCH`
+- `RETURN`
 
 ## Additionally supported
 - `CREATE INDEX`
 - `DROP INDEX`
 - `SHOW INDEXES`
-
-## Partially supported
-
-| Clause | Notes |
-|--------|-------|
-| `RETURN` | Missing `CASE WHEN`, `XOR`, `%`, `^`, string matching (`STARTS WITH`, `ENDS WITH`, `CONTAINS`), and list predicates (`ALL`, `ANY`, `NONE`, `SINGLE`) |
 
 ## Not supported
 
@@ -47,6 +42,6 @@ Grafio aims to comply strictly with the official openCypher grammar. You can ref
 
 ## Coverage
 
-Grafio currently covers **85%** of standard openCypher clauses (16 out of 19 core standard clauses are either fully or partially supported).
+Grafio currently covers **84%** of standard openCypher clauses (16 out of 19 core standard clauses are fully supported).
 
 <CoverageChart />

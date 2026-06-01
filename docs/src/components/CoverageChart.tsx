@@ -10,18 +10,16 @@ export default function CoverageChart() {
   const textColor = colorMode === 'dark' ? '#F5F6F7' : '#1C1E21';
 
   const data = {
-    labels: ['Fully supported', 'Partially supported', 'Not supported'],
+    labels: ['Fully supported', 'Not supported'],
     datasets: [
       {
-        data: [15, 1, 3],
+        data: [16, 3],
         backgroundColor: [
           'rgba(75, 192, 192, 0.8)',
-          'rgba(255, 206, 86, 0.8)',
           'rgba(255, 99, 132, 0.8)',
         ],
         borderColor: [
           'rgba(75, 192, 192, 1)',
-          'rgba(255, 206, 86, 1)',
           'rgba(255, 99, 132, 1)',
         ],
         borderWidth: 1,

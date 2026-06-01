@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.14.0] - 2026-06-01
+
+### ✨ New Features
+
+1. **Full `RETURN` Clause Expression Support**
+   - Added support for `CASE WHEN` conditional expressions.
+   - Added support for `XOR`, `%` (modulo), and `^` (exponentiation) operators.
+   - Added support for string matching operators: `STARTS WITH`, `ENDS WITH`, and `CONTAINS`.
+   - Added support for list predicates: `ALL`, `ANY`, `NONE`, and `SINGLE`.
+   - The `RETURN` clause now fully supports all standard openCypher expressions.
+
+### 🐛 Bug Fixes
+
+1. **Syntax & Semantic Fixes**
+   - Hardened `Parser._isIdentifier()` to correctly exclude literal tokens (e.g. `STRING`, `BOOLEAN`, `NULL`), preventing them from masking syntax errors.
+   - Fixed `CASE WHEN` logic in `ExpressionEvaluator` so that an explicit base expression evaluating to `undefined` no longer incorrectly falls back to boolean CASE semantics.
+   - Fixed `Semantic._containsAggregate()` to properly traverse and validate aggregates inside `WHERE` and projection sub-clauses of list/pattern comprehensions.
+
 ## [7.13.0] - 2026-05-31
 
 ### ✨ New Features
