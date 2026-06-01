@@ -39,7 +39,7 @@ export class PlanFormatter {
       case 'mermaid':
         return this.toMermaid(plan, executionStats, params);
       default:
-         throw new Error(`Unsupported plan format: ${String(format)}`);
+        throw new Error(`Unsupported plan format: ${String(format)}`);
     }
   }
 
@@ -187,10 +187,10 @@ export class PlanFormatter {
       case 'SetPropertyStep':
         const assignments = step.assignments.map(a => (a.key ? a.key + ' ' + a.operator + ' ' : a.operator + ' ') + this.getExpressionDescription(a.value)).join(', ');
         return 'SetPropertyStep ' + step.variable + '.' + step.entityKind + ' ' + assignments;
-      
+
       case 'DeleteEntityStep':
         return 'DeleteEntityStep ' + step.variable + '.' + step.entityKind + (step.detach ? ' DETACH' : '');
-      
+
       case 'RemovePropertyStep':
         return 'RemovePropertyStep ' + step.variable + '.' + step.entityKind + ' ' + step.property;
       case 'RemoveLabelStep':
@@ -215,11 +215,11 @@ export class PlanFormatter {
         const createDesc = step.createSteps.map(s => this.describeStepForMermaid(s, _params)).join(', ');
         let onMatch = '';
         if (step.onMatchItems && step.onMatchItems.length > 0) {
-            onMatch = ' ON MATCH SET ' + step.onMatchItems.map(a => (a.property ? a.variable + '.' + a.property : a.variable) + ' ' + a.operator + ' ' + this.getExpressionDescription(a.value)).join(', ');
+          onMatch = ' ON MATCH SET ' + step.onMatchItems.map(a => (a.property ? a.variable + '.' + a.property : a.variable) + ' ' + a.operator + ' ' + this.getExpressionDescription(a.value)).join(', ');
         }
         let onCreate = '';
         if (step.onCreateItems && step.onCreateItems.length > 0) {
-            onCreate = ' ON CREATE SET ' + step.onCreateItems.map(a => (a.property ? a.variable + '.' + a.property : a.variable) + ' ' + a.operator + ' ' + this.getExpressionDescription(a.value)).join(', ');
+          onCreate = ' ON CREATE SET ' + step.onCreateItems.map(a => (a.property ? a.variable + '.' + a.property : a.variable) + ' ' + a.operator + ' ' + this.getExpressionDescription(a.value)).join(', ');
         }
         return 'MergeStep { read: [' + readDesc + '], create: [' + createDesc + '] }' + onMatch + onCreate;
       }
@@ -247,9 +247,9 @@ export class PlanFormatter {
 
       case 'UnionStep': {
         const desc = step.plans.map((p, i) => {
-           const subStepsDesc = p.steps.map(s => this.describeStepForMermaid(s, _params)).join(', ');
-           const unionType = i > 0 ? (step.all[i - 1] ? ' UNION ALL ' : ' UNION ') : '';
-           return unionType + '{ ' + subStepsDesc + ' }';
+          const subStepsDesc = p.steps.map(s => this.describeStepForMermaid(s, _params)).join(', ');
+          const unionType = i > 0 ? (step.all[i - 1] ? ' UNION ALL ' : ' UNION ') : '';
+          return unionType + '{ ' + subStepsDesc + ' }';
         }).join('');
         return 'UnionStep ' + desc;
       }
@@ -284,7 +284,7 @@ export class PlanFormatter {
           ? (step.minHops === 1 ? '' : '[*' + step.minHops + ']')
           : '[*' + step.minHops + '..' + (step.maxHops === Infinity ? '*' : step.maxHops) + ']';
         const strategy = step.strategy !== 'single-hop' ? ' ' + step.strategy : '';
-        return 'EdgeExpandStep (' + dir + ')' + edgeVar + edgeTypes + ' \u2192 ' + step.target + targetTypes + hops +  strategy;
+        return 'EdgeExpandStep (' + dir + ')' + edgeVar + edgeTypes + ' \u2192 ' + step.target + targetTypes + hops + strategy;
       }
 
       case 'FilterStep':
@@ -351,11 +351,11 @@ export class PlanFormatter {
         const createDesc = step.createSteps.map(s => this.describeStep(s, params)).join(', ');
         let onMatch = '';
         if (step.onMatchItems && step.onMatchItems.length > 0) {
-            onMatch = ' ON MATCH SET ' + step.onMatchItems.map(a => (a.property ? a.variable + '.' + a.property : a.variable) + ' ' + a.operator + ' ' + this.getExpressionDescription(a.value)).join(', ');
+          onMatch = ' ON MATCH SET ' + step.onMatchItems.map(a => (a.property ? a.variable + '.' + a.property : a.variable) + ' ' + a.operator + ' ' + this.getExpressionDescription(a.value)).join(', ');
         }
         let onCreate = '';
         if (step.onCreateItems && step.onCreateItems.length > 0) {
-            onCreate = ' ON CREATE SET ' + step.onCreateItems.map(a => (a.property ? a.variable + '.' + a.property : a.variable) + ' ' + a.operator + ' ' + this.getExpressionDescription(a.value)).join(', ');
+          onCreate = ' ON CREATE SET ' + step.onCreateItems.map(a => (a.property ? a.variable + '.' + a.property : a.variable) + ' ' + a.operator + ' ' + this.getExpressionDescription(a.value)).join(', ');
         }
         return 'MergeStep { read: [' + readDesc + '], create: [' + createDesc + '] }' + onMatch + onCreate;
       }
@@ -383,9 +383,9 @@ export class PlanFormatter {
 
       case 'UnionStep': {
         const desc = step.plans.map((p, i) => {
-           const subStepsDesc = p.steps.map(s => this.describeStep(s, params)).join(', ');
-           const unionType = i > 0 ? (step.all[i - 1] ? ' UNION ALL ' : ' UNION ') : '';
-           return unionType + '{ ' + subStepsDesc + ' }';
+          const subStepsDesc = p.steps.map(s => this.describeStep(s, params)).join(', ');
+          const unionType = i > 0 ? (step.all[i - 1] ? ' UNION ALL ' : ' UNION ') : '';
+          return unionType + '{ ' + subStepsDesc + ' }';
         }).join('');
         return 'UnionStep ' + desc;
       }
@@ -430,6 +430,8 @@ export class PlanFormatter {
       case 'FunctionCall':
         const args = expr.args.map(a => this.getExpressionDescription(a)).join(', ');
         return expr.name + '(' + (expr.distinct ? 'DISTINCT ' : '') + args + ')';
+      case 'ExistsSubquery':
+        return 'EXISTS { ... }';
       case 'Map':
         return '{' + Object.entries(expr.props).map(([k, v]) => k + ': ' + this.getExpressionDescription(v)).join(', ') + '}';
       case 'ListComprehension': {

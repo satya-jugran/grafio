@@ -256,6 +256,22 @@ it('converts nested AND/OR PropertyFilters to Expression AST via id-lookup path'
   expect(((pred as any).right as any).op).toBe('AND');
 });
 
+it('converts STARTS WITH and ENDS WITH to Expression AST via id-lookup path', async () => {
+  const p = await plan(
+    "MATCH (p:Person) WHERE id(p) = 'some-id' AND p.name STARTS WITH 'A' AND p.lastName ENDS WITH 'Z' RETURN p"
+  );
+  const filters = p.steps.filter(s => s.kind === 'FilterStep');
+  expect(filters.length).toBe(2);
+  
+  const pred1 = (filters[0] as FilterStep).predicate;
+  expect(pred1.kind).toBe('Binary');
+  expect((pred1 as any).op).toBe('STARTS WITH');
+
+  const pred2 = (filters[1] as FilterStep).predicate;
+  expect(pred2.kind).toBe('Binary');
+  expect((pred2 as any).op).toBe('ENDS WITH');
+});
+
 it('converts IS NULL to IS NULL expression via id-lookup path', async () => {
   const p = await plan(
     "MATCH (p:Person) WHERE id(p) = 'some-id' AND p.name IS NULL RETURN p"
