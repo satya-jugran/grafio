@@ -1083,7 +1083,10 @@ export class Semantic {
         return expr.elements.some(e => this._containsAggregate(e));
 
       case 'ListComprehension':
-        return this._containsAggregate(expr.list);
+        if (this._containsAggregate(expr.list)) return true;
+        if (expr.where && this._containsAggregate(expr.where)) return true;
+        if (expr.projection && this._containsAggregate(expr.projection)) return true;
+        return false;
 
       case 'Map':
         return Object.values(expr.props).some(e => this._containsAggregate(e));
@@ -1092,6 +1095,8 @@ export class Semantic {
         return expr.match.where ? this._containsAggregate(expr.match.where.expression) : false;
 
       case 'PatternComprehension':
+        if (expr.where && this._containsAggregate(expr.where)) return true;
+        if (expr.projection && this._containsAggregate(expr.projection)) return true;
         return false;
 
       case 'PatternExpr':
@@ -1103,7 +1108,7 @@ export class Semantic {
         return expr.branches.some(b => this._containsAggregate(b.when) || this._containsAggregate(b.then));
 
       case 'ListPredicate':
-        return this._containsAggregate(expr.list);
+        return this._containsAggregate(expr.list) || this._containsAggregate(expr.where);
 
       case 'Identifier':
       case 'Literal':
