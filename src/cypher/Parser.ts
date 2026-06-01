@@ -101,6 +101,7 @@ const enum Prec {
   COMPARISON = 4,
   ADD = 6,
   MUL = 7,
+  EXP = 8,
 }
 
 /**
@@ -109,6 +110,7 @@ const enum Prec {
  */
 const BINARY_PREC: Partial<Record<TokenKind, Prec>> = {
   [TokenKind.OR]: Prec.OR,
+  [TokenKind.XOR]: Prec.OR,
   [TokenKind.AND]: Prec.AND,
   [TokenKind.EQ]: Prec.COMPARISON,
   [TokenKind.NEQ]: Prec.COMPARISON,
@@ -117,10 +119,15 @@ const BINARY_PREC: Partial<Record<TokenKind, Prec>> = {
   [TokenKind.LTE]: Prec.COMPARISON,
   [TokenKind.GT]: Prec.COMPARISON,
   [TokenKind.GTE]: Prec.COMPARISON,
+  [TokenKind.STARTS]: Prec.COMPARISON,
+  [TokenKind.ENDS]: Prec.COMPARISON,
+  [TokenKind.CONTAINS]: Prec.COMPARISON,
   [TokenKind.PLUS]: Prec.ADD,
   [TokenKind.MINUS]: Prec.ADD,
   [TokenKind.STAR]: Prec.MUL,
   [TokenKind.SLASH]: Prec.MUL,
+  [TokenKind.PERCENT]: Prec.MUL,
+  [TokenKind.CARET]: Prec.EXP,
 };
 
 // ── Parser ────────────────────────────────────────────────────────
@@ -434,7 +441,7 @@ export class Parser {
 
     if (this._check(TokenKind.AS)) {
       this._advance();
-      alias = this._consume(TokenKind.IDENT, "Expected alias name after 'AS'").value;
+      alias = this._consumeIdentifier("Expected alias name after 'AS'").value;
     }
 
     return { kind: 'ReturnItem', expression, alias };
@@ -540,10 +547,10 @@ export class Parser {
       this._advance();
     }
     this._consume(TokenKind.DELETE, "Expected 'DELETE'");
-    const variables: string[] = [this._consume(TokenKind.IDENT, 'Expected variable name').value];
+    const variables: string[] = [this._consumeIdentifier('Expected variable name').value];
     while (this._check(TokenKind.COMMA)) {
       this._advance();
-      variables.push(this._consume(TokenKind.IDENT, 'Expected variable name').value);
+      variables.push(this._consumeIdentifier('Expected variable name').value);
     }
     return { kind: 'Delete', detach, variables };
   }
@@ -561,13 +568,13 @@ export class Parser {
 
   /** SET item: IDENT '.' IDENT '=' expression | IDENT '=' expression | IDENT '+=' expression */
   private _parseSetItem(): SetItem {
-    const varToken = this._consume(TokenKind.IDENT, 'Expected variable name in SET');
+    const varToken = this._consumeIdentifier('Expected variable name in SET');
     const variable: IdentifierExpr = { kind: 'Identifier', name: varToken.value };
 
     if (this._check(TokenKind.DOT)) {
       // IDENT '.' IDENT '=' expr
       this._advance();
-      const propToken = this._consume(TokenKind.IDENT, 'Expected property name');
+      const propToken = this._consumeIdentifier('Expected property name');
       this._consume(TokenKind.EQ, "Expected '=' in SET assignment");
       const value = this._parseExpression();
       return { kind: 'SetItem', variable, property: propToken.value, operator: '=', value };
@@ -604,18 +611,18 @@ export class Parser {
 
   /** REMOVE item: IDENT '.' IDENT or IDENT ':' IDENT (':' IDENT)* */
   private _parseRemoveItem(): RemoveItem {
-    const varToken = this._consume(TokenKind.IDENT, 'Expected variable name in REMOVE');
+    const varToken = this._consumeIdentifier('Expected variable name in REMOVE');
     const variable: IdentifierExpr = { kind: 'Identifier', name: varToken.value };
 
     if (this._check(TokenKind.DOT)) {
       this._advance(); // consume '.'
-      const propToken = this._consume(TokenKind.IDENT, 'Expected property name');
+      const propToken = this._consumeIdentifier('Expected property name');
       return { kind: 'RemoveItem', variable, property: propToken.value };
     } else if (this._check(TokenKind.COLON)) {
       const labels: string[] = [];
       do {
         this._advance(); // consume ':'
-        labels.push(this._consume(TokenKind.IDENT, 'Expected label name').value);
+        labels.push(this._consumeIdentifier('Expected label name').value);
       } while (this._check(TokenKind.COLON));
       return { kind: 'RemoveItem', variable, labels };
     } else {
@@ -636,7 +643,7 @@ export class Parser {
     if (this._check(TokenKind.STRING)) {
       name = this._consume(TokenKind.STRING, "Expected index name after 'INDEX'").value;
     } else {
-      const nameToken = this._consume(TokenKind.IDENT, "Expected index name after 'INDEX'");
+      const nameToken = this._consumeIdentifier("Expected index name after 'INDEX'");
       name = nameToken.value;
     }
 
@@ -664,9 +671,9 @@ export class Parser {
       // optional dash
       if (this._check(TokenKind.MINUS)) this._advance();
       this._consume(TokenKind.LBRACKET, "Expected '[' for edge pattern");
-      variable = this._consume(TokenKind.IDENT, "Expected variable name in edge pattern").value;
+      variable = this._consumeIdentifier("Expected variable name in edge pattern").value;
       this._consume(TokenKind.COLON, "Expected ':' after edge variable");
-      labelOrType = this._consume(TokenKind.IDENT, "Expected edge type name").value;
+      labelOrType = this._consumeIdentifier("Expected edge type name").value;
       this._consume(TokenKind.RBRACKET, "Expected ']'");
       // optional dash
       if (this._check(TokenKind.MINUS)) this._advance();
@@ -676,9 +683,9 @@ export class Parser {
     } else {
       // node pattern: (var:Label)
       this._consume(TokenKind.LPAREN, "Expected '(' for node pattern");
-      variable = this._consume(TokenKind.IDENT, "Expected variable name in FOR pattern").value;
+      variable = this._consumeIdentifier("Expected variable name in FOR pattern").value;
       this._consume(TokenKind.COLON, "Expected ':' after variable");
-      labelOrType = this._consume(TokenKind.IDENT, "Expected label name").value;
+      labelOrType = this._consumeIdentifier("Expected label name").value;
       this._consume(TokenKind.RPAREN, "Expected ')'");
       target = 'node';
     }
@@ -689,7 +696,7 @@ export class Parser {
 
     const propertyKeys: string[] = [];
     do {
-      const v = this._consume(TokenKind.IDENT, "Expected variable in ON property list").value;
+      const v = this._consumeIdentifier("Expected variable in ON property list").value;
       if (v !== variable) {
         const tok = this._peek(-1);
         throw new CypherSyntaxError(
@@ -699,7 +706,7 @@ export class Parser {
         );
       }
       this._consume(TokenKind.DOT, "Expected '.' after variable in ON property list");
-      const prop = this._consume(TokenKind.IDENT, "Expected property name").value;
+      const prop = this._consumeIdentifier("Expected property name").value;
       propertyKeys.push(prop);
     } while (this._check(TokenKind.COMMA) && this._advance());
     this._consume(TokenKind.RPAREN, "Expected ')' after ON property list");
@@ -730,7 +737,7 @@ export class Parser {
     if (this._check(TokenKind.STRING)) {
       name = this._consume(TokenKind.STRING, "Expected index name after 'INDEX'").value;
     } else {
-      name = this._consume(TokenKind.IDENT, "Expected index name after 'INDEX'").value;
+      name = this._consumeIdentifier("Expected index name after 'INDEX'").value;
     }
 
     if (name === '') {
@@ -762,7 +769,7 @@ export class Parser {
     if (this._check(TokenKind.INDEX)) {
       this._advance();
     } else {
-      const idxToken = this._consume(TokenKind.IDENT, "Expected 'INDEXES' after 'SHOW'");
+      const idxToken = this._consumeIdentifier("Expected 'INDEXES' after 'SHOW'");
       if (idxToken.value.toLowerCase() !== 'indexes') {
         throw new CypherSyntaxError(
           `Expected 'INDEXES' after 'SHOW', but found '${idxToken.value}'`,
@@ -802,7 +809,7 @@ export class Parser {
    */
   private _parsePatternPath(): PatternPath | NamedPath {
     // Check for named path: IDENT = (pattern)
-    if (this._check(TokenKind.IDENT) && this._peek(1).kind === TokenKind.EQ && this._peek(2).kind === TokenKind.LPAREN) {
+    if (this._isIdentifier(this._peek()) && this._peek(1).kind === TokenKind.EQ && this._peek(2).kind === TokenKind.LPAREN) {
       const name = this._advance().value; // consume IDENT
       this._advance(); // consume EQ
       const pattern = this._parsePlainPatternPath();
@@ -835,7 +842,7 @@ export class Parser {
 
     // Optional variable.
     let variable: string | undefined;
-    if (this._check(TokenKind.IDENT)) {
+    if (this._isIdentifier(this._peek())) {
       variable = this._advance().value;
     }
 
@@ -843,11 +850,11 @@ export class Parser {
     const labels: string[] = [];
     if (this._check(TokenKind.COLON)) {
       this._advance();
-      labels.push(this._consume(TokenKind.IDENT, 'Expected label name after :').value);
+      labels.push(this._consumeIdentifier('Expected label name after :').value);
 
       while (this._check(TokenKind.PIPE)) {
         this._advance();
-        labels.push(this._consume(TokenKind.IDENT, 'Expected label name after |').value);
+        labels.push(this._consumeIdentifier('Expected label name after |').value);
       }
     }
 
@@ -899,7 +906,7 @@ export class Parser {
 
     // Optional variable.
     let variable: string | undefined;
-    if (this._check(TokenKind.IDENT)) {
+    if (this._isIdentifier(this._peek())) {
       variable = this._advance().value;
     }
 
@@ -907,11 +914,11 @@ export class Parser {
     const types: string[] = [];
     if (this._check(TokenKind.COLON)) {
       this._advance();
-      types.push(this._consume(TokenKind.IDENT, 'Expected edge type after :').value);
+      types.push(this._consumeIdentifier('Expected edge type after :').value);
 
       while (this._check(TokenKind.PIPE)) {
         this._advance();
-        types.push(this._consume(TokenKind.IDENT, 'Expected edge type after |').value);
+        types.push(this._consumeIdentifier('Expected edge type after |').value);
       }
     }
 
@@ -982,7 +989,7 @@ export class Parser {
 
     if (!this._check(TokenKind.RBRACE)) {
       do {
-        const key = this._consume(TokenKind.IDENT, 'Expected property key').value;
+        const key = this._consumeIdentifier('Expected property key').value;
         this._consume(TokenKind.COLON, "Expected ':' after property key");
         props[key] = this._parsePropertyValue();
       } while (this._check(TokenKind.COMMA) && this._advance());
@@ -1083,10 +1090,14 @@ export class Parser {
       if (prec === undefined || prec < minPrec) break;
 
       this._advance();
-      const right = this._parseExpression(
-        // Left-associative: increase min precedence by 1.
-        prec + 1,
-      );
+
+      if (token.kind === TokenKind.STARTS || token.kind === TokenKind.ENDS) {
+        this._consume(TokenKind.WITH, `Expected 'WITH' after '${token.value}'`);
+      }
+
+      // Left-associative for most, Right-associative for EXP (^)
+      const nextPrec = token.kind === TokenKind.CARET ? prec : prec + 1;
+      const right = this._parseExpression(nextPrec);
       left = this._makeBinary(left, token.kind, right);
     }
 
@@ -1147,6 +1158,55 @@ export class Parser {
         this._advance();
         return { kind: 'Parameter', name: token.value };
 
+      case TokenKind.CASE: {
+        this._advance(); // consume CASE
+        
+        let expression: import('./ast/AstNode').Expression | undefined;
+        if (!this._check(TokenKind.WHEN)) {
+          expression = this._parseExpression();
+        }
+
+        const branches: Array<{ when: import('./ast/AstNode').Expression; then: import('./ast/AstNode').Expression }> = [];
+        do {
+          this._consume(TokenKind.WHEN, "Expected 'WHEN'");
+          const whenExpr = this._parseExpression();
+          this._consume(TokenKind.THEN, "Expected 'THEN'");
+          const thenExpr = this._parseExpression();
+          branches.push({ when: whenExpr, then: thenExpr });
+        } while (this._check(TokenKind.WHEN));
+
+        let elseExpr: import('./ast/AstNode').Expression | undefined;
+        if (this._check(TokenKind.ELSE)) {
+          this._advance();
+          elseExpr = this._parseExpression();
+        }
+
+        this._consume(TokenKind.END, "Expected 'END' to close CASE expression");
+        return { kind: 'Case', expression, branches, else: elseExpr } as import('./ast/AstNode').CaseExpr;
+      }
+
+      case TokenKind.ALL:
+      case TokenKind.ANY:
+      case TokenKind.NONE:
+      case TokenKind.SINGLE: {
+        const predicateKind = token.kind;
+        this._advance(); // consume ALL/ANY/NONE/SINGLE
+        this._consume(TokenKind.LPAREN, `Expected '(' after ${token.value}`);
+        const variable = this._consumeIdentifier("Expected variable name").value;
+        this._consume(TokenKind.IN, "Expected 'IN'");
+        const list = this._parseExpression();
+        this._consume(TokenKind.WHERE, "Expected 'WHERE'");
+        const where = this._parseExpression();
+        this._consume(TokenKind.RPAREN, "Expected ')'");
+        return {
+          kind: 'ListPredicate',
+          predicate: predicateKind === TokenKind.ALL ? 'ALL' : predicateKind === TokenKind.ANY ? 'ANY' : predicateKind === TokenKind.NONE ? 'NONE' : 'SINGLE',
+          variable,
+          list,
+          where
+        } as import('./ast/AstNode').ListPredicateExpr;
+      }
+
       case TokenKind.EXISTS: {
         this._advance();
         this._consume(TokenKind.LBRACE, "Expected '{' after EXISTS");
@@ -1166,28 +1226,7 @@ export class Parser {
         return { kind: 'ExistsSubquery', match };
       }
 
-      case TokenKind.IDENT: {
-        this._advance();
-
-        // Check for function call: ident(...)
-        if (this._check(TokenKind.LPAREN)) {
-          return this._parseFunctionCall(token.value);
-        }
-
-        let expr: Expression = { kind: 'Identifier', name: token.value };
-
-        // Chained property access: ident.prop1.prop2
-        // The property name may be a reserved keyword (e.g. `order`
-        // in `ch.order`).  Use _advance() instead of _consume(IDENT)
-        // so keyword tokens are accepted as property identifiers.
-        while (this._check(TokenKind.DOT)) {
-          this._advance();
-          const prop = this._advance().value;
-          expr = { kind: 'PropertyAccess', object: expr, property: prop };
-        }
-
-        return expr;
-      }
+      
 
       // Aggregate function tokens (COUNT, SUM, AVG, MIN, MAX, COLLECT)
       case TokenKind.COUNT:
@@ -1227,7 +1266,7 @@ export class Parser {
         this._advance();
 
         // Check for list comprehension: [IDENT IN ... ]
-        if (this._check(TokenKind.IDENT) && this._peek(1).kind === TokenKind.IN) {
+        if (this._isIdentifier(this._peek()) && this._peek(1).kind === TokenKind.IN) {
           const variable = this._advance().value; // consume IDENT
           this._advance(); // consume IN
           const list = this._parseExpression();
@@ -1289,7 +1328,7 @@ export class Parser {
 
         if (!this._check(TokenKind.RBRACE)) {
           do {
-            const key = this._consume(TokenKind.IDENT, 'Expected property key').value;
+            const key = this._consumeIdentifier('Expected property key').value;
             this._consume(TokenKind.COLON, "Expected ':' after property key");
             props[key] = this._parseExpression();
           } while (this._check(TokenKind.COMMA) && this._advance());
@@ -1300,6 +1339,26 @@ export class Parser {
       }
 
       default:
+        if (this._isIdentifier(token)) {
+          this._advance();
+
+          // Check for function call: ident(...)
+          if (this._check(TokenKind.LPAREN)) {
+            return this._parseFunctionCall(token.value);
+          }
+
+          let expr: Expression = { kind: 'Identifier', name: token.value };
+
+          // Chained property access: ident.prop1.prop2
+          while (this._check(TokenKind.DOT)) {
+            this._advance();
+            const prop = this._advance().value;
+            expr = { kind: 'PropertyAccess', object: expr, property: prop };
+          }
+
+          return expr;
+        }
+
         throw new CypherSyntaxError(
           `Unexpected token '${token.value}' in expression`,
           token.line,
@@ -1374,6 +1433,7 @@ export class Parser {
   private _makeBinary(left: Expression, opKind: TokenKind, right: Expression): BinaryExpr {
     const opMap: Record<string, BinaryExpr['op']> = {
       [TokenKind.OR]: 'OR',
+      [TokenKind.XOR]: 'XOR',
       [TokenKind.AND]: 'AND',
       [TokenKind.EQ]: '=',
       [TokenKind.NEQ]: '<>',
@@ -1382,10 +1442,15 @@ export class Parser {
       [TokenKind.LTE]: '<=',
       [TokenKind.GT]: '>',
       [TokenKind.GTE]: '>=',
+      [TokenKind.STARTS]: 'STARTS WITH',
+      [TokenKind.ENDS]: 'ENDS WITH',
+      [TokenKind.CONTAINS]: 'CONTAINS',
       [TokenKind.PLUS]: '+',
       [TokenKind.MINUS]: '-',
       [TokenKind.STAR]: '*',
       [TokenKind.SLASH]: '/',
+      [TokenKind.PERCENT]: '%',
+      [TokenKind.CARET]: '^',
     };
 
     return {
@@ -1397,6 +1462,23 @@ export class Parser {
   }
 
   // ── Token stream helpers ────────────────────────────────────────
+
+
+  private _isIdentifier(token: Token): boolean {
+    return token.kind === TokenKind.IDENT || /^[a-zA-Z_]\w*$/.test(token.value);
+  }
+
+  private _consumeIdentifier(message: string): Token {
+    const token = this._peek();
+    if (this._isIdentifier(token)) {
+      return this._advance();
+    }
+    throw new CypherSyntaxError(
+      `${message}, but found '${token.value}'`,
+      token.line,
+      token.col,
+    );
+  }
 
   /** Ensure the token stream is at EOF; throws if trailing tokens exist. */
   private _ensureAtEnd(context: string): void {

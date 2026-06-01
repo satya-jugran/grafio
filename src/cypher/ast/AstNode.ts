@@ -348,7 +348,9 @@ export type Expression =
   | ExistsSubqueryExpr
   | ListComprehensionExpr
   | PatternComprehensionExpr
-  | PatternExpr;
+  | PatternExpr
+  | CaseExpr
+  | ListPredicateExpr;
 
 // -- Literals --
 
@@ -382,7 +384,7 @@ export interface PropertyAccessExpr {
 
 // -- Binary expressions --
 
-export type BinaryOp = 'AND' | 'OR' | '=' | '<>' | '<' | '<=' | '>' | '>=' | '+' | '-' | '*' | '/' | '=~';
+export type BinaryOp = 'AND' | 'OR' | 'XOR' | '=' | '<>' | '<' | '<=' | '>' | '>=' | '+' | '-' | '*' | '/' | '%' | '^' | '=~' | 'STARTS WITH' | 'ENDS WITH' | 'CONTAINS';
 
 export interface BinaryExpr {
   kind: 'Binary';
@@ -482,4 +484,28 @@ export interface MapExpr {
   kind: 'Map';
   /** The properties of the map. */
   props: Record<string, Expression>;
+}
+
+// -- Control flow & List predicates --
+
+export interface CaseExpr {
+  kind: 'Case';
+  /** Optional base expression: CASE base WHEN ... */
+  expression?: Expression;
+  /** WHEN branches */
+  branches: Array<{ when: Expression; then: Expression }>;
+  /** Optional ELSE branch */
+  else?: Expression;
+}
+
+export interface ListPredicateExpr {
+  kind: 'ListPredicate';
+  /** The predicate type */
+  predicate: 'ALL' | 'ANY' | 'NONE' | 'SINGLE';
+  /** The bound variable name */
+  variable: string;
+  /** The list to evaluate against */
+  list: Expression;
+  /** The condition to evaluate for each element */
+  where: Expression;
 }

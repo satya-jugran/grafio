@@ -557,6 +557,26 @@ export class Semantic {
         return;
       }
 
+      case 'Case':
+        if (expr.expression) this._checkExpressionVars(expr.expression, clause, extraScope, restrictScope);
+        for (const branch of expr.branches) {
+          this._checkExpressionVars(branch.when, clause, extraScope, restrictScope);
+          this._checkExpressionVars(branch.then, clause, extraScope, restrictScope);
+        }
+        if (expr.else) this._checkExpressionVars(expr.else, clause, extraScope, restrictScope);
+        return;
+
+      case 'ListPredicate': {
+        this._checkExpressionVars(expr.list, clause, extraScope, restrictScope);
+        const localScope = new Set(restrictScope ? restrictScope.keys() : this._scope.keys());
+        if (extraScope) {
+          for (const v of extraScope.keys()) localScope.add(v);
+        }
+        localScope.add(expr.variable);
+        this._checkExpressionVars(expr.where, 'list predicate WHERE', undefined, localScope);
+        return;
+      }
+
       case 'Literal':
       case 'Parameter':
         // No variable references — safe.
@@ -707,6 +727,27 @@ export class Semantic {
         for (const seg of segments) {
           if (seg.variable) localAllowed.add(seg.variable);
         }
+        return;
+      }
+
+      case 'Case':
+        if (expr.expression) this._checkExpressionVarsWithAllowed(expr.expression, clause, allowed, extraScope);
+        for (const branch of expr.branches) {
+          this._checkExpressionVarsWithAllowed(branch.when, clause, allowed, extraScope);
+          this._checkExpressionVarsWithAllowed(branch.then, clause, allowed, extraScope);
+        }
+        if (expr.else) this._checkExpressionVarsWithAllowed(expr.else, clause, allowed, extraScope);
+        return;
+
+      case 'ListPredicate': {
+        this._checkExpressionVarsWithAllowed(expr.list, clause, allowed, extraScope);
+        const localAllowed = new Set(allowed);
+        if (extraScope) {
+          for (const v of extraScope.keys()) localAllowed.add(v);
+        }
+        for (const v of this._scope.keys()) localAllowed.add(v);
+        localAllowed.add(expr.variable);
+        this._checkExpressionVarsWithAllowed(expr.where, 'list predicate WHERE', localAllowed, undefined);
         return;
       }
 
@@ -983,6 +1024,25 @@ export class Semantic {
         return [];
       }
 
+      case 'Case': {
+        const unresolved = [];
+        if (expr.expression) unresolved.push(...this._collectUnresolvedPostAggIdentifiers(expr.expression, allowed));
+        for (const branch of expr.branches) {
+          unresolved.push(...this._collectUnresolvedPostAggIdentifiers(branch.when, allowed));
+          unresolved.push(...this._collectUnresolvedPostAggIdentifiers(branch.then, allowed));
+        }
+        if (expr.else) unresolved.push(...this._collectUnresolvedPostAggIdentifiers(expr.else, allowed));
+        return unresolved;
+      }
+
+      case 'ListPredicate': {
+        const unresolved = [...this._collectUnresolvedPostAggIdentifiers(expr.list, allowed)];
+        const localAllowed = new Set(allowed);
+        localAllowed.add(expr.variable);
+        unresolved.push(...this._collectUnresolvedPostAggIdentifiers(expr.where, localAllowed));
+        return unresolved;
+      }
+
       case 'Literal':
       case 'Parameter':
         return [];
@@ -1036,6 +1096,14 @@ export class Semantic {
 
       case 'PatternExpr':
         return false;
+
+      case 'Case':
+        if (expr.expression && this._containsAggregate(expr.expression)) return true;
+        if (expr.else && this._containsAggregate(expr.else)) return true;
+        return expr.branches.some(b => this._containsAggregate(b.when) || this._containsAggregate(b.then));
+
+      case 'ListPredicate':
+        return this._containsAggregate(expr.list);
 
       case 'Identifier':
       case 'Literal':
@@ -1501,6 +1569,15 @@ export class Semantic {
       case 'PatternExpr':
         // PatternExpr contains a pattern path only — no sub-expressions to walk.
         return false;
+
+      case 'Case':
+        if (expr.expression && this._expressionReferencesAny(expr.expression, varNames)) return true;
+        if (expr.else && this._expressionReferencesAny(expr.else, varNames)) return true;
+        return expr.branches.some(b => this._expressionReferencesAny(b.when, varNames) || this._expressionReferencesAny(b.then, varNames));
+
+      case 'ListPredicate':
+        if (this._expressionReferencesAny(expr.list, varNames)) return true;
+        return this._expressionReferencesAny(expr.where, varNames);
 
       case 'Literal':
       case 'Parameter':

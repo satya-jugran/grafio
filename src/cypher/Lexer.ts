@@ -47,6 +47,18 @@ const KEYWORDS: Record<string, TokenKind> = {
   desc: TokenKind.DESC,
   union: TokenKind.UNION,
   all: TokenKind.ALL,
+  any: TokenKind.ANY,
+  none: TokenKind.NONE,
+  single: TokenKind.SINGLE,
+  case: TokenKind.CASE,
+  when: TokenKind.WHEN,
+  then: TokenKind.THEN,
+  else: TokenKind.ELSE,
+  end: TokenKind.END,
+  xor: TokenKind.XOR,
+  starts: TokenKind.STARTS,
+  ends: TokenKind.ENDS,
+  contains: TokenKind.CONTAINS,
   // Future keywords
   create: TokenKind.CREATE,
   merge: TokenKind.MERGE,
@@ -147,6 +159,8 @@ export class Lexer {
         case '|': tokens.push(this._makeToken(TokenKind.PIPE, '|')); this._advance(); continue;
         case '*': tokens.push(this._makeToken(TokenKind.STAR, '*')); this._advance(); continue;
         case '/': tokens.push(this._makeToken(TokenKind.SLASH, '/')); this._advance(); continue;
+        case '%': tokens.push(this._makeToken(TokenKind.PERCENT, '%')); this._advance(); continue;
+        case '^': tokens.push(this._makeToken(TokenKind.CARET, '^')); this._advance(); continue;
       }
 
       // ── Two-character tokens (arrows, comparisons) ──────────────

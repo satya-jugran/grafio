@@ -35,6 +35,18 @@ export const enum TokenKind {
   DESC = 'DESC',
   UNION = 'UNION',
   ALL = 'ALL',
+  ANY = 'ANY',
+  NONE = 'NONE',
+  SINGLE = 'SINGLE',
+  CASE = 'CASE',
+  WHEN = 'WHEN',
+  THEN = 'THEN',
+  ELSE = 'ELSE',
+  END = 'END',
+  XOR = 'XOR',
+  STARTS = 'STARTS',
+  ENDS = 'ENDS',
+  CONTAINS = 'CONTAINS',
 
   // ── Future keywords (tokenised, gated in CypherEngine) ──────────
   CREATE = 'CREATE',
@@ -96,6 +108,8 @@ export const enum TokenKind {
   MINUS = 'MINUS',
   STAR = 'STAR',
   SLASH = 'SLASH',
+  PERCENT = 'PERCENT',
+  CARET = 'CARET',
 
   /** End-of-input sentinel. */
   EOF = 'EOF',

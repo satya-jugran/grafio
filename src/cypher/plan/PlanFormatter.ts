@@ -229,6 +229,31 @@ export class PlanFormatter {
         return 'ExistsSubqueryStep [' + step.resultVariable + '] { ' + subStepsDesc + ' }';
       }
 
+      case 'VerifyNodeStep': {
+        const types = step.types?.length ? ':' + step.types.join('|') : (step.label ? ':' + step.label : '');
+        const filters = step.propertyFilters?.map(f => this.getPropertyFilterDescription(f)).join(', ') || '';
+        return 'VerifyNodeStep ' + step.variable + types + (filters ? ' { ' + filters + ' }' : '');
+      }
+
+      case 'PatternComprehensionStep': {
+        const subStepsDesc = step.subPlan.map(s => this.describeStepForMermaid(s, _params)).join(', ');
+        return 'PatternComprehensionStep [' + step.resultVariable + '] { ' + subStepsDesc + ' | ' + this.getExpressionDescription(step.projection) + ' }';
+      }
+
+      case 'PatternExprStep': {
+        const subStepsDesc = step.subPlan.map(s => this.describeStepForMermaid(s, _params)).join(', ');
+        return 'PatternExprStep [' + step.resultVariable + '=(' + step.pathVariables.join(', ') + ')] { ' + subStepsDesc + ' }';
+      }
+
+      case 'UnionStep': {
+        const desc = step.plans.map((p, i) => {
+           const subStepsDesc = p.steps.map(s => this.describeStepForMermaid(s, _params)).join(', ');
+           const unionType = i > 0 ? (step.all[i - 1] ? ' UNION ALL ' : ' UNION ') : '';
+           return unionType + '{ ' + subStepsDesc + ' }';
+        }).join('');
+        return 'UnionStep ' + desc;
+      }
+
       default:
         return (step as PlanStep).kind;
     }
@@ -340,6 +365,31 @@ export class PlanFormatter {
         return 'ExistsSubqueryStep [' + step.resultVariable + '] { ' + subStepsDesc + ' }';
       }
 
+      case 'VerifyNodeStep': {
+        const types = step.types?.length ? ':' + step.types.join('|') : (step.label ? ':' + step.label : '');
+        const filters = step.propertyFilters?.map(f => this.getPropertyFilterDescription(f)).join(', ') || '';
+        return 'VerifyNodeStep [' + step.variable + types + (filters ? ' { ' + filters + ' }' : '') + ']';
+      }
+
+      case 'PatternComprehensionStep': {
+        const subStepsDesc = step.subPlan.map(s => this.describeStep(s, params)).join(', ');
+        return 'PatternComprehensionStep [' + step.resultVariable + '] { ' + subStepsDesc + ' | ' + this.getExpressionDescription(step.projection) + ' }';
+      }
+
+      case 'PatternExprStep': {
+        const subStepsDesc = step.subPlan.map(s => this.describeStep(s, params)).join(', ');
+        return 'PatternExprStep [' + step.resultVariable + '=(' + step.pathVariables.join(', ') + ')] { ' + subStepsDesc + ' }';
+      }
+
+      case 'UnionStep': {
+        const desc = step.plans.map((p, i) => {
+           const subStepsDesc = p.steps.map(s => this.describeStep(s, params)).join(', ');
+           const unionType = i > 0 ? (step.all[i - 1] ? ' UNION ALL ' : ' UNION ') : '';
+           return unionType + '{ ' + subStepsDesc + ' }';
+        }).join('');
+        return 'UnionStep ' + desc;
+      }
+
       default:
         return (step as PlanStep).kind;
     }
@@ -380,8 +430,6 @@ export class PlanFormatter {
       case 'FunctionCall':
         const args = expr.args.map(a => this.getExpressionDescription(a)).join(', ');
         return expr.name + '(' + (expr.distinct ? 'DISTINCT ' : '') + args + ')';
-      case 'ExistsSubquery':
-        return 'EXISTS { ... }';
       case 'Map':
         return '{' + Object.entries(expr.props).map(([k, v]) => k + ': ' + this.getExpressionDescription(v)).join(', ') + '}';
       case 'ListComprehension': {
@@ -405,6 +453,23 @@ export class PlanFormatter {
       }
       case 'PatternExpr':
         return '(pattern)';
+      case 'Case': {
+        let desc = 'CASE';
+        if (expr.expression) desc += ' ' + this.getExpressionDescription(expr.expression);
+        for (const branch of expr.branches) {
+          desc += ' WHEN ' + this.getExpressionDescription(branch.when) + ' THEN ' + this.getExpressionDescription(branch.then);
+        }
+        if (expr.else) desc += ' ELSE ' + this.getExpressionDescription(expr.else);
+        desc += ' END';
+        return desc;
+      }
+      case 'ListPredicate': {
+        let desc = expr.predicate;
+        desc += '(' + expr.variable + ' IN ' + this.getExpressionDescription(expr.list) + ' WHERE ' + this.getExpressionDescription(expr.where) + ')';
+        return desc;
+      }
+      default:
+        return expr.kind;
     }
   }
 

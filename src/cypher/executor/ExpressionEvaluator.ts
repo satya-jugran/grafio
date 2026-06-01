@@ -159,6 +159,51 @@ export class ExpressionEvaluator {
         return expr.elements.map((e) => this.evaluate(e, row, params));
       }
 
+      case 'Case': {
+        const caseExpr = expr as import('../ast/AstNode').CaseExpr;
+        let baseValue: unknown = undefined;
+        if (caseExpr.expression) {
+          baseValue = this.evaluate(caseExpr.expression, row, params);
+        }
+
+        for (const branch of caseExpr.branches) {
+          const whenVal = this.evaluate(branch.when, row, params);
+          const isMatch = baseValue !== undefined ? this.eq(baseValue, whenVal) : Boolean(whenVal);
+          if (isMatch) {
+            return this.evaluate(branch.then, row, params);
+          }
+        }
+
+        if (caseExpr.else) {
+          return this.evaluate(caseExpr.else, row, params);
+        }
+        return null;
+      }
+
+      case 'ListPredicate': {
+        const predExpr = expr as import('../ast/AstNode').ListPredicateExpr;
+        const listValue = this.evaluate(predExpr.list, row, params);
+        if (listValue === null || listValue === undefined) return null;
+        if (!Array.isArray(listValue)) {
+          throw new TypeMismatchError(`List predicate requires a list, got ${typeof listValue}`);
+        }
+
+        let matchCount = 0;
+        for (const item of listValue) {
+          const newRow = new Map(row);
+          newRow.set(predExpr.variable, item);
+          const condition = this.evaluate(predExpr.where, newRow, params);
+          if (condition) matchCount++;
+        }
+
+        switch (predExpr.predicate) {
+          case 'ALL': return matchCount === listValue.length;
+          case 'ANY': return matchCount > 0;
+          case 'NONE': return matchCount === 0;
+          case 'SINGLE': return matchCount === 1;
+        }
+      }
+
       case 'Map': {
         const result: Record<string, unknown> = {};
         for (const [k, v] of Object.entries(expr.props)) {
@@ -347,6 +392,8 @@ export class ExpressionEvaluator {
         return Boolean(left) && Boolean(right);
       case 'OR':
         return Boolean(left) || Boolean(right);
+      case 'XOR':
+        return Boolean(left) !== Boolean(right);
       case '=':
         return this.eq(left, right);
       case '<>':
@@ -386,6 +433,24 @@ export class ExpressionEvaluator {
         if ((right as number) === 0)
           throw new CypherRuntimeError('Division by zero');
         return (left as number) / (right as number);
+      case '%':
+        if ((right as number) === 0)
+          throw new CypherRuntimeError('Modulo by zero');
+        return (left as number) % (right as number);
+      case '^':
+        return Math.pow(left as number, right as number);
+      case 'STARTS WITH':
+        if (left == null || right == null) return null;
+        if (typeof left !== 'string' || typeof right !== 'string') return false;
+        return left.startsWith(right);
+      case 'ENDS WITH':
+        if (left == null || right == null) return null;
+        if (typeof left !== 'string' || typeof right !== 'string') return false;
+        return left.endsWith(right);
+      case 'CONTAINS':
+        if (left == null || right == null) return null;
+        if (typeof left !== 'string' || typeof right !== 'string') return false;
+        return left.includes(right);
       default:
         throw new CypherRuntimeError(`Unknown operator: ${op}`);
     }
