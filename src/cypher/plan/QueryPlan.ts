@@ -67,7 +67,8 @@ export type PlanStep =
   | UnionStep
   | ExistsSubqueryStep
   | PatternComprehensionStep
-  | PatternExprStep;
+  | PatternExprStep
+  | UnwindStep;
 
 // ── Individual step types ─────────────────────────────────────────
 
@@ -245,6 +246,15 @@ export interface LimitStep {
   skipExpr?: Expression;
   /** Expression evaluating to max rows (undefined if no LIMIT clause). */
   limitExpr?: Expression;
+}
+
+/**
+ * Unwind a list into individual rows.
+ */
+export interface UnwindStep {
+  kind: 'UnwindStep';
+  expression: Expression;
+  variable: string;
 }
 
 /**

@@ -75,7 +75,7 @@ export class Planner {
       }];
       
       if (ast.orderBy) {
-        steps.push(this._projPlanner.planSort({ orderBy: ast.orderBy, return: ast.queries[0].return } as any));
+        steps.push(this._projPlanner.planSort({ orderBy: ast.orderBy, return: ast.queries[0].return } as any, true));
       }
       if (ast.skip || ast.limit) {
         steps.push(this._projPlanner.planLimit({ skip: ast.skip, limit: ast.limit } as any));
@@ -90,7 +90,7 @@ export class Planner {
       for (const segment of ast.segments) {
         const fakeAst: QueryAst = {
           kind: 'Query',
-          matches: segment.matches,
+          readingClauses: segment.readingClauses,
           create: segment.create,
           merge: segment.merge,
           set: segment.set,
@@ -132,7 +132,7 @@ export class Planner {
         
         const fakeAst: QueryAst = {
           kind: 'Query',
-          matches: [expr.match],
+          readingClauses: [expr.match],
           return: { kind: 'Return', distinct: false, items: [] },
           segments: [],
         };
@@ -199,7 +199,7 @@ export class Planner {
         
         const fakeAst: QueryAst = {
           kind: 'Query',
-          matches: [],
+          readingClauses: [],
           return: { kind: 'Return', distinct: false, items: [] },
           segments: [],
         };
@@ -230,7 +230,7 @@ export class Planner {
         
         const fakeAst: QueryAst = {
           kind: 'Query',
-          matches: [],
+          readingClauses: [],
           return: { kind: 'Return', distinct: false, items: [] },
           segments: [],
         };
@@ -315,9 +315,19 @@ export class Planner {
 
   private async _planSegment(ast: QueryAst, steps: PlanStep[], knownVars: Set<string>, isWithStar: boolean): Promise<void> {
 
-    // ── Process each MATCH / OPTIONAL MATCH clause ─────────────────
-    for (const matchClause of ast.matches) {
-      await this._planMatchClause(matchClause, steps, knownVars, ast);
+    // ── Process each MATCH / OPTIONAL MATCH / UNWIND clause ─────────────────
+    for (const clause of ast.readingClauses) {
+      if (clause.kind === 'Match') {
+        await this._planMatchClause(clause, steps, knownVars, ast);
+      } else if (clause.kind === 'Unwind') {
+        const expr = await this._extractSubqueries(clause.expression, steps, knownVars);
+        steps.push({
+          kind: 'UnwindStep',
+          expression: expr,
+          variable: clause.alias,
+        });
+        knownVars.add(clause.alias);
+      }
     }
 
     // ── NEW: Emit CREATE steps ─────────────────────────────────────
@@ -676,8 +686,10 @@ export class Planner {
     };
 
     // Check MATCH patterns
-    for (const matchClause of ast.matches) {
-      if (!res) checkPatterns(matchClause.patterns);
+    for (const clause of ast.readingClauses) {
+      if (clause.kind === 'Match') {
+        if (!res) checkPatterns(clause.patterns);
+      }
     }
 
     // If still unresolved, check CREATE patterns

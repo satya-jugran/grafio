@@ -174,6 +174,8 @@ export class Executor {
         return this._pipelineExecutor.executeSort(step, rows, params);
       case 'LimitStep':
         return this._pipelineExecutor.executeLimit(step, rows, params);
+      case 'UnwindStep':
+        return this._pipelineExecutor.executeUnwind(step, rows, params);
 
       case 'AggregateStep':
         return this._aggregateExecutor.executeAggregate(step, rows, params, transaction);
