@@ -249,7 +249,7 @@ export interface LimitStep {
 }
 
 /**
- * Unwind a list into individual rows.
+ * Unwind an expression into rows (null/undefined → 0 rows; list → N rows; scalar → 1 row).
  */
 export interface UnwindStep {
   kind: 'UnwindStep';
