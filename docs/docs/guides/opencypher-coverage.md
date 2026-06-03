@@ -23,6 +23,7 @@ Grafio's Cypher engine supports a comprehensive subset of openCypher.
 - `REMOVE`
 - `MATCH`
 - `RETURN`
+- `UNWIND`
 
 ## Additionally supported
 - `CREATE INDEX`
@@ -31,7 +32,6 @@ Grafio's Cypher engine supports a comprehensive subset of openCypher.
 
 ## Not supported
 
-- `UNWIND`
 - `CALL`
 - `YIELD`
 
@@ -42,6 +42,6 @@ Grafio aims to comply strictly with the official openCypher grammar. You can ref
 
 ## Coverage
 
-Grafio currently covers **84%** of standard openCypher clauses (16 out of 19 core standard clauses are fully supported).
+Grafio currently covers **89%** of standard openCypher clauses (17 out of 19 core standard clauses are fully supported).
 
 <CoverageChart />

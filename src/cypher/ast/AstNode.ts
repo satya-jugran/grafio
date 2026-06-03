@@ -122,8 +122,8 @@ export interface QueryAst {
   kind: 'Query';
   /** Pipeline segments (WITH-delimited). Empty array for non-WITH queries. */
   segments: QuerySegment[];
-  /** Reading clauses: MATCH and/or OPTIONAL MATCH, each with its own WHERE. */
-  matches: MatchClause[];
+  /** Reading clauses: MATCH, OPTIONAL MATCH, or UNWIND. */
+  readingClauses: ReadingClause[];
   /** Optional CREATE clause. */
   create?: CreateClause;
   /** Optional MERGE clauses. */
@@ -166,6 +166,8 @@ export type Statement = QueryAst | UnionAst;
 
 export type MatchPattern = PatternPath | NamedPath;
 
+export type ReadingClause = MatchClause | UnwindClause;
+
 export interface MatchClause {
   kind: 'Match';
   /** Whether this is an OPTIONAL MATCH (left-outer-join semantics). */
@@ -174,6 +176,14 @@ export interface MatchClause {
   patterns: MatchPattern[];
   /** Optional WHERE sub-clause attached to this MATCH. */
   where?: WhereClause;
+}
+
+export interface UnwindClause {
+  kind: 'Unwind';
+  /** The list expression to unwind. */
+  expression: Expression;
+  /** The variable name bound to the unwound elements. */
+  alias: string;
 }
 
 export interface WhereClause {
@@ -219,8 +229,8 @@ export interface WithClause {
 /** A single pipeline stage in a multi-segment query, delimited by WITH. */
 export interface QuerySegment {
   kind: 'QuerySegment';
-  /** Reading clauses: MATCH and/or OPTIONAL MATCH, each with its own WHERE. */
-  matches: MatchClause[];
+  /** Reading clauses: MATCH, OPTIONAL MATCH, or UNWIND. */
+  readingClauses: ReadingClause[];
   /** Optional CREATE clause. */
   create?: CreateClause;
   /** Optional MERGE clauses. */

@@ -49,6 +49,8 @@ import { Token, TokenKind } from './Token';
 import { CypherSyntaxError } from './errors';
 import {
   QueryAst,
+  ReadingClause,
+  UnwindClause,
   MatchClause,
   CreateClause,
   SetClause,
@@ -245,8 +247,8 @@ export class Parser {
     const segments: import('./ast/AstNode').QuerySegment[] = [];
 
     while (!this._isAtEnd() && !this._check(TokenKind.UNION)) {
-      // Parse a sequence of MATCH / OPTIONAL MATCH clauses (each with embedded WHERE).
-      const matches = this._parseMatchClauses();
+      // Parse a sequence of MATCH / OPTIONAL MATCH / UNWIND clauses (each with embedded WHERE if applicable).
+      const readingClauses = this._parseReadingClauses();
 
       // Write clauses (each optional, in positional order).
       // If CREATE is followed by INDEX, this is DDL — skip and let _ensureAtEnd reject the hybrid query.
@@ -268,7 +270,7 @@ export class Parser {
       if (this._check(TokenKind.WITH)) {
         segments.push({
           kind: 'QuerySegment',
-          matches,
+          readingClauses,
           create,
           merge: merge.length > 0 ? merge : undefined,
           set,
@@ -297,7 +299,7 @@ export class Parser {
 
         const isEmpty =
           segments.length === 0 &&
-          matches.length === 0 &&
+          readingClauses.length === 0 &&
           create === undefined &&
           merge.length === 0 &&
           set === undefined &&
@@ -316,7 +318,7 @@ export class Parser {
         return {
           kind: 'Query',
           segments,
-          matches,
+          readingClauses,
           create,
           merge: merge.length > 0 ? merge : undefined,
           set,
@@ -336,20 +338,31 @@ export class Parser {
   // ── Clause parsers ──────────────────────────────────────────────
 
   /**
-   * Parse a sequence of MATCH / OPTIONAL MATCH clauses.
+   * Parse a sequence of MATCH / OPTIONAL MATCH / UNWIND clauses.
    * Each MATCH clause consumes a trailing WHERE if present.
    */
-  private _parseMatchClauses(): MatchClause[] {
-    const matches: MatchClause[] = [];
-    while (this._check(TokenKind.MATCH) || this._check(TokenKind.OPTIONAL)) {
+  private _parseReadingClauses(): ReadingClause[] {
+    const readingClauses: ReadingClause[] = [];
+    while (this._check(TokenKind.MATCH) || this._check(TokenKind.OPTIONAL) || this._check(TokenKind.UNWIND)) {
       if (this._check(TokenKind.OPTIONAL)) {
         this._advance(); // consume OPTIONAL
-        matches.push(this._parseMatchClause(true));
-      } else {
-        matches.push(this._parseMatchClause(false));
+        readingClauses.push(this._parseMatchClause(true));
+      } else if (this._check(TokenKind.MATCH)) {
+        readingClauses.push(this._parseMatchClause(false));
+      } else if (this._check(TokenKind.UNWIND)) {
+        readingClauses.push(this._parseUnwindClause());
       }
     }
-    return matches;
+    return readingClauses;
+  }
+
+  /** UNWIND expression AS identifier */
+  private _parseUnwindClause(): UnwindClause {
+    this._consume(TokenKind.UNWIND, "Expected 'UNWIND'");
+    const expression = this._parseExpression();
+    this._consume(TokenKind.AS, "Expected 'AS' after UNWIND expression");
+    const alias = this._consumeIdentifier("Expected variable name after 'AS'").value;
+    return { kind: 'Unwind', expression, alias };
   }
 
   /** [OPTIONAL] MATCH patternPath (',' patternPath)* [WHERE expression] */
@@ -716,7 +729,7 @@ export class Parser {
     return {
       kind: 'Query',
       segments: [],
-      matches: [],
+      readingClauses: [],
       createIndex: {
         kind: 'CreateIndex',
         name,
@@ -753,7 +766,7 @@ export class Parser {
     return {
       kind: 'Query',
       segments: [],
-      matches: [],
+      readingClauses: [],
       dropIndex: {
         kind: 'DropIndex',
         name: name,
@@ -783,7 +796,7 @@ export class Parser {
     return {
       kind: 'Query',
       segments: [],
-      matches: [],
+      readingClauses: [],
       showIndexes: { kind: 'ShowIndexes' },
       return: {
         kind: 'Return',

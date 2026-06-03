@@ -189,9 +189,13 @@ export class Semantic {
 
     for (const segment of ast.segments) {
       // 1. Resolve MATCH scopes (adds to this._scope)
-      for (const matchClause of segment.matches) {
-        for (let i = 0; i < matchClause.patterns.length; i++) {
-          this._collectPatternScope(matchClause.patterns[i], i);
+      for (const clause of segment.readingClauses) {
+        if (clause.kind === 'Match') {
+          for (let i = 0; i < clause.patterns.length; i++) {
+            this._collectPatternScope(clause.patterns[i], i);
+          }
+        } else if (clause.kind === 'Unwind') {
+          this._addBinding(clause.alias, -1, 'node');
         }
       }
 
@@ -205,7 +209,7 @@ export class Semantic {
       // Construct a temporary QueryAst for this segment to reuse existing passes
       const fakeAst: QueryAst = {
         kind: 'Query',
-        matches: segment.matches,
+        readingClauses: segment.readingClauses,
         create: segment.create,
         merge: segment.merge,
         set: segment.set,
@@ -258,9 +262,13 @@ export class Semantic {
     }
 
     // Now process the final segment (the remaining fields in QueryAst)
-    for (const matchClause of ast.matches) {
-      for (let i = 0; i < matchClause.patterns.length; i++) {
-        this._collectPatternScope(matchClause.patterns[i], i);
+    for (const clause of ast.readingClauses) {
+      if (clause.kind === 'Match') {
+        for (let i = 0; i < clause.patterns.length; i++) {
+          this._collectPatternScope(clause.patterns[i], i);
+        }
+      } else if (clause.kind === 'Unwind') {
+        this._addBinding(clause.alias, -1, 'node');
       }
     }
 
@@ -295,9 +303,13 @@ export class Semantic {
   private _resolveScopes(ast: QueryAst): QueryAst {
     this._scope = new Map();
 
-    for (const matchClause of ast.matches) {
-      for (let i = 0; i < matchClause.patterns.length; i++) {
-        this._collectPatternScope(matchClause.patterns[i], i);
+    for (const clause of ast.readingClauses) {
+      if (clause.kind === 'Match') {
+        for (let i = 0; i < clause.patterns.length; i++) {
+          this._collectPatternScope(clause.patterns[i], i);
+        }
+      } else if (clause.kind === 'Unwind') {
+        this._addBinding(clause.alias, -1, 'node');
       }
     }
 
@@ -363,17 +375,21 @@ export class Semantic {
     // cannot reference variables introduced by a later MATCH/OPTIONAL MATCH.
     const incrementalScope = new Set<string>();
 
-    for (const matchClause of ast.matches) {
-      for (const pattern of matchClause.patterns) {
-        const segments = getPatternSegments(pattern);
-        if (pattern.kind === 'NamedPath' && pattern.name) incrementalScope.add(pattern.name);
-        for (const seg of segments) {
-          if (seg.variable) incrementalScope.add(seg.variable);
+    for (const clause of ast.readingClauses) {
+      if (clause.kind === 'Match') {
+        for (const pattern of clause.patterns) {
+          const segments = getPatternSegments(pattern);
+          if (pattern.kind === 'NamedPath' && pattern.name) incrementalScope.add(pattern.name);
+          for (const seg of segments) {
+            if (seg.variable) incrementalScope.add(seg.variable);
+          }
         }
-      }
-
-      if (matchClause.where) {
-        this._checkExpressionVars(matchClause.where.expression, 'WHERE', extraScope, incrementalScope);
+        if (clause.where) {
+          this._checkExpressionVars(clause.where.expression, 'WHERE', extraScope, incrementalScope);
+        }
+      } else if (clause.kind === 'Unwind') {
+        this._checkExpressionVars(clause.expression, 'UNWIND', extraScope, incrementalScope);
+        incrementalScope.add(clause.alias);
       }
     }
 
@@ -395,18 +411,14 @@ export class Semantic {
 
     // Check ORDER BY items.
     if (ast.orderBy) {
-      // When aggregates are present, ORDER BY can reference aggregate
-      // aliases and group-by key aliases that aren't in the MATCH scope.
       const hasAggregate = ast.return.items.some(
         item => this._containsAggregate(item.expression),
       );
 
-      const allowedAliases = hasAggregate
-        ? this._collectReturnAliases(ast)
-        : undefined;
+      const allowedAliases = this._collectReturnAliases(ast);
 
       for (const item of ast.orderBy.items) {
-        if (allowedAliases) {
+        if (hasAggregate) {
           this._checkExpressionVarsWithAllowed(
             item.expression,
             'ORDER BY',
@@ -414,7 +426,13 @@ export class Semantic {
             extraScope,
           );
         } else {
-          this._checkExpressionVars(item.expression, 'ORDER BY', extraScope);
+          const mergedExtraScope = new Set<string>();
+          if (extraScope) {
+            for (const key of extraScope.keys()) mergedExtraScope.add(key);
+          }
+          for (const key of allowedAliases) mergedExtraScope.add(key);
+
+          this._checkExpressionVars(item.expression, 'ORDER BY', mergedExtraScope);
         }
       }
     }
@@ -767,8 +785,10 @@ export class Semantic {
    * @throws {CypherSemanticError} on the first duplicate.
    */
   private _checkDuplicateBindings(ast: QueryAst): QueryAst {
-    for (const matchClause of ast.matches) {
-      this._checkDuplicateBindingsForPatterns(matchClause.patterns);
+    for (const clause of ast.readingClauses) {
+      if (clause.kind === 'Match') {
+        this._checkDuplicateBindingsForPatterns(clause.patterns);
+      }
     }
     return ast;
   }
@@ -865,11 +885,13 @@ export class Semantic {
    */
   private _checkAggregateGrouping(ast: QueryAst): QueryAst {
     // Rule 1: No aggregate functions in WHERE.
-    for (const matchClause of ast.matches) {
-      if (matchClause.where && this._containsAggregate(matchClause.where.expression)) {
-        throw new CypherSemanticError(
-          'Aggregate functions cannot be used in WHERE clauses',
-        );
+    for (const clause of ast.readingClauses) {
+      if (clause.kind === 'Match') {
+        if (clause.where && this._containsAggregate(clause.where.expression)) {
+          throw new CypherSemanticError(
+            'Aggregate functions cannot be used in WHERE clauses',
+          );
+        }
       }
     }
 

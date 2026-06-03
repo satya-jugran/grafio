@@ -60,9 +60,43 @@ export class ProjectionPlanner {
 
   // ── Sorting ─────────────────────────────────────────────────────
 
-  planSort(ast: QueryAst): SortStep {
+  planSort(ast: QueryAst, isPostProjection: boolean = false): SortStep {
+    const hasAggs = this.hasAggregates(ast);
+    const returnAliases = new Map<string, Expression>();
+    
+    if (!hasAggs && !isPostProjection && ast.return) {
+      for (const item of ast.return.items) {
+        if (item.alias) {
+          returnAliases.set(item.alias, item.expression);
+        }
+      }
+    }
+
+    const rewrite = (e: Expression): Expression => {
+      if (hasAggs || isPostProjection) return e;
+      if (e.kind === 'Identifier' && returnAliases.has(e.name)) {
+        return returnAliases.get(e.name)!;
+      }
+      switch (e.kind) {
+        case 'Binary': return { ...e, left: rewrite(e.left), right: rewrite(e.right) };
+        case 'Unary': return { ...e, operand: rewrite(e.operand) };
+        case 'FunctionCall': return { ...e, args: e.args.map(rewrite) };
+        case 'PropertyAccess': return { ...e, object: rewrite(e.object) };
+        case 'In': return { ...e, expression: rewrite(e.expression), list: rewrite(e.list) };
+        case 'IsNull': return { ...e, expression: rewrite(e.expression) };
+        case 'List': return { ...e, elements: e.elements.map(rewrite) };
+        case 'Case': return { 
+          ...e, 
+          expression: e.expression ? rewrite(e.expression) : undefined,
+          branches: e.branches.map(b => ({ when: rewrite(b.when), then: rewrite(b.then) })),
+          else: e.else ? rewrite(e.else) : undefined 
+        };
+        default: return e;
+      }
+    };
+
     const items: SortSpec[] = ast.orderBy!.items.map((item) => ({
-      expression: item.expression,
+      expression: rewrite(item.expression),
       direction: item.direction,
     }));
     return { kind: 'SortStep', items };
@@ -404,7 +438,7 @@ export class ProjectionPlanner {
  *    no WHERE, aggregates reference only the edge variable
  */
   private _isEdgeSimplePlan(steps: PlanStep[], ast: QueryAst): boolean {
-    if (ast.matches.some(m => m.where)) return false;
+    if (ast.readingClauses.some(c => c.kind === 'Match' && c.where)) return false;
 
     let nodeScanCount = 0;
     let edgeExpandCount = 0;
@@ -436,7 +470,7 @@ export class ProjectionPlanner {
   }
 
   private _isSimplePlan(steps: PlanStep[], ast: QueryAst): boolean {
-    if (ast.matches.some(m => m.where)) return false;
+    if (ast.readingClauses.some(c => c.kind === 'Match' && c.where)) return false;
 
     let nodeScanCount = 0;
     for (const step of steps) {

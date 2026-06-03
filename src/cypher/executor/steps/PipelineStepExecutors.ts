@@ -133,6 +133,35 @@ export class PipelineStepExecutor {
     const end = limitVal === Infinity ? undefined : start + limitVal;
     return rows.slice(start, end);
   }
+
+  // ── UnwindStep ─────────────────────────────────────────────────
+
+  async executeUnwind(
+    step: import('../../plan/QueryPlan').UnwindStep,
+    rows: Row[],
+    params: Record<string, unknown>,
+  ): Promise<Row[]> {
+    return parallelMap(rows, (chunk) => {
+      const result: Row[] = [];
+      for (const row of chunk) {
+        const val = this._evaluator.evaluate(step.expression, row, params);
+        if (val === null || val === undefined) {
+          continue;
+        } else if (Array.isArray(val)) {
+          for (const item of val) {
+            const newRow = new Map(row);
+            newRow.set(step.variable, item);
+            result.push(newRow);
+          }
+        } else {
+          const newRow = new Map(row);
+          newRow.set(step.variable, val);
+          result.push(newRow);
+        }
+      }
+      return Promise.resolve(result);
+    }, this._maxDegreeOfParallelism);
+  }
 }
 
 /**
