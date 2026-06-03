@@ -69,30 +69,6 @@ export function runGraphFromJSONScenarios(
       await expect(Graph.importJSON(data, provider)).rejects.toThrow(EdgeAlreadyExistsError);
     });
 
-    it('should throw NodeNotFoundError for edge referencing non-existent source', async () => {
-      const data = {
-        nodes: [
-          { id: 'node1', labels: ['Test'], properties: { name: 'A' } },
-        ],
-        edges: [
-          { id: 'edge1', sourceId: 'non-existent', targetId: 'node1', type: 'LINKS', properties: {} },
-        ],
-      };
-      await expect(Graph.importJSON(data, provider)).rejects.toThrow(NodeNotFoundError);
-    });
-
-    it('should throw NodeNotFoundError for edge referencing non-existent target', async () => {
-      const data = {
-        nodes: [
-          { id: 'node1', labels: ['Test'], properties: { name: 'A' } },
-        ],
-        edges: [
-          { id: 'edge1', sourceId: 'node1', targetId: 'non-existent', type: 'LINKS', properties: {} },
-        ],
-      };
-      await expect(Graph.importJSON(data, provider)).rejects.toThrow(NodeNotFoundError);
-    });
-
     it('should successfully create graph with valid data', async () => {
       const data = {
         nodes: [

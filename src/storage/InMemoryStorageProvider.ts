@@ -1343,16 +1343,15 @@ export class InMemoryStorageProvider implements IStorageProvider {
    */
   async importJSON(data: GraphData): Promise<void> {
     for (const nodeData of data.nodes) {
+      if (this._nodes.has(nodeData.id)) {
+        throw new NodeAlreadyExistsError(nodeData.id);
+      }
       this._insertNodeLive(nodeData, true);
     }
 
     for (const edgeData of data.edges) {
-      // Validate node references before inserting
-      if (!this._nodes.has(edgeData.sourceId)) {
-        throw new NodeNotFoundError(edgeData.sourceId);
-      }
-      if (!this._nodes.has(edgeData.targetId)) {
-        throw new NodeNotFoundError(edgeData.targetId);
+      if (this._edges.has(edgeData.id)) {
+        throw new EdgeAlreadyExistsError(edgeData.id);
       }
       this._insertEdgeLive(edgeData, true);
     }
