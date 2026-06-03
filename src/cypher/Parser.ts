@@ -341,8 +341,8 @@ export class Parser {
    * Parse a sequence of MATCH / OPTIONAL MATCH / UNWIND clauses.
    * Each MATCH clause consumes a trailing WHERE if present.
    */
-  private _parseReadingClauses(): import('./ast/AstNode').ReadingClause[] {
-    const readingClauses: import('./ast/AstNode').ReadingClause[] = [];
+  private _parseReadingClauses(): ReadingClause[] {
+    const readingClauses: ReadingClause[] = [];
     while (this._check(TokenKind.MATCH) || this._check(TokenKind.OPTIONAL) || this._check(TokenKind.UNWIND)) {
       if (this._check(TokenKind.OPTIONAL)) {
         this._advance(); // consume OPTIONAL
