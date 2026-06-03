@@ -254,6 +254,9 @@ export class PlanFormatter {
         return 'UnionStep ' + desc;
       }
 
+      case 'UnwindStep':
+        return 'UnwindStep ' + step.variable + ' IN ' + this.getExpressionDescription(step.expression);
+
       default:
         return (step as PlanStep).kind;
     }
@@ -389,6 +392,9 @@ export class PlanFormatter {
         }).join('');
         return 'UnionStep ' + desc;
       }
+
+      case 'UnwindStep':
+        return 'UnwindStep [' + step.variable + ' IN ' + this.getExpressionDescription(step.expression) + ']';
 
       default:
         return (step as PlanStep).kind;
