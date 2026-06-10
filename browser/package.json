@@ -1,0 +1,61 @@
+{
+  "name": "@grafio/browser",
+  "version": "7.15.1",
+  "publishConfig": {
+    "access": "public"
+  },
+  "description": "Browser-optimized bundle of Grafio graph database with Cypher support",
+  "main": "./dist/grafio.browser.js",
+  "module": "./dist/grafio.browser.mjs",
+  "types": "./types/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/grafio.browser.mjs",
+      "require": "./dist/grafio.browser.js",
+      "types": "./types/index.d.ts"
+    }
+  },
+  "files": [
+    "dist/",
+    "types/",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "node scripts/build.js",
+    "build:types": "tsc --emitDeclarationOnly",
+    "build:all": "npm run build && npm run build:types",
+    "clean": "rimraf dist"
+  },
+  "keywords": [
+    "graph",
+    "database",
+    "cypher",
+    "browser",
+    "in-memory",
+    "typescript",
+    "client-side",
+    "graph-database"
+  ],
+  "author": "Satya Jugran",
+  "license": "GPL-3.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/satya-jugran/grafio",
+    "directory": "browser"
+  },
+  "funding": "https://ko-fi.com/satyajugran",
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "rimraf": "^5.0.0",
+    "typescript": "~5.6.2"
+  },
+  "peerDependencies": {},
+  "browserslist": [
+    ">0.5%",
+    "not dead",
+    "not op_mini all",
+    "last 3 chrome versions",
+    "last 3 firefox versions",
+    "last 5 safari versions"
+  ]
+}

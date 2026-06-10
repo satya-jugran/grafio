@@ -192,7 +192,7 @@ export class CypherEngine {
    *
    * @param query  - Cypher query string.
    * @param params - Named parameter map (`$key` → value).
-   * @param format - Output format: 'json' | 'ascii' | 'mermaid' (default: 'json').
+   * @param format - Output format: 'json' | 'text' | 'mermaid' (default: 'json').
    * @returns A formatted string representation of the query execution plan.
    * @throws {CypherSyntaxError}       on tokenisation / parse errors.
    * @throws {CypherNotSupportedError} on unsupported clauses (UNWIND, etc.).

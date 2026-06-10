@@ -890,7 +890,7 @@ describe('CypherEngine Integration', () => {
       expect(plan).toContain('"NodeScanStep"');
     });
 
-    it('returns ascii format', async () => {
+    it('returns text format', async () => {
       await buildSocialGraph(graph);
       const plan = await engine.getQueryPlan('MATCH (p:Person) RETURN p', {}, 'text');
       expect(plan).toContain('NodeScanStep');

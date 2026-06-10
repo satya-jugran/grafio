@@ -3,7 +3,7 @@
  *
  * Converts a {@link QueryPlan} into different output formats:
  * - 'json'    → JSON string representation
- * - 'text'   → ASCII tree diagram
+ * - 'text'   → TEXT tree diagram
  * - 'mermaid' → Mermaid flowchart syntax
  *
  * @module cypher/plan/PlanFormatter
@@ -66,7 +66,7 @@ export class PlanFormatter {
   }
 
   /**
-   * Convert plan to ASCII tree diagram.
+   * Convert plan to TEXT tree diagram.
    */
   private toText(plan: QueryPlan, executionStats?: PlanExecutionStats, params?: Record<string, unknown>): string {
     const lines: string[] = [];

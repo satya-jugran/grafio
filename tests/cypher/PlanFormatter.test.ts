@@ -31,7 +31,7 @@ describe('PlanFormatter', () => {
       expect(result).toContain('"variable": "p"');
     });
 
-    it('returns ascii format', () => {
+    it('returns text format', () => {
       const plan: QueryPlan = {
         steps: [
           {

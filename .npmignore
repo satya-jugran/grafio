@@ -36,3 +36,7 @@ coverage/
 
 # Lock files (optional, some prefer to keep package-lock.json)
 package-lock.json
+
+# Browser bundle (separate npm package: @grafio/browser)
+browser/
+scripts/

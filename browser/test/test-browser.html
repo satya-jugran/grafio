@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Grafio Browser Bundle — Test Page</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      background: #0f1117;
+      color: #e0e0e0;
+      padding: 2rem;
+      max-width: 900px;
+      margin: 0 auto;
+    }
+    h1 { color: #4fc3f7; margin-bottom: 0.5rem; font-size: 1.5rem; }
+    .subtitle { color: #888; margin-bottom: 1.5rem; font-size: 0.9rem; }
+    .test { 
+      background: #1a1d27;
+      border: 1px solid #2a2d3a;
+      border-radius: 8px;
+      padding: 1rem 1.2rem;
+      margin-bottom: 0.8rem;
+      font-family: 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+      font-size: 0.85rem;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .pass { border-left: 4px solid #4caf50; }
+    .fail { border-left: 4px solid #f44336; background: #1a1215; }
+    .pass::before { content: '✅ '; }
+    .fail::before { content: '❌ '; }
+    .summary {
+      margin-top: 1.5rem;
+      padding: 1rem 1.2rem;
+      border-radius: 8px;
+      font-weight: bold;
+      font-size: 1rem;
+    }
+    .summary.all-pass { background: #1b3a1b; color: #66bb6a; border: 1px solid #2e7d32; }
+    .summary.has-fail { background: #3a1b1b; color: #ef5350; border: 1px solid #c62828; }
+    #results { margin-top: 1rem; }
+  </style>
+</head>
+<body>
+  <h1>Grafio Browser Bundle — Test Page</h1>
+  <p class="subtitle">Verifies that grafio.browser.js works correctly in the browser</p>
+  <div id="results"></div>
+
+  <script src="../dist/grafio.browser.js"></script>
+  <script>
+    const results = document.getElementById('results');
+    let passed = 0;
+    let failed = 0;
+
+    function test(name, fn) {
+      return fn().then(() => {
+        passed++;
+        const div = document.createElement('div');
+        div.className = 'test pass';
+        div.textContent = name;
+        results.appendChild(div);
+      }).catch(err => {
+        failed++;
+        const div = document.createElement('div');
+        div.className = 'test fail';
+        div.textContent = `${name}\n\n${err.message}\n${err.stack || ''}`;
+        results.appendChild(div);
+      });
+    }
+
+    function assert(condition, message) {
+      if (!condition) throw new Error(message || 'Assertion failed');
+    }
+
+    function assertEqual(actual, expected, message) {
+      if (actual !== expected) {
+        throw new Error(message || `Expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
+      }
+    }
+
+    async function runTests() {
+      // ── Test 1: Module exports exist ────────────────────────────
+      await test('Module exports: Graph, Node, Edge, CypherEngine exist', async () => {
+        assert(typeof Grafio.Graph === 'function', 'Graph not found');
+        assert(typeof Grafio.Node === 'function', 'Node not found');
+        assert(typeof Grafio.Edge === 'function', 'Edge not found');
+        assert(typeof Grafio.CypherEngine === 'function', 'CypherEngine not found');
+        assert(typeof Grafio.InMemoryStorageProvider === 'function', 'InMemoryStorageProvider not found');
+        assert(typeof Grafio.PlanFormatter === 'function', 'PlanFormatter not found');
+      });
+
+      // ── Test 2: Basic graph creation ────────────────────────────
+      await test('Graph creation and node/edge operations', async () => {
+        const graph = new Grafio.Graph();
+        const alice = await graph.addNode('Person', { name: 'Alice', age: 30 });
+        const bob = await graph.addNode('Person', { name: 'Bob', age: 25 });
+        assert(alice.id, 'Alice should have an id');
+        assert(bob.id, 'Bob should have an id');
+        assertEqual(alice.labels[0], 'Person');
+        assertEqual(alice.properties.name, 'Alice');
+
+        const edge = await graph.addEdge(alice.id, bob.id, 'KNOWS', { since: 2020 });
+        assert(edge.id, 'Edge should have an id');
+        assertEqual(edge.type, 'KNOWS');
+        assertEqual(edge.sourceId, alice.id);
+        assertEqual(edge.targetId, bob.id);
+      });
+
+      // ── Test 3: Cypher READ query ───────────────────────────────
+      await test('Cypher MATCH query returns correct results', async () => {
+        const graph = new Grafio.Graph();
+        await graph.addNode('Person', { name: 'Alice' });
+        await graph.addNode('Person', { name: 'Bob' });
+        await graph.addNode('City', { name: 'London' });
+
+        const engine = new Grafio.CypherEngine(graph);
+        const result = await engine.execute('MATCH (p:Person) RETURN p');
+        
+        assertEqual(result.columns.length, 1);
+        assertEqual(result.rows.length, 2);
+        assert(result.summary.queryTimeMs >= 0, 'Should have query time');
+      });
+
+      // ── Test 4: Cypher query with parameters ────────────────────
+      await test('Cypher parameterized query', async () => {
+        const graph = new Grafio.Graph();
+        await graph.addNode('Person', { name: 'Alice', age: 30 });
+        await graph.addNode('Person', { name: 'Bob', age: 25 });
+
+        const engine = new Grafio.CypherEngine(graph);
+        const result = await engine.execute(
+          'MATCH (p:Person) WHERE p.name = $name RETURN p',
+          { name: 'Alice' }
+        );
+        
+        assertEqual(result.rows.length, 1);
+        const person = result.rows[0].p;
+        assert(person.properties.name === 'Alice', `Expected Alice, got ${person.properties.name}`);
+      });
+
+      // ── Test 5: Execution plan ──────────────────────────────────
+      await test('Query plan generation (text format)', async () => {
+        const graph = new Grafio.Graph();
+        await graph.addNode('Person', { name: 'Alice' });
+
+        const engine = new Grafio.CypherEngine(graph);
+        const plan = await engine.getQueryPlan('MATCH (p:Person) RETURN p', {}, 'text');
+        
+        assert(typeof plan === 'string', 'Plan should be a string');
+        assert(plan.length > 0, 'Plan should not be empty');
+      });
+
+      // ── Test 6: Cypher CREATE query (write) ─────────────────────
+      await test('Cypher CREATE query modifies graph', async () => {
+        const graph = new Grafio.Graph();
+        const engine = new Grafio.CypherEngine(graph);
+        
+        const result = await engine.execute('CREATE (n:City {name: "London", population: 9000000}) RETURN n');
+        assertEqual(result.summary.nodesCreated, 1);
+        
+        // Verify the node was actually added to the graph
+        const nodes = await graph.getNodes({ filter: { types: ['City'] } });
+        assertEqual(nodes.length, 1);
+        assertEqual(nodes[0].properties.name, 'London');
+      });
+
+      // ── Test 7: Write query + JSON export sync ──────────────────
+      await test('Write query updates graph state, exportJSON reflects changes', async () => {
+        const graph = new Grafio.Graph();
+        await graph.addNode('Person', { name: 'Alice' });
+        
+        // Initial export
+        const json1 = await graph.exportJSON();
+        assertEqual(json1.nodes.length, 1);
+        
+        // Execute write query
+        const engine = new Grafio.CypherEngine(graph);
+        await engine.execute('CREATE (n:Person {name: "Bob"})');
+        
+        // Export should now reflect the new state
+        const json2 = await graph.exportJSON();
+        assertEqual(json2.nodes.length, 2);
+        
+        const names = json2.nodes.map(n => n.properties.name).sort();
+        assertEqual(names[0], 'Alice');
+        assertEqual(names[1], 'Bob');
+      });
+
+      // ── Test 8: Graph.importJSON / exportJSON round-trip ─────────
+      await test('Graph JSON import/export round-trip', async () => {
+        const graph1 = new Grafio.Graph();
+        await graph1.addNode('Person', { name: 'Alice' });
+        await graph1.addNode('Person', { name: 'Bob' });
+        const alice = await graph1.getNode(Array.from(await graph1.getNodes()).find(n => n.properties.name === 'Alice')?.id);
+        const bob = await graph1.getNode(Array.from(await graph1.getNodes()).find(n => n.properties.name === 'Bob')?.id);
+        await graph1.addEdge(alice.id, bob.id, 'KNOWS');
+
+        const json = await graph1.exportJSON();
+        assertEqual(json.nodes.length, 2);
+        assertEqual(json.edges.length, 1);
+
+        const graph2 = await Grafio.Graph.importJSON(json);
+        const json2 = await graph2.exportJSON();
+        assertEqual(json2.nodes.length, 2);
+        assertEqual(json2.edges.length, 1);
+      });
+
+      // ── Test 9: Error classes ───────────────────────────────────
+      await test('Error classes are available and throwable', async () => {
+        assert(typeof Grafio.CypherSyntaxError === 'function');
+        assert(typeof Grafio.CypherSemanticError === 'function');
+        assert(typeof Grafio.CypherRuntimeError === 'function');
+        assert(typeof Grafio.NodeNotFoundError === 'function');
+        assert(typeof Grafio.InvalidGraphDataError === 'function');
+        
+        // Throw and catch a CypherSyntaxError
+        const graph = new Grafio.Graph();
+        const engine = new Grafio.CypherEngine(graph);
+        try {
+          await engine.execute('INVALID SYNTAX ???');
+          assert(false, 'Should have thrown');
+        } catch (e) {
+          assert(e instanceof Grafio.CypherSyntaxError, `Expected CypherSyntaxError, got ${e.constructor.name}`);
+        }
+      });
+
+      // ── Test 10: GraphToMermaid ─────────────────────────────────
+      await test('GraphToMermaid converts graph to mermaid syntax', async () => {
+        const graph = new Grafio.Graph();
+        await graph.addNode('Person', { name: 'Alice' });
+        await graph.addNode('Person', { name: 'Bob' });
+        const alice = (await graph.getNodes())[0];
+        const bob = (await graph.getNodes())[1];
+        await graph.addEdge(alice.id, bob.id, 'KNOWS');
+
+        const converter = await Grafio.GraphToMermaid.fromGraph(graph);
+        const mermaid = converter.toString();
+        
+        assert(typeof mermaid === 'string', 'Mermaid should be a string');
+        assert(mermaid.includes('graph') || mermaid.includes('flowchart'), `Should contain graph/flowchart directive: ${mermaid}`);
+      });
+
+      // ── Summary ─────────────────────────────────────────────────
+      const summary = document.createElement('div');
+      summary.className = `summary ${failed === 0 ? 'all-pass' : 'has-fail'}`;
+      summary.textContent = failed === 0
+        ? `🎉 All ${passed} tests passed! Browser bundle works correctly.`
+        : `⚠️ ${passed} passed, ${failed} failed out of ${passed + failed} tests.`;
+      results.appendChild(summary);
+
+      console.log(failed === 0 ? 'All tests passed!' : `${failed} tests failed`);
+    }
+
+    runTests();
+  </script>
+</body>
+</html>

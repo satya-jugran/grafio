@@ -140,6 +140,7 @@ export class Graph {
 
   /**
    * Adds a new node to the graph.
+   * @deprecated Use `CypherEngine.execute('CREATE (n:Label {prop: $val})')` instead.
    * @param labels - One or more node labels (e.g., "Course" or ["Person", "Employee"])
    * @param properties - Optional JSON properties
    * @param transaction - Optional transaction to use for this operation
@@ -151,6 +152,7 @@ export class Graph {
 
   /**
    * Removes a node from the graph.
+   * @deprecated Use `CypherEngine.execute('MATCH (n) WHERE id(n) = $id DETACH DELETE n')` instead.
    * @param id - Id of the node to remove
    * @param cascade - If true, also removes all incident edges (default: false)
    * @param transaction - Optional transaction to use for this operation
@@ -189,6 +191,7 @@ export class Graph {
 
   /**
    * Adds a new directed edge to the graph.
+   * @deprecated Use `CypherEngine.execute('MATCH (a),(b) WHERE id(a)=$src AND id(b)=$tgt CREATE (a)-[:TYPE]->(b)')` instead.
    * @param sourceId - Id of the source node
    * @param targetId - Id of the target node
    * @param type - The relationship type
@@ -208,6 +211,7 @@ export class Graph {
 
   /**
    * Removes an edge from the graph.
+   * @deprecated Use `CypherEngine.execute('MATCH ()-[r]->() WHERE id(r) = $id DELETE r')` instead.
    * @param id - Id of the edge to remove
    * @param transaction - Optional transaction to use for this operation
    * @returns true if the edge was removed, false if it didn't exist
@@ -294,6 +298,7 @@ export class Graph {
 
   /**
    * Removes all nodes and edges from the graph.
+   * @deprecated Use `CypherEngine.execute('MATCH (n) DETACH DELETE n')` instead.
    */
   async clear(): Promise<void> {
     return this._index.clear();
@@ -305,6 +310,7 @@ export class Graph {
 
   /**
    * Adds a property to a node. Fails if the property key already exists.
+   * @deprecated Use `CypherEngine.execute('MATCH (n) WHERE id(n)=$id SET n.key = $val')` instead.
    * @param nodeId - The id of the node
    * @param key - The property key to add
    * @param value - The property value (must be a primitive)
@@ -315,6 +321,7 @@ export class Graph {
 
   /**
    * Updates an existing property on a node. Fails if the property doesn't exist.
+   * @deprecated Use `CypherEngine.execute('MATCH (n) WHERE id(n)=$id SET n.key = $val')` instead.
    * @param nodeId - The id of the node
    * @param key - The property key to update
    * @param value - The new value (must be a primitive)
@@ -325,6 +332,7 @@ export class Graph {
 
   /**
    * Deletes a property from a node.
+   * @deprecated Use `CypherEngine.execute('MATCH (n) WHERE id(n)=$id REMOVE n.key')` instead.
    * @param nodeId - The id of the node
    * @param key - The property key to delete
    */
@@ -334,6 +342,7 @@ export class Graph {
 
   /**
    * Clears all properties from a node.
+   * @deprecated Use `CypherEngine.execute('MATCH (n) WHERE id(n)=$id SET n = {}')` instead.
    * @param nodeId - The id of the node
    */
   async clearNodeProperties(nodeId: string, transaction?: GraphTransaction): Promise<void> {
@@ -342,6 +351,7 @@ export class Graph {
 
   /**
    * Removes labels from a node.
+   * @deprecated Use `CypherEngine.execute('MATCH (n) WHERE id(n)=$id REMOVE n:Label')` instead.
    * @param nodeId - The id of the node
    * @param labels - The labels to remove
    * @param transaction - Optional transaction to use for this operation
@@ -356,6 +366,7 @@ export class Graph {
 
   /**
    * Adds a property to an edge. Fails if the property key already exists.
+   * @deprecated Use `CypherEngine.execute('MATCH ()-[r]->() WHERE id(r)=$id SET r.key = $val')` instead.
    * @param edgeId - The id of the edge
    * @param key - The property key to add
    * @param value - The property value (must be a primitive)
@@ -366,6 +377,7 @@ export class Graph {
 
   /**
    * Updates an existing property on an edge. Fails if the property doesn't exist.
+   * @deprecated Use `CypherEngine.execute('MATCH ()-[r]->() WHERE id(r)=$id SET r.key = $val')` instead.
    * @param edgeId - The id of the edge
    * @param key - The property key to update
    * @param value - The new value (must be a primitive)
@@ -376,6 +388,7 @@ export class Graph {
 
   /**
    * Deletes a property from an edge.
+   * @deprecated Use `CypherEngine.execute('MATCH ()-[r]->() WHERE id(r)=$id REMOVE r.key')` instead.
    * @param edgeId - The id of the edge
    * @param key - The property key to delete
    */
@@ -385,6 +398,7 @@ export class Graph {
 
   /**
    * Clears all properties from an edge.
+   * @deprecated Use `CypherEngine.execute('MATCH ()-[r]->() WHERE id(r)=$id SET r = {}')` instead.
    * @param edgeId - The id of the edge
    */
   async clearEdgeProperties(edgeId: string, transaction?: GraphTransaction): Promise<void> {
@@ -394,7 +408,7 @@ export class Graph {
   /**
    * Creates an index on one or more node or edge properties.
    * Supports both simple indexes (single property) and compound indexes (multiple properties).
-   *
+   * @deprecated Use `CypherEngine.execute('CREATE INDEX name FOR (n:Label) ON (n.prop)')` instead.
    * @param name - Unique name for the index
    * @param target - Either 'node' or 'edge'
    * @param propertyKeys - Array of property names to index
@@ -427,7 +441,7 @@ export class Graph {
 
   /**
    * Deletes an index by its name.
-   *
+   * @deprecated Use `CypherEngine.execute('DROP INDEX name')` instead.
    * @param name - The name of the index to delete
    * @throws Error if the index does not exist
    */
