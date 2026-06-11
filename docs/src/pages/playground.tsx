@@ -31,8 +31,10 @@ function VisualizerComponent({
   const visualizerRef = useRef<any>(null);
 
   useEffect(() => {
+    let isMounted = true;
     if (isBrowser && containerRef.current) {
       import('@grafio/visualizer').then(({ CypherVisualizer }) => {
+        if (!isMounted) return;
         visualizerRef.current = new CypherVisualizer(containerRef.current!, { 
           mode, 
           showArrows: true,
@@ -47,6 +49,7 @@ function VisualizerComponent({
       });
       
       return () => {
+        isMounted = false;
         if (visualizerRef.current) {
           visualizerRef.current.destroy();
           visualizerRef.current = null;
