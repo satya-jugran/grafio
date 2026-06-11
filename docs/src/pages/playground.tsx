@@ -117,7 +117,6 @@ export default function Playground() {
   };
 
   const handleInitializeGraph = async () => {
-    if (!graph) return;
     try {
       console.log("Initializing graph with data:", dataInput);
       const parsedData = JSON.parse(dataInput);
