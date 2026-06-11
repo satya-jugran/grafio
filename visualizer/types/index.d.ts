@@ -24,6 +24,7 @@ export declare class CypherVisualizer {
     render(cypherResult: any): void;
     private applyDataAndZoom;
     private extractGraphData;
+    private escapeHtml;
     private getNodeLabel;
     private getLinkLabel;
 }

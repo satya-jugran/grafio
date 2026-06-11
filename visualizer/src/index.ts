@@ -300,27 +300,39 @@ export class CypherVisualizer {
     };
   }
 
+  private escapeHtml(unsafe: string): string {
+    if (typeof unsafe !== 'string') return String(unsafe);
+    return unsafe
+         .replace(/&/g, "&amp;")
+         .replace(/</g, "&lt;")
+         .replace(/>/g, "&gt;")
+         .replace(/"/g, "&quot;")
+         .replace(/'/g, "&#039;");
+  }
+
   private getNodeLabel(node: any): string {
-    if (!this.options.showHoverData) return node.label || node.id;
-    const label = node.label || node.id;
+    const rawLabel = String(node.label || node.id || '');
+    if (!this.options.showHoverData) return this.escapeHtml(rawLabel);
+    
     const props = node.data?.properties || {};
     const hasProps = Object.keys(props).length > 0;
     
     return `<div style="padding: 2px;">
-      <strong style="color: #ffffff;">${label}</strong>
-      ${hasProps ? `<pre style="margin: 4px 0 0 0; padding: 6px; font-size: 0.85em; background: #2d3748; color: #e2e8f0; border: 1px solid #4a5568; border-radius: 4px;">${JSON.stringify(props, null, 2)}</pre>` : ''}
+      <strong style="color: #ffffff;">${this.escapeHtml(rawLabel)}</strong>
+      ${hasProps ? `<pre style="margin: 4px 0 0 0; padding: 6px; font-size: 0.85em; background: #2d3748; color: #e2e8f0; border: 1px solid #4a5568; border-radius: 4px;">${this.escapeHtml(JSON.stringify(props, null, 2))}</pre>` : ''}
     </div>`;
   }
 
   private getLinkLabel(link: any): string {
-    if (!this.options.showHoverData) return link.name || '';
-    const name = link.name || '';
+    const rawName = String(link.name || '');
+    if (!this.options.showHoverData) return this.escapeHtml(rawName);
+    
     const props = link.data?.properties || {};
     const hasProps = Object.keys(props).length > 0;
     
     return `<div style="padding: 2px;">
-      <strong style="color: #ffffff;">${name}</strong>
-      ${hasProps ? `<pre style="margin: 4px 0 0 0; padding: 6px; font-size: 0.85em; background: #2d3748; color: #e2e8f0; border: 1px solid #4a5568; border-radius: 4px;">${JSON.stringify(props, null, 2)}</pre>` : ''}
+      <strong style="color: #ffffff;">${this.escapeHtml(rawName)}</strong>
+      ${hasProps ? `<pre style="margin: 4px 0 0 0; padding: 6px; font-size: 0.85em; background: #2d3748; color: #e2e8f0; border: 1px solid #4a5568; border-radius: 4px;">${this.escapeHtml(JSON.stringify(props, null, 2))}</pre>` : ''}
     </div>`;
   }
 }
