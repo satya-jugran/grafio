@@ -1,0 +1,1388 @@
+import { Dataset } from './types';
+
+export const educationDataset: Dataset = {
+  id: 'education',
+  name: 'Education Curriculum',
+  description: 'A detailed education graph containing courses, chapters, sections, exams, and authors.',
+  data: {
+      "nodes": [
+            {
+                  "id": "python-course",
+                  "labels": [
+                        "Course"
+                  ],
+                  "properties": {
+                        "name": "Python",
+                        "duration": 40
+                  }
+            },
+            {
+                  "id": "nodejs-course",
+                  "labels": [
+                        "Course"
+                  ],
+                  "properties": {
+                        "name": "NodeJS",
+                        "duration": 35
+                  }
+            },
+            {
+                  "id": "author-john",
+                  "labels": [
+                        "Author"
+                  ],
+                  "properties": {
+                        "name": "John Doe"
+                  }
+            },
+            {
+                  "id": "author-jane",
+                  "labels": [
+                        "Author"
+                  ],
+                  "properties": {
+                        "name": "Jane Smith"
+                  }
+            },
+            {
+                  "id": "author-bob",
+                  "labels": [
+                        "Author"
+                  ],
+                  "properties": {
+                        "name": "Bob Wilson"
+                  }
+            },
+            {
+                  "id": "author-alice",
+                  "labels": [
+                        "Author"
+                  ],
+                  "properties": {
+                        "name": "Alice Brown"
+                  }
+            },
+            {
+                  "id": "publisher-o Reilly",
+                  "labels": [
+                        "Publisher"
+                  ],
+                  "properties": {
+                        "name": "O'Reilly Media"
+                  }
+            },
+            {
+                  "id": "python-ch1",
+                  "labels": [
+                        "Chapter"
+                  ],
+                  "properties": {
+                        "name": "Python Basics",
+                        "order": 1
+                  }
+            },
+            {
+                  "id": "python-ch2",
+                  "labels": [
+                        "Chapter"
+                  ],
+                  "properties": {
+                        "name": "Control Flow",
+                        "order": 2
+                  }
+            },
+            {
+                  "id": "python-ch3",
+                  "labels": [
+                        "Chapter"
+                  ],
+                  "properties": {
+                        "name": "Functions",
+                        "order": 3
+                  }
+            },
+            {
+                  "id": "python-ch4",
+                  "labels": [
+                        "Chapter"
+                  ],
+                  "properties": {
+                        "name": "Data Structures",
+                        "order": 4
+                  }
+            },
+            {
+                  "id": "python-ch5",
+                  "labels": [
+                        "Chapter"
+                  ],
+                  "properties": {
+                        "name": "OOP",
+                        "order": 5
+                  }
+            },
+            {
+                  "id": "python-ch6",
+                  "labels": [
+                        "Chapter"
+                  ],
+                  "properties": {
+                        "name": "Modules",
+                        "order": 6
+                  }
+            },
+            {
+                  "id": "nodejs-ch1",
+                  "labels": [
+                        "Chapter"
+                  ],
+                  "properties": {
+                        "name": "NodeJS Intro",
+                        "order": 1
+                  }
+            },
+            {
+                  "id": "nodejs-ch2",
+                  "labels": [
+                        "Chapter"
+                  ],
+                  "properties": {
+                        "name": "Express Basics",
+                        "order": 2
+                  }
+            },
+            {
+                  "id": "nodejs-ch3",
+                  "labels": [
+                        "Chapter"
+                  ],
+                  "properties": {
+                        "name": "Middleware",
+                        "order": 3
+                  }
+            },
+            {
+                  "id": "nodejs-ch4",
+                  "labels": [
+                        "Chapter"
+                  ],
+                  "properties": {
+                        "name": "REST APIs",
+                        "order": 4
+                  }
+            },
+            {
+                  "id": "nodejs-ch5",
+                  "labels": [
+                        "Chapter"
+                  ],
+                  "properties": {
+                        "name": "Databases",
+                        "order": 5
+                  }
+            },
+            {
+                  "id": "nodejs-ch6",
+                  "labels": [
+                        "Chapter"
+                  ],
+                  "properties": {
+                        "name": "Authentication",
+                        "order": 6
+                  }
+            },
+            {
+                  "id": "nodejs-ch7",
+                  "labels": [
+                        "Chapter"
+                  ],
+                  "properties": {
+                        "name": "Testing",
+                        "order": 7
+                  }
+            },
+            {
+                  "id": "python-ch1-s1",
+                  "labels": [
+                        "Section"
+                  ],
+                  "properties": {
+                        "name": "Variables",
+                        "duration": 15
+                  }
+            },
+            {
+                  "id": "python-ch1-s2",
+                  "labels": [
+                        "Section"
+                  ],
+                  "properties": {
+                        "name": "Data Types",
+                        "duration": 20
+                  }
+            },
+            {
+                  "id": "python-ch1-s3",
+                  "labels": [
+                        "Section"
+                  ],
+                  "properties": {
+                        "name": "Operators",
+                        "duration": 15
+                  }
+            },
+            {
+                  "id": "python-ch2-s1",
+                  "labels": [
+                        "Section"
+                  ],
+                  "properties": {
+                        "name": "If Statements",
+                        "duration": 20
+                  }
+            },
+            {
+                  "id": "python-ch2-s2",
+                  "labels": [
+                        "Section"
+                  ],
+                  "properties": {
+                        "name": "Loops",
+                        "duration": 25
+                  }
+            },
+            {
+                  "id": "python-ch2-s3",
+                  "labels": [
+                        "Section"
+                  ],
+                  "properties": {
+                        "name": "Comprehensions",
+                        "duration": 20
+                  }
+            },
+            {
+                  "id": "python-ch3-s1",
+                  "labels": [
+                        "Section"
+                  ],
+                  "properties": {
+                        "name": "Function Definition",
+                        "duration": 20
+                  }
+            },
+            {
+                  "id": "python-ch3-s2",
+                  "labels": [
+                        "Section"
+                  ],
+                  "properties": {
+                        "name": "Arguments",
+                        "duration": 25
+                  }
+            },
+            {
+                  "id": "python-ch3-s3",
+                  "labels": [
+                        "Section"
+                  ],
+                  "properties": {
+                        "name": "Lambda",
+                        "duration": 15
+                  }
+            },
+            {
+                  "id": "python-ch3-s4",
+                  "labels": [
+                        "Section"
+                  ],
+                  "properties": {
+                        "name": "Decorators",
+                        "duration": 30
+                  }
+            },
+            {
+                  "id": "python-ch4-s1",
+                  "labels": [
+                        "Section"
+                  ],
+                  "properties": {
+                        "name": "Lists",
+                        "duration": 25
+                  }
+            },
+            {
+                  "id": "python-ch4-s2",
+                  "labels": [
+                        "Section"
+                  ],
+                  "properties": {
+                        "name": "Dictionaries",
+                        "duration": 25
+                  }
+            },
+            {
+                  "id": "python-ch4-s3",
+                  "labels": [
+                        "Section"
+                  ],
+                  "properties": {
+                        "name": "Sets",
+                        "duration": 20
+                  }
+            },
+            {
+                  "id": "python-ch5-s1",
+                  "labels": [
+                        "Section"
+                  ],
+                  "properties": {
+                        "name": "Classes",
+                        "duration": 30
+                  }
+            },
+            {
+                  "id": "python-ch5-s2",
+                  "labels": [
+                        "Section"
+                  ],
+                  "properties": {
+                        "name": "Inheritance",
+                        "duration": 25
+                  }
+            },
+            {
+                  "id": "python-ch5-s3",
+                  "labels": [
+                        "Section"
+                  ],
+                  "properties": {
+                        "name": "Polymorphism",
+                        "duration": 20
+                  }
+            },
+            {
+                  "id": "python-ch6-s1",
+                  "labels": [
+                        "Section"
+                  ],
+                  "properties": {
+                        "name": "Import",
+                        "duration": 20
+                  }
+            },
+            {
+                  "id": "python-ch6-s2",
+                  "labels": [
+                        "Section"
+                  ],
+                  "properties": {
+                        "name": "Packages",
+                        "duration": 25
+                  }
+            },
+            {
+                  "id": "nodejs-ch1-s1",
+                  "labels": [
+                        "Section"
+                  ],
+                  "properties": {
+                        "name": "Installation",
+                        "duration": 10
+                  }
+            },
+            {
+                  "id": "nodejs-ch1-s2",
+                  "labels": [
+                        "Section"
+                  ],
+                  "properties": {
+                        "name": "NPM",
+                        "duration": 20
+                  }
+            },
+            {
+                  "id": "nodejs-ch1-s3",
+                  "labels": [
+                        "Section"
+                  ],
+                  "properties": {
+                        "name": "First App",
+                        "duration": 25
+                  }
+            },
+            {
+                  "id": "nodejs-ch1-s4",
+                  "labels": [
+                        "Section"
+                  ],
+                  "properties": {
+                        "name": "Event Loop",
+                        "duration": 30
+                  }
+            },
+            {
+                  "id": "nodejs-ch2-s1",
+                  "labels": [
+                        "Section"
+                  ],
+                  "properties": {
+                        "name": "Setup Express",
+                        "duration": 20
+                  }
+            },
+            {
+                  "id": "nodejs-ch2-s2",
+                  "labels": [
+                        "Section"
+                  ],
+                  "properties": {
+                        "name": "Routes",
+                        "duration": 25
+                  }
+            },
+            {
+                  "id": "nodejs-ch2-s3",
+                  "labels": [
+                        "Section"
+                  ],
+                  "properties": {
+                        "name": "Templating",
+                        "duration": 20
+                  }
+            },
+            {
+                  "id": "nodejs-ch3-s1",
+                  "labels": [
+                        "Section"
+                  ],
+                  "properties": {
+                        "name": "Logger",
+                        "duration": 15
+                  }
+            },
+            {
+                  "id": "nodejs-ch3-s2",
+                  "labels": [
+                        "Section"
+                  ],
+                  "properties": {
+                        "name": "Auth Middleware",
+                        "duration": 25
+                  }
+            },
+            {
+                  "id": "nodejs-ch3-s3",
+                  "labels": [
+                        "Section"
+                  ],
+                  "properties": {
+                        "name": "Error Handling",
+                        "duration": 20
+                  }
+            },
+            {
+                  "id": "nodejs-ch4-s1",
+                  "labels": [
+                        "Section"
+                  ],
+                  "properties": {
+                        "name": "REST Principles",
+                        "duration": 20
+                  }
+            },
+            {
+                  "id": "nodejs-ch4-s2",
+                  "labels": [
+                        "Section"
+                  ],
+                  "properties": {
+                        "name": "CRUD Operations",
+                        "duration": 30
+                  }
+            },
+            {
+                  "id": "nodejs-ch4-s3",
+                  "labels": [
+                        "Section"
+                  ],
+                  "properties": {
+                        "name": "Validation",
+                        "duration": 25
+                  }
+            },
+            {
+                  "id": "nodejs-ch5-s1",
+                  "labels": [
+                        "Section"
+                  ],
+                  "properties": {
+                        "name": "MongoDB",
+                        "duration": 30
+                  }
+            },
+            {
+                  "id": "nodejs-ch5-s2",
+                  "labels": [
+                        "Section"
+                  ],
+                  "properties": {
+                        "name": "Mongoose",
+                        "duration": 35
+                  }
+            },
+            {
+                  "id": "nodejs-ch5-s3",
+                  "labels": [
+                        "Section"
+                  ],
+                  "properties": {
+                        "name": "PostgreSQL",
+                        "duration": 30
+                  }
+            },
+            {
+                  "id": "nodejs-ch6-s1",
+                  "labels": [
+                        "Section"
+                  ],
+                  "properties": {
+                        "name": "JWT",
+                        "duration": 30
+                  }
+            },
+            {
+                  "id": "nodejs-ch6-s2",
+                  "labels": [
+                        "Section"
+                  ],
+                  "properties": {
+                        "name": "OAuth",
+                        "duration": 25
+                  }
+            },
+            {
+                  "id": "nodejs-ch6-s3",
+                  "labels": [
+                        "Section"
+                  ],
+                  "properties": {
+                        "name": "Sessions",
+                        "duration": 20
+                  }
+            },
+            {
+                  "id": "nodejs-ch7-s1",
+                  "labels": [
+                        "Section"
+                  ],
+                  "properties": {
+                        "name": "Jest",
+                        "duration": 30
+                  }
+            },
+            {
+                  "id": "nodejs-ch7-s2",
+                  "labels": [
+                        "Section"
+                  ],
+                  "properties": {
+                        "name": "Integration Tests",
+                        "duration": 35
+                  }
+            },
+            {
+                  "id": "python-exam1",
+                  "labels": [
+                        "Exam"
+                  ],
+                  "properties": {
+                        "name": "Python Midterm",
+                        "duration": 60
+                  }
+            },
+            {
+                  "id": "python-exam2",
+                  "labels": [
+                        "Exam"
+                  ],
+                  "properties": {
+                        "name": "Python Final",
+                        "duration": 90
+                  }
+            },
+            {
+                  "id": "nodejs-exam1",
+                  "labels": [
+                        "Exam"
+                  ],
+                  "properties": {
+                        "name": "NodeJS Midterm",
+                        "duration": 60
+                  }
+            },
+            {
+                  "id": "nodejs-exam2",
+                  "labels": [
+                        "Exam"
+                  ],
+                  "properties": {
+                        "name": "NodeJS Final",
+                        "duration": 90
+                  }
+            },
+            {
+                  "id": "python-exam1-t1",
+                  "labels": [
+                        "Test"
+                  ],
+                  "properties": {
+                        "name": "MCQ - Basics",
+                        "questions": 10
+                  }
+            },
+            {
+                  "id": "python-exam1-t2",
+                  "labels": [
+                        "Test"
+                  ],
+                  "properties": {
+                        "name": "Coding - Functions",
+                        "questions": 3
+                  }
+            },
+            {
+                  "id": "python-exam1-t3",
+                  "labels": [
+                        "Test"
+                  ],
+                  "properties": {
+                        "name": "Debugging",
+                        "questions": 5
+                  }
+            },
+            {
+                  "id": "python-exam2-t1",
+                  "labels": [
+                        "Test"
+                  ],
+                  "properties": {
+                        "name": "MCQ - Advanced",
+                        "questions": 15
+                  }
+            },
+            {
+                  "id": "python-exam2-t2",
+                  "labels": [
+                        "Test"
+                  ],
+                  "properties": {
+                        "name": "Project",
+                        "questions": 1
+                  }
+            },
+            {
+                  "id": "python-exam2-t3",
+                  "labels": [
+                        "Test"
+                  ],
+                  "properties": {
+                        "name": "Code Review",
+                        "questions": 5
+                  }
+            },
+            {
+                  "id": "python-exam2-t4",
+                  "labels": [
+                        "Test"
+                  ],
+                  "properties": {
+                        "name": "Optimization",
+                        "questions": 3
+                  }
+            },
+            {
+                  "id": "nodejs-exam1-t1",
+                  "labels": [
+                        "Test"
+                  ],
+                  "properties": {
+                        "name": "MCQ - Express",
+                        "questions": 10
+                  }
+            },
+            {
+                  "id": "nodejs-exam1-t2",
+                  "labels": [
+                        "Test"
+                  ],
+                  "properties": {
+                        "name": "API Design",
+                        "questions": 3
+                  }
+            },
+            {
+                  "id": "nodejs-exam1-t3",
+                  "labels": [
+                        "Test"
+                  ],
+                  "properties": {
+                        "name": "Middleware Tasks",
+                        "questions": 5
+                  }
+            },
+            {
+                  "id": "nodejs-exam2-t1",
+                  "labels": [
+                        "Test"
+                  ],
+                  "properties": {
+                        "name": "MCQ - Full Stack",
+                        "questions": 15
+                  }
+            },
+            {
+                  "id": "nodejs-exam2-t2",
+                  "labels": [
+                        "Test"
+                  ],
+                  "properties": {
+                        "name": "REST API Project",
+                        "questions": 1
+                  }
+            },
+            {
+                  "id": "nodejs-exam2-t3",
+                  "labels": [
+                        "Test"
+                  ],
+                  "properties": {
+                        "name": "Database Design",
+                        "questions": 5
+                  }
+            },
+            {
+                  "id": "nodejs-exam2-t4",
+                  "labels": [
+                        "Test"
+                  ],
+                  "properties": {
+                        "name": "Security Audit",
+                        "questions": 4
+                  }
+            },
+            {
+                  "id": "tag-programming",
+                  "labels": [
+                        "Tag"
+                  ],
+                  "properties": {
+                        "name": "Programming"
+                  }
+            },
+            {
+                  "id": "tag-backend",
+                  "labels": [
+                        "Tag"
+                  ],
+                  "properties": {
+                        "name": "Backend"
+                  }
+            },
+            {
+                  "id": "tag-frontend",
+                  "labels": [
+                        "Tag"
+                  ],
+                  "properties": {
+                        "name": "Frontend"
+                  }
+            },
+            {
+                  "id": "tag-webdev",
+                  "labels": [
+                        "Tag"
+                  ],
+                  "properties": {
+                        "name": "Web Development"
+                  }
+            }
+      ],
+      "edges": [
+            {
+                  "id": "e1",
+                  "sourceId": "python-course",
+                  "targetId": "python-ch1",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e2",
+                  "sourceId": "python-course",
+                  "targetId": "python-ch2",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e3",
+                  "sourceId": "python-course",
+                  "targetId": "python-ch3",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e4",
+                  "sourceId": "python-course",
+                  "targetId": "python-ch4",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e5",
+                  "sourceId": "python-course",
+                  "targetId": "python-ch5",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e6",
+                  "sourceId": "python-course",
+                  "targetId": "python-ch6",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e7",
+                  "sourceId": "python-course",
+                  "targetId": "python-exam1",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e8",
+                  "sourceId": "python-course",
+                  "targetId": "python-exam2",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e9",
+                  "sourceId": "nodejs-course",
+                  "targetId": "nodejs-ch1",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e10",
+                  "sourceId": "nodejs-course",
+                  "targetId": "nodejs-ch2",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e11",
+                  "sourceId": "nodejs-course",
+                  "targetId": "nodejs-ch3",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e12",
+                  "sourceId": "nodejs-course",
+                  "targetId": "nodejs-ch4",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e13",
+                  "sourceId": "nodejs-course",
+                  "targetId": "nodejs-ch5",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e14",
+                  "sourceId": "nodejs-course",
+                  "targetId": "nodejs-ch6",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e15",
+                  "sourceId": "nodejs-course",
+                  "targetId": "nodejs-ch7",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e16",
+                  "sourceId": "nodejs-course",
+                  "targetId": "nodejs-exam1",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e17",
+                  "sourceId": "nodejs-course",
+                  "targetId": "nodejs-exam2",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e18",
+                  "sourceId": "python-ch1",
+                  "targetId": "python-ch1-s1",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e19",
+                  "sourceId": "python-ch1",
+                  "targetId": "python-ch1-s2",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e20",
+                  "sourceId": "python-ch1",
+                  "targetId": "python-ch1-s3",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e21",
+                  "sourceId": "python-ch2",
+                  "targetId": "python-ch2-s1",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e22",
+                  "sourceId": "python-ch2",
+                  "targetId": "python-ch2-s2",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e23",
+                  "sourceId": "python-ch2",
+                  "targetId": "python-ch2-s3",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e24",
+                  "sourceId": "python-ch3",
+                  "targetId": "python-ch3-s1",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e25",
+                  "sourceId": "python-ch3",
+                  "targetId": "python-ch3-s2",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e26",
+                  "sourceId": "python-ch3",
+                  "targetId": "python-ch3-s3",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e27",
+                  "sourceId": "python-ch3",
+                  "targetId": "python-ch3-s4",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e28",
+                  "sourceId": "python-ch4",
+                  "targetId": "python-ch4-s1",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e29",
+                  "sourceId": "python-ch4",
+                  "targetId": "python-ch4-s2",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e30",
+                  "sourceId": "python-ch4",
+                  "targetId": "python-ch4-s3",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e31",
+                  "sourceId": "python-ch5",
+                  "targetId": "python-ch5-s1",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e32",
+                  "sourceId": "python-ch5",
+                  "targetId": "python-ch5-s2",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e33",
+                  "sourceId": "python-ch5",
+                  "targetId": "python-ch5-s3",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e34",
+                  "sourceId": "python-ch6",
+                  "targetId": "python-ch6-s1",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e35",
+                  "sourceId": "python-ch6",
+                  "targetId": "python-ch6-s2",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e36",
+                  "sourceId": "nodejs-ch1",
+                  "targetId": "nodejs-ch1-s1",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e37",
+                  "sourceId": "nodejs-ch1",
+                  "targetId": "nodejs-ch1-s2",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e38",
+                  "sourceId": "nodejs-ch1",
+                  "targetId": "nodejs-ch1-s3",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e39",
+                  "sourceId": "nodejs-ch1",
+                  "targetId": "nodejs-ch1-s4",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e40",
+                  "sourceId": "nodejs-ch2",
+                  "targetId": "nodejs-ch2-s1",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e41",
+                  "sourceId": "nodejs-ch2",
+                  "targetId": "nodejs-ch2-s2",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e42",
+                  "sourceId": "nodejs-ch2",
+                  "targetId": "nodejs-ch2-s3",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e43",
+                  "sourceId": "nodejs-ch3",
+                  "targetId": "nodejs-ch3-s1",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e44",
+                  "sourceId": "nodejs-ch3",
+                  "targetId": "nodejs-ch3-s2",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e45",
+                  "sourceId": "nodejs-ch3",
+                  "targetId": "nodejs-ch3-s3",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e46",
+                  "sourceId": "nodejs-ch4",
+                  "targetId": "nodejs-ch4-s1",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e47",
+                  "sourceId": "nodejs-ch4",
+                  "targetId": "nodejs-ch4-s2",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e48",
+                  "sourceId": "nodejs-ch4",
+                  "targetId": "nodejs-ch4-s3",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e49",
+                  "sourceId": "nodejs-ch5",
+                  "targetId": "nodejs-ch5-s1",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e50",
+                  "sourceId": "nodejs-ch5",
+                  "targetId": "nodejs-ch5-s2",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e51",
+                  "sourceId": "nodejs-ch5",
+                  "targetId": "nodejs-ch5-s3",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e52",
+                  "sourceId": "nodejs-ch6",
+                  "targetId": "nodejs-ch6-s1",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e53",
+                  "sourceId": "nodejs-ch6",
+                  "targetId": "nodejs-ch6-s2",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e54",
+                  "sourceId": "nodejs-ch6",
+                  "targetId": "nodejs-ch6-s3",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e55",
+                  "sourceId": "nodejs-ch7",
+                  "targetId": "nodejs-ch7-s1",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e56",
+                  "sourceId": "nodejs-ch7",
+                  "targetId": "nodejs-ch7-s2",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e57",
+                  "sourceId": "python-exam1",
+                  "targetId": "python-exam1-t1",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e58",
+                  "sourceId": "python-exam1",
+                  "targetId": "python-exam1-t2",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e59",
+                  "sourceId": "python-exam1",
+                  "targetId": "python-exam1-t3",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e60",
+                  "sourceId": "python-exam2",
+                  "targetId": "python-exam2-t1",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e61",
+                  "sourceId": "python-exam2",
+                  "targetId": "python-exam2-t2",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e62",
+                  "sourceId": "python-exam2",
+                  "targetId": "python-exam2-t3",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e63",
+                  "sourceId": "python-exam2",
+                  "targetId": "python-exam2-t4",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e64",
+                  "sourceId": "nodejs-exam1",
+                  "targetId": "nodejs-exam1-t1",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e65",
+                  "sourceId": "nodejs-exam1",
+                  "targetId": "nodejs-exam1-t2",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e66",
+                  "sourceId": "nodejs-exam1",
+                  "targetId": "nodejs-exam1-t3",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e67",
+                  "sourceId": "nodejs-exam2",
+                  "targetId": "nodejs-exam2-t1",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e68",
+                  "sourceId": "nodejs-exam2",
+                  "targetId": "nodejs-exam2-t2",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e69",
+                  "sourceId": "nodejs-exam2",
+                  "targetId": "nodejs-exam2-t3",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e70",
+                  "sourceId": "nodejs-exam2",
+                  "targetId": "nodejs-exam2-t4",
+                  "type": "CONTAINS",
+                  "properties": {}
+            },
+            {
+                  "id": "e71",
+                  "sourceId": "author-john",
+                  "targetId": "python-course",
+                  "type": "AUTHOR_OF",
+                  "properties": {}
+            },
+            {
+                  "id": "e72",
+                  "sourceId": "author-jane",
+                  "targetId": "python-course",
+                  "type": "AUTHOR_OF",
+                  "properties": {}
+            },
+            {
+                  "id": "e73",
+                  "sourceId": "author-bob",
+                  "targetId": "nodejs-course",
+                  "type": "AUTHOR_OF",
+                  "properties": {}
+            },
+            {
+                  "id": "e74",
+                  "sourceId": "author-alice",
+                  "targetId": "nodejs-course",
+                  "type": "AUTHOR_OF",
+                  "properties": {}
+            },
+            {
+                  "id": "e75",
+                  "sourceId": "publisher-o Reilly",
+                  "targetId": "python-course",
+                  "type": "PUBLISHED_BY",
+                  "properties": {}
+            },
+            {
+                  "id": "e76",
+                  "sourceId": "publisher-o Reilly",
+                  "targetId": "nodejs-course",
+                  "type": "PUBLISHED_BY",
+                  "properties": {}
+            },
+            {
+                  "id": "e77",
+                  "sourceId": "python-course",
+                  "targetId": "tag-programming",
+                  "type": "TAGGED_WITH",
+                  "properties": {}
+            },
+            {
+                  "id": "e78",
+                  "sourceId": "python-course",
+                  "targetId": "tag-backend",
+                  "type": "TAGGED_WITH",
+                  "properties": {}
+            },
+            {
+                  "id": "e79",
+                  "sourceId": "nodejs-course",
+                  "targetId": "tag-programming",
+                  "type": "TAGGED_WITH",
+                  "properties": {}
+            },
+            {
+                  "id": "e80",
+                  "sourceId": "nodejs-course",
+                  "targetId": "tag-backend",
+                  "type": "TAGGED_WITH",
+                  "properties": {}
+            },
+            {
+                  "id": "e81",
+                  "sourceId": "nodejs-course",
+                  "targetId": "tag-frontend",
+                  "type": "TAGGED_WITH",
+                  "properties": {}
+            },
+            {
+                  "id": "e82",
+                  "sourceId": "nodejs-course",
+                  "targetId": "tag-webdev",
+                  "type": "TAGGED_WITH",
+                  "properties": {}
+            }
+      ]
+}
+};

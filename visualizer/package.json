@@ -1,0 +1,55 @@
+{
+  "name": "@grafio/visualizer",
+  "version": "7.15.1",
+  "publishConfig": {
+    "access": "public"
+  },
+  "description": "3D and 2D force-directed graph visualizer for Grafio cypher query results",
+  "main": "./dist/visualizer.js",
+  "module": "./dist/visualizer.mjs",
+  "types": "./types/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/visualizer.mjs",
+      "require": "./dist/visualizer.js",
+      "types": "./types/index.d.ts"
+    }
+  },
+  "files": [
+    "dist/",
+    "types/"
+  ],
+  "scripts": {
+    "build": "node scripts/build.js",
+    "build:types": "tsc --emitDeclarationOnly",
+    "build:all": "npm run build && npm run build:types",
+    "clean": "rimraf dist types"
+  },
+  "keywords": [
+    "graph",
+    "database",
+    "cypher",
+    "visualizer",
+    "force-graph",
+    "3d"
+  ],
+  "author": "Satya Jugran",
+  "license": "GPL-3.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/satya-jugran/grafio",
+    "directory": "visualizer"
+  },
+  "dependencies": {
+    "3d-force-graph": "^1.73.4",
+    "force-graph": "^1.43.5",
+    "three": "^0.184.0",
+    "three-spritetext": "^1.10.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.184.1",
+    "esbuild": "^0.25.0",
+    "rimraf": "^5.0.0",
+    "typescript": "~5.6.2"
+  }
+}

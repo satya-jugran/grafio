@@ -92,6 +92,11 @@ const config: Config = {
           label: 'Tutorials',
         },
         {
+          to: '/playground',
+          label: 'Playground',
+          position: 'left'
+        },
+        {
           to: 'blog',
           label: 'Blog',
           position: 'left'

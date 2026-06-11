@@ -1,0 +1,171 @@
+.playgroundContainer {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 140px);
+  min-height: 600px;
+  border: 1px solid var(--ifm-color-emphasis-300);
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 1rem;
+}
+
+.dataEditorContainer {
+  display: flex;
+  height: 100%;
+  padding: 0.5rem;
+  gap: 0.5rem;
+  background-color: var(--ifm-background-color);
+}
+
+.datasetList {
+  width: 250px;
+  background-color: var(--ifm-color-emphasis-100);
+  border: 1px solid var(--ifm-color-emphasis-300);
+  border-radius: 6px;
+  overflow-y: auto;
+}
+
+.datasetItem {
+  padding: 1rem;
+  border-bottom: 1px solid var(--ifm-color-emphasis-200);
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.datasetItem:last-child {
+  border-bottom: none;
+}
+
+.datasetItem:hover {
+  background-color: var(--ifm-color-emphasis-200);
+}
+
+.datasetItem.active {
+  background-color: var(--ifm-color-primary-lightest);
+  border-left: 4px solid var(--ifm-color-primary);
+}
+
+.datasetItem h4 {
+  margin: 0 0 0.5rem 0;
+  font-size: 1rem;
+}
+
+.datasetItem p {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--ifm-color-emphasis-600);
+}
+
+.editorPane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+}
+
+.editorHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 1rem;
+  background-color: var(--ifm-color-emphasis-200);
+  border: 1px solid var(--ifm-color-emphasis-300);
+  border-bottom: none;
+  border-top-left-radius: 6px;
+  border-top-right-radius: 6px;
+}
+
+.textarea {
+  flex: 1;
+  width: 100%;
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.9rem;
+  padding: 1rem;
+  border: 1px solid var(--ifm-color-emphasis-300);
+  border-bottom-left-radius: 6px;
+  border-bottom-right-radius: 6px;
+  resize: none;
+  background-color: var(--ifm-color-emphasis-100);
+  color: var(--ifm-color-emphasis-900);
+}
+
+.textarea:focus {
+  outline: none;
+  border-color: var(--ifm-color-primary);
+}
+
+/* Cypher Editor */
+.cypherEditorContainer {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  position: relative;
+}
+
+.panelHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 1rem;
+  background-color: var(--ifm-color-emphasis-200);
+  border-bottom: 1px solid var(--ifm-color-emphasis-300);
+  font-weight: bold;
+}
+
+.panelContent {
+  flex: 1;
+  display: flex;
+  position: relative;
+  overflow: hidden;
+}
+
+.outputArea {
+  width: 100%;
+  height: 100%;
+  padding: 1rem;
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.85rem;
+  overflow: auto;
+  background-color: var(--ifm-color-emphasis-100);
+  border: none;
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+/* Resizable panels handle */
+.resizeHandle {
+  background-color: var(--ifm-color-emphasis-300);
+  transition: background-color 0.2s ease;
+}
+
+.resizeHandle[data-resize-handle-state="hover"] {
+  background-color: var(--ifm-color-primary);
+}
+
+.resizeHandle[data-resize-handle-state="drag"] {
+  background-color: var(--ifm-color-primary);
+}
+
+.resizeHandleHorizontal {
+  width: 8px;
+  cursor: col-resize;
+  border-left: 1px solid var(--ifm-color-emphasis-200);
+  border-right: 1px solid var(--ifm-color-emphasis-200);
+}
+
+.resizeHandleVertical {
+  height: 8px;
+  cursor: row-resize;
+  border-top: 1px solid var(--ifm-color-emphasis-200);
+  border-bottom: 1px solid var(--ifm-color-emphasis-200);
+}
+
+.mermaidContainer {
+  height: 100%;
+  width: 100%;
+  overflow: auto;
+  padding: 2rem;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
