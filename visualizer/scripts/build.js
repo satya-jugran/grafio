@@ -11,7 +11,6 @@ const COMMON = {
   sourcemap: true,
   target: ['es2020'],
   logLevel: 'info',
-  globalName: 'GrafioVisualizer',
 };
 
 async function build() {
@@ -20,7 +19,7 @@ async function build() {
   await esbuild.build({
     ...COMMON,
     outfile: path.join(DIST, 'visualizer.js'),
-    format: 'iife',
+    format: 'cjs',
     minify: true,
   });
 
