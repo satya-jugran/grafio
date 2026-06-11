@@ -93,6 +93,15 @@ const sidebars: SidebarsConfig = {
         },
       ],
     },
+    {
+      type: 'category',
+      label: 'Supporting Libraries',
+      collapsed: false,
+      items: [
+        'supporting-libraries/grafio-browser',
+        'supporting-libraries/grafio-visualizer',
+      ],
+    },
   ],
 
   tutorials: [
