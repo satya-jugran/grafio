@@ -1,6 +1,3 @@
-import ForceGraph3D from '3d-force-graph';
-import ForceGraph from 'force-graph';
-import SpriteText from 'three-spritetext';
 
 export interface VisualizerOptions {
   mode?: '2d' | '3d';
@@ -15,7 +12,8 @@ export interface VisualizerOptions {
 export class CypherVisualizer {
   private container: HTMLElement;
   private options: VisualizerOptions;
-  private graphInstance: any;
+  private graphInstance: any = null;
+  private pendingData: {nodes: any[], links: any[]} | null = null;
   private lastCypherResult: any = null;
   private resizeObserver: ResizeObserver | null = null;
 
@@ -84,12 +82,19 @@ export class CypherVisualizer {
     return this.labelColorMap.get(label)!;
   }
 
-  private initGraph() {
+  private async initGraph() {
     this.container.innerHTML = ''; // clear
     const width = this.container.clientWidth || 800;
     const height = this.container.clientHeight || 500;
 
     if (this.options.mode === '3d') {
+      const [ForceGraph3DModule, SpriteTextModule] = await Promise.all([
+        import('3d-force-graph'),
+        import('three-spritetext')
+      ]);
+      const ForceGraph3D = ForceGraph3DModule.default || ForceGraph3DModule;
+      const SpriteText = SpriteTextModule.default || (SpriteTextModule as any);
+
       this.graphInstance = (ForceGraph3D as any)()(this.container)
         .width(width).height(height)
         .nodeColor((node: any) => this.getNodeColor(node))
@@ -132,7 +137,15 @@ export class CypherVisualizer {
       if (this.options.showArrows) {
         this.graphInstance.linkDirectionalArrowLength(3.5).linkDirectionalArrowRelPos(1);
       }
+
+      if (this.pendingData) {
+        this.graphInstance.graphData(this.pendingData);
+        this.pendingData = null;
+      }
     } else {
+      const ForceGraphModule = await import('force-graph');
+      const ForceGraph = ForceGraphModule.default || ForceGraphModule;
+
       this.graphInstance = (ForceGraph as any)()(this.container)
         .width(width).height(height)
         .nodeColor((node: any) => this.getNodeColor(node))
@@ -217,6 +230,11 @@ export class CypherVisualizer {
       if (this.options.showArrows) {
         this.graphInstance.linkDirectionalArrowLength(3.5).linkDirectionalArrowRelPos(1);
       }
+
+      if (this.pendingData) {
+        this.graphInstance.graphData(this.pendingData);
+        this.pendingData = null;
+      }
     }
     
     // We do NOT call applyDataAndZoom here anymore. setMode will call render.
@@ -225,6 +243,7 @@ export class CypherVisualizer {
   public setMode(mode: '2d' | '3d') {
     if (this.options.mode !== mode) {
       this.options.mode = mode;
+      this.graphInstance = null;
       this.initGraph();
       if (this.lastCypherResult) {
         this.render(this.lastCypherResult);
@@ -245,6 +264,10 @@ export class CypherVisualizer {
   }
 
   private applyDataAndZoom(data: {nodes: any[], links: any[]}) {
+    if (!this.graphInstance) {
+      this.pendingData = data;
+      return;
+    }
     this.graphInstance.graphData(data);
   }
 

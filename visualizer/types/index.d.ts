@@ -11,6 +11,7 @@ export declare class CypherVisualizer {
     private container;
     private options;
     private graphInstance;
+    private pendingData;
     private lastCypherResult;
     private resizeObserver;
     private readonly colorPalette;
