@@ -8,7 +8,7 @@ import { datasets, Dataset } from '../components/datasets';
 import styles from './playground.module.css';
 
 // Type declarations to satisfy TS until module is fully typed via build
-import { Graph, CypherEngine, PlanFormatter } from '@grafio/browser';
+import { Graph, CypherEngine } from '@grafio/browser';
 
 function VisualizerComponent({ 
   mode, 
