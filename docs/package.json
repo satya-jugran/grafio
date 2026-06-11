@@ -24,7 +24,10 @@
     "prism-react-renderer": "^2.3.0",
     "react": "^18.0.0",
     "react-chartjs-2": "^5.3.1",
-    "react-dom": "^18.0.0"
+    "react-dom": "^18.0.0",
+    "@grafio/browser": "file:../browser",
+    "@grafio/visualizer": "file:../visualizer",
+    "react-resizable-panels": "^2.0.19"
   },
   "devDependencies": {
     "@docusaurus/module-type-aliases": "3.7.0",

@@ -54,3 +54,6 @@ Thumbs.db
 # Browser package (@grafio/browser) — only ignore build output and deps
 browser/dist/
 browser/node_modules/
+# Visualizer package
+visualizer/dist/
+visualizer/node_modules/
