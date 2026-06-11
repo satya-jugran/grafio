@@ -22,7 +22,24 @@ jobs:
           cache: 'npm'
           cache-dependency-path: docs/package-lock.json
 
-      - name: Install dependencies
+      - name: Build grafio core
+        run: |
+          npm ci
+          npm run build:prod
+
+      - name: Build grafio browser
+        run: |
+          cd browser
+          npm ci
+          npm run build:all
+
+      - name: Build grafio visualizer
+        run: |
+          cd visualizer
+          npm ci
+          npm run build:all
+
+      - name: Install docs dependencies
         run: npm ci
         working-directory: docs
 
