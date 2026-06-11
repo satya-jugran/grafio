@@ -6,6 +6,10 @@ on:
     paths:
       - 'docs/**'
       - '.github/workflows/docs.yml'
+      - 'browser/**'
+      - 'visualizer/**'
+      - 'package.json'
+  workflow_dispatch:
 
 permissions:
   contents: write
