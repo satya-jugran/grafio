@@ -1,18 +1,18 @@
 {
   "name": "@grafio/browser",
-  "version": "7.15.1",
+  "version": "7.15.2",
   "publishConfig": {
     "access": "public"
   },
   "description": "Browser-optimized bundle of Grafio graph database with Cypher support",
   "main": "./dist/grafio.browser.js",
   "module": "./dist/grafio.browser.mjs",
-  "types": "./types/index.d.ts",
+  "types": "./types/browser/src/index.d.ts",
   "exports": {
     ".": {
+      "types": "./types/browser/src/index.d.ts",
       "import": "./dist/grafio.browser.mjs",
-      "require": "./dist/grafio.browser.js",
-      "types": "./types/index.d.ts"
+      "require": "./dist/grafio.browser.js"
     }
   },
   "files": [

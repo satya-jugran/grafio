@@ -10,9 +10,9 @@
   "types": "./types/index.d.ts",
   "exports": {
     ".": {
+      "types": "./types/index.d.ts",
       "import": "./dist/visualizer.mjs",
-      "require": "./dist/visualizer.js",
-      "types": "./types/index.d.ts"
+      "require": "./dist/visualizer.js"
     }
   },
   "files": [

@@ -17,34 +17,34 @@
   },
   "exports": {
     ".": {
+      "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
-      "require": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "require": "./dist/index.js"
     },
     "./errors": {
+      "types": "./dist/errors.d.ts",
       "import": "./dist/errors.js",
-      "require": "./dist/errors.js",
-      "types": "./dist/errors.d.ts"
+      "require": "./dist/errors.js"
     },
     "./cypher": {
+      "types": "./dist/cypher/index.d.ts",
       "import": "./dist/cypher/index.js",
-      "require": "./dist/cypher/index.js",
-      "types": "./dist/cypher/index.d.ts"
+      "require": "./dist/cypher/index.js"
     },
     "./cache": {
+      "types": "./dist/storage/cache/index.d.ts",
       "import": "./dist/storage/cache/index.js",
-      "require": "./dist/storage/cache/index.js",
-      "types": "./dist/storage/cache/index.d.ts"
+      "require": "./dist/storage/cache/index.js"
     },
     "./testing": {
+      "types": "./dist/shared/testing/index.d.ts",
       "import": "./dist/shared/testing/index.js",
-      "require": "./dist/shared/testing/index.js",
-      "types": "./dist/shared/testing/index.d.ts"
+      "require": "./dist/shared/testing/index.js"
     },
     "./testing/perf": {
+      "types": "./dist/shared/testing/perf/index.d.ts",
       "import": "./dist/shared/testing/perf/index.js",
-      "require": "./dist/shared/testing/perf/index.js",
-      "types": "./dist/shared/testing/perf/index.d.ts"
+      "require": "./dist/shared/testing/perf/index.js"
     }
   },
   "keywords": [
