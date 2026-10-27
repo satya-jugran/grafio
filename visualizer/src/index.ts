@@ -1,3 +1,108 @@
+export interface VisualizerNodeData {
+  id: string;
+  labels: readonly string[];
+  properties?: Readonly<Record<string, unknown>>;
+  [key: string]: unknown;
+}
+
+export interface VisualizerEdgeData {
+  id: string;
+  sourceId: string;
+  targetId: string;
+  type: string;
+  properties?: Readonly<Record<string, unknown>>;
+  [key: string]: unknown;
+}
+
+export interface VisualizerNode {
+  id: string;
+  label?: string;
+  data?: VisualizerNodeData;
+  x?: number;
+  y?: number;
+  z?: number;
+  __bckgDimensions?: [number, number];
+}
+
+export interface VisualizerLink {
+  id?: string;
+  source: string | VisualizerNode;
+  target: string | VisualizerNode;
+  name?: string;
+  data?: VisualizerEdgeData;
+}
+
+export interface VisualizerGraphData {
+  nodes: VisualizerNode[];
+  links: VisualizerLink[];
+}
+
+export interface CypherVisualizerResult {
+  rows?: ReadonlyArray<Readonly<Record<string, unknown>>>;
+}
+
+interface Position3D {
+  x: number;
+  y: number;
+  z: number;
+}
+
+interface SpriteTextInstance {
+  color: string;
+  textHeight: number;
+  backgroundColor?: string | false;
+  padding?: number;
+  borderRadius?: number;
+  position: { x: number; y: number; z: number };
+}
+
+interface GraphInstance {
+  width(value: number): GraphInstance;
+  height(value: number): GraphInstance;
+  nodeColor(callback: (node: VisualizerNode) => string): GraphInstance;
+  nodeLabel(callback: (node: VisualizerNode) => string | null): GraphInstance;
+  linkLabel(callback: (link: VisualizerLink) => string | null): GraphInstance;
+  onNodeClick(callback: (node: VisualizerNode) => void): GraphInstance;
+  onLinkClick(callback: (link: VisualizerLink) => void): GraphInstance;
+  graphData(data: VisualizerGraphData): GraphInstance;
+  nodeThreeObject?(callback: (node: VisualizerNode) => SpriteTextInstance): GraphInstance;
+  linkThreeObjectExtend?(enabled: boolean): GraphInstance;
+  linkThreeObject?(callback: (link: VisualizerLink) => SpriteTextInstance): GraphInstance;
+  linkPositionUpdate?(callback: (sprite: SpriteTextInstance, position: { start: Position3D; end: Position3D }) => void): GraphInstance;
+  linkDirectionalArrowLength?(length: number): GraphInstance;
+  linkDirectionalArrowRelPos?(position: number): GraphInstance;
+  nodeCanvasObject?(callback: (node: VisualizerNode, context: CanvasRenderingContext2D, globalScale: number) => void): GraphInstance;
+  nodePointerAreaPaint?(callback: (node: VisualizerNode, color: string, context: CanvasRenderingContext2D) => void): GraphInstance;
+  linkCanvasObjectMode?(callback: () => 'after'): GraphInstance;
+  linkCanvasObject?(callback: (link: VisualizerLink, context: CanvasRenderingContext2D, globalScale: number) => void): GraphInstance;
+  _destructor?(): void;
+}
+
+type GraphFactory = () => (container: HTMLElement) => GraphInstance;
+type SpriteTextConstructor = new (text?: string, textHeight?: number, color?: string) => SpriteTextInstance;
+
+function resolveDefault<T>(module: unknown): T {
+  if (typeof module === 'object' && module !== null && 'default' in module) {
+    const candidate = module as { default?: unknown };
+    if (candidate.default) return candidate.default as T;
+  }
+  return module as T;
+}
+
+function isVisualizerEdgeData(value: object): value is VisualizerEdgeData {
+  const candidate = value as Partial<VisualizerEdgeData>;
+  return typeof candidate.id === 'string'
+    && typeof candidate.sourceId === 'string'
+    && typeof candidate.targetId === 'string'
+    && typeof candidate.type === 'string';
+}
+
+function isVisualizerNodeData(value: object): value is VisualizerNodeData {
+  const candidate = value as Partial<VisualizerNodeData>;
+  return typeof candidate.id === 'string'
+    && Array.isArray(candidate.labels)
+    && !('sourceId' in value);
+}
 
 export interface VisualizerOptions {
   mode?: '2d' | '3d';
@@ -5,16 +110,16 @@ export interface VisualizerOptions {
   showHoverData?: boolean;
   showPermanentLabels?: boolean;
   showEdgeLabels?: boolean;
-  onNodeClick?: (node: any) => void;
-  onLinkClick?: (link: any) => void;
+  onNodeClick?: (node: VisualizerNode) => void;
+  onLinkClick?: (link: VisualizerLink) => void;
 }
 
 export class CypherVisualizer {
   private container: HTMLElement;
   private options: VisualizerOptions;
-  private graphInstance: any = null;
-  private pendingData: {nodes: any[], links: any[]} | null = null;
-  private lastCypherResult: any = null;
+  private graphInstance: GraphInstance | null = null;
+  private pendingData: VisualizerGraphData | null = null;
+  private lastCypherResult: CypherVisualizerResult | null | undefined = null;
   private resizeObserver: ResizeObserver | null = null;
 
   private readonly colorPalette = [
@@ -73,7 +178,7 @@ export class CypherVisualizer {
     this.container.innerHTML = '';
   }
 
-  private getNodeColor(node: any): string {
+  private getNodeColor(node: VisualizerNode): string {
     const label = node.label || 'Unknown';
     if (!this.labelColorMap.has(label)) {
       this.labelColorMap.set(label, this.colorPalette[this.nextColorIndex % this.colorPalette.length]);
@@ -92,19 +197,19 @@ export class CypherVisualizer {
         import('3d-force-graph'),
         import('three-spritetext')
       ]);
-      const ForceGraph3D = ForceGraph3DModule.default || ForceGraph3DModule;
-      const SpriteText = SpriteTextModule.default || (SpriteTextModule as any);
+      const ForceGraph3D = resolveDefault<GraphFactory>(ForceGraph3DModule);
+      const SpriteText = resolveDefault<SpriteTextConstructor>(SpriteTextModule);
 
-      this.graphInstance = (ForceGraph3D as any)()(this.container)
+      this.graphInstance = ForceGraph3D()(this.container)
         .width(width).height(height)
-        .nodeColor((node: any) => this.getNodeColor(node))
-        .nodeLabel((node: any) => this.options.showHoverData ? this.getNodeLabel(node) : null)
-        .linkLabel((link: any) => this.options.showHoverData ? this.getLinkLabel(link) : null)
-        .onNodeClick((node: any) => { if (this.options.onNodeClick) this.options.onNodeClick(node); })
-        .onLinkClick((link: any) => { if (this.options.onLinkClick) this.options.onLinkClick(link); });
+        .nodeColor((node: VisualizerNode) => this.getNodeColor(node))
+        .nodeLabel((node: VisualizerNode) => this.options.showHoverData ? this.getNodeLabel(node) : null)
+        .linkLabel((link: VisualizerLink) => this.options.showHoverData ? this.getLinkLabel(link) : null)
+        .onNodeClick((node: VisualizerNode) => { if (this.options.onNodeClick) this.options.onNodeClick(node); })
+        .onLinkClick((link: VisualizerLink) => { if (this.options.onLinkClick) this.options.onLinkClick(link); });
 
       if (this.options.showPermanentLabels) {
-        this.graphInstance.nodeThreeObject((node: any) => {
+        this.graphInstance.nodeThreeObject?.((node: VisualizerNode) => {
           const label = node.label || node.id;
           const sprite = new SpriteText(`${label}\n${node.id}`);
           sprite.color = '#ffffff';
@@ -117,14 +222,14 @@ export class CypherVisualizer {
       }
 
       if (this.options.showEdgeLabels) {
-        this.graphInstance.linkThreeObjectExtend(true);
-        this.graphInstance.linkThreeObject((link: any) => {
+        this.graphInstance.linkThreeObjectExtend?.(true);
+        this.graphInstance.linkThreeObject?.((link: VisualizerLink) => {
           const sprite = new SpriteText(link.name || '');
           sprite.color = 'lightgrey';
           sprite.textHeight = 2.5;
           return sprite;
         });
-        this.graphInstance.linkPositionUpdate((sprite: any, { start, end }: any) => {
+        this.graphInstance.linkPositionUpdate?.((sprite: SpriteTextInstance, { start, end }) => {
           const middlePos = {
             x: start.x + (end.x - start.x) / 2,
             y: start.y + (end.y - start.y) / 2,
@@ -135,7 +240,7 @@ export class CypherVisualizer {
       }
 
       if (this.options.showArrows) {
-        this.graphInstance.linkDirectionalArrowLength(3.5).linkDirectionalArrowRelPos(1);
+        this.graphInstance.linkDirectionalArrowLength?.(3.5)?.linkDirectionalArrowRelPos?.(1);
       }
 
       if (this.pendingData) {
@@ -144,56 +249,64 @@ export class CypherVisualizer {
       }
     } else {
       const ForceGraphModule = await import('force-graph');
-      const ForceGraph = ForceGraphModule.default || ForceGraphModule;
+      const ForceGraph = resolveDefault<GraphFactory>(ForceGraphModule);
 
-      this.graphInstance = (ForceGraph as any)()(this.container)
+      this.graphInstance = ForceGraph()(this.container)
         .width(width).height(height)
-        .nodeColor((node: any) => this.getNodeColor(node))
-        .nodeLabel((node: any) => this.options.showHoverData ? this.getNodeLabel(node) : null)
-        .linkLabel((link: any) => this.options.showHoverData ? this.getLinkLabel(link) : null)
-        .onNodeClick((node: any) => { if (this.options.onNodeClick) this.options.onNodeClick(node); })
-        .onLinkClick((link: any) => { if (this.options.onLinkClick) this.options.onLinkClick(link); });
+        .nodeColor((node: VisualizerNode) => this.getNodeColor(node))
+        .nodeLabel((node: VisualizerNode) => this.options.showHoverData ? this.getNodeLabel(node) : null)
+        .linkLabel((link: VisualizerLink) => this.options.showHoverData ? this.getLinkLabel(link) : null)
+        .onNodeClick((node: VisualizerNode) => { if (this.options.onNodeClick) this.options.onNodeClick(node); })
+        .onLinkClick((link: VisualizerLink) => { if (this.options.onLinkClick) this.options.onLinkClick(link); });
 
       if (this.options.showPermanentLabels) {
-        this.graphInstance.nodeCanvasObject((node: any, ctx: any, globalScale: number) => {
+        this.graphInstance.nodeCanvasObject?.((node: VisualizerNode, ctx: CanvasRenderingContext2D, globalScale: number) => {
           const label = node.label || node.id;
           const text = `${label}\n${node.id}`;
           const fontSize = 12/globalScale;
+          const x = node.x ?? 0;
+          const y = node.y ?? 0;
           ctx.font = `${fontSize}px Sans-Serif`;
           
           const lines = text.split('\n');
           const maxTextWidth = Math.max(...lines.map(l => ctx.measureText(l).width));
           
-          const bckgDimensions = [maxTextWidth, fontSize * lines.length].map(n => n + fontSize * 0.2); // padding
+          const bckgDimensions: [number, number] = [
+            maxTextWidth + fontSize * 0.2,
+            fontSize * lines.length + fontSize * 0.2,
+          ];
           
           ctx.fillStyle = this.getNodeColor(node);
-          ctx.fillRect(node.x - bckgDimensions[0] / 2, node.y - bckgDimensions[1] / 2, bckgDimensions[0], bckgDimensions[1]);
+          ctx.fillRect(x - bckgDimensions[0] / 2, y - bckgDimensions[1] / 2, bckgDimensions[0], bckgDimensions[1]);
 
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           ctx.fillStyle = '#ffffff';
           lines.forEach((line, i) => {
-             ctx.fillText(line, node.x, node.y - (bckgDimensions[1]/2) + (i + 0.5) * fontSize + fontSize * 0.1);
+             ctx.fillText(line, x, y - (bckgDimensions[1]/2) + (i + 0.5) * fontSize + fontSize * 0.1);
           });
           
           node.__bckgDimensions = bckgDimensions; // save for hover interaction if needed
         });
         
         // Disable node point rendering so only the canvas card shows
-        this.graphInstance.nodePointerAreaPaint((node: any, color: string, ctx: any) => {
+        this.graphInstance.nodePointerAreaPaint?.((node: VisualizerNode, color: string, ctx: CanvasRenderingContext2D) => {
           if (!node.__bckgDimensions) return;
+          const x = node.x ?? 0;
+          const y = node.y ?? 0;
           ctx.fillStyle = color;
           const bckgDimensions = node.__bckgDimensions;
-          ctx.fillRect(node.x - bckgDimensions[0] / 2, node.y - bckgDimensions[1] / 2, bckgDimensions[0], bckgDimensions[1]);
+          ctx.fillRect(x - bckgDimensions[0] / 2, y - bckgDimensions[1] / 2, bckgDimensions[0], bckgDimensions[1]);
         });
       }
 
       if (this.options.showEdgeLabels) {
-        this.graphInstance.linkCanvasObjectMode(() => 'after');
-        this.graphInstance.linkCanvasObject((link: any, ctx: any, globalScale: number) => {
-          const start = link.source;
-          const end = link.target;
-          if (!start || !end || typeof start.x !== 'number' || typeof end.x !== 'number') return;
+        this.graphInstance.linkCanvasObjectMode?.(() => 'after');
+        this.graphInstance.linkCanvasObject?.((link: VisualizerLink, ctx: CanvasRenderingContext2D, globalScale: number) => {
+          const start = typeof link.source === 'string' ? undefined : link.source;
+          const end = typeof link.target === 'string' ? undefined : link.target;
+          if (!start || !end || typeof start.x !== 'number' || typeof start.y !== 'number'
+            || typeof end.x !== 'number' || typeof end.y !== 'number') return;
           
           const textPos = {
             x: start.x + (end.x - start.x) / 2,
@@ -228,7 +341,7 @@ export class CypherVisualizer {
       }
 
       if (this.options.showArrows) {
-        this.graphInstance.linkDirectionalArrowLength(3.5).linkDirectionalArrowRelPos(1);
+        this.graphInstance.linkDirectionalArrowLength?.(3.5)?.linkDirectionalArrowRelPos?.(1);
       }
 
       if (this.pendingData) {
@@ -251,7 +364,7 @@ export class CypherVisualizer {
     }
   }
 
-  public render(cypherResult: any) {
+  public render(cypherResult: CypherVisualizerResult | null | undefined) {
     this.lastCypherResult = cypherResult;
     
     if (!cypherResult || !cypherResult.rows) {
@@ -263,7 +376,7 @@ export class CypherVisualizer {
     this.applyDataAndZoom(freshData);
   }
 
-  private applyDataAndZoom(data: {nodes: any[], links: any[]}) {
+  private applyDataAndZoom(data: VisualizerGraphData) {
     if (!this.graphInstance) {
       this.pendingData = data;
       return;
@@ -271,11 +384,11 @@ export class CypherVisualizer {
     this.graphInstance.graphData(data);
   }
 
-  private extractGraphData(rows: any[]) {
-    const nodesMap = new Map();
-    const edgesMap = new Map();
+  private extractGraphData(rows: ReadonlyArray<Readonly<Record<string, unknown>>>): VisualizerGraphData {
+    const nodesMap = new Map<string, VisualizerNode>();
+    const edgesMap = new Map<string, VisualizerLink>();
 
-    const processValue = (val: any) => {
+    const processValue = (val: unknown): void => {
       if (!val || typeof val !== 'object') return;
 
       if (Array.isArray(val)) {
@@ -284,7 +397,7 @@ export class CypherVisualizer {
       }
 
       // Check if Edge: must have id, sourceId, targetId, type
-      if ('id' in val && 'sourceId' in val && 'targetId' in val && 'type' in val) {
+      if (isVisualizerEdgeData(val)) {
         if (!edgesMap.has(val.id)) {
           edgesMap.set(val.id, {
             id: val.id,
@@ -298,7 +411,7 @@ export class CypherVisualizer {
       }
 
       // Check if Node: must have id, labels (and no sourceId to be safe)
-      if ('id' in val && 'labels' in val && Array.isArray(val.labels) && !('sourceId' in val)) {
+      if (isVisualizerNodeData(val)) {
         if (!nodesMap.has(val.id)) {
           nodesMap.set(val.id, {
             id: val.id,
@@ -333,7 +446,7 @@ export class CypherVisualizer {
          .replace(/'/g, "&#039;");
   }
 
-  private getNodeLabel(node: any): string {
+  private getNodeLabel(node: VisualizerNode): string {
     const rawLabel = String(node.label || node.id || '');
     if (!this.options.showHoverData) return this.escapeHtml(rawLabel);
     
@@ -346,7 +459,7 @@ export class CypherVisualizer {
     </div>`;
   }
 
-  private getLinkLabel(link: any): string {
+  private getLinkLabel(link: VisualizerLink): string {
     const rawName = String(link.name || '');
     if (!this.options.showHoverData) return this.escapeHtml(rawName);
     

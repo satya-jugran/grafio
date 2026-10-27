@@ -16,7 +16,11 @@ export type { TraversalOptions } from './Graph/TraversalOptions';
 export type { MermaidOptions } from './Graph/GraphToMermaid';
 
 // Storage abstraction
-export type { IStorageProvider } from './storage/IStorageProvider';
+export {
+  isCacheWarmableStorageProvider,
+  type IStorageProvider,
+  type CacheWarmableStorageProvider,
+} from './storage/IStorageProvider';
 export { InMemoryStorageProvider } from './storage/InMemoryStorageProvider';
 export type { InMemoryStorageProviderOptions } from './storage/InMemoryStorageProvider';
 export type { IGraphFactory } from './storage/IGraphFactory';

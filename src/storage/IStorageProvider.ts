@@ -16,6 +16,24 @@ export interface IndexMetadata {
 }
 
 /**
+ * Optional capability implemented by providers that can preload cache data.
+ * Storage providers that do not expose caching can omit this capability.
+ */
+export interface CacheWarmableStorageProvider {
+  warmCache(): Promise<void>;
+}
+
+/**
+ * Runtime type guard for optional provider capabilities.
+ */
+export function isCacheWarmableStorageProvider(
+  provider: IStorageProvider,
+): provider is IStorageProvider & CacheWarmableStorageProvider {
+  const candidate = provider as Partial<CacheWarmableStorageProvider>;
+  return typeof candidate.warmCache === 'function';
+}
+
+/**
  * Contract that every storage backend must fulfill.
  *
  * All methods are async (v5.0+) to support both synchronous in-memory providers

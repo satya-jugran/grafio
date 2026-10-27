@@ -1,5 +1,27 @@
 import type { ICacheProvider } from './ICacheProvider';
 
+/** Minimal Redis client surface used by RedisCache. */
+interface RedisClient {
+  once(event: 'ready', listener: () => void): this;
+  once(event: 'error', listener: (error: Error) => void): this;
+  get(key: string): Promise<string | null>;
+  exists(key: string): Promise<number>;
+  set(key: string, value: string): Promise<string>;
+  set(key: string, value: string, mode: 'PX', ttlMs: number): Promise<string>;
+  del(...keys: string[]): Promise<number>;
+  scan(cursor: string, ...args: Array<string | number>): Promise<[string, string[]]>;
+  zadd(key: string, score: number, member: string): Promise<number>;
+  zrange(key: string, start: number, stop: number, withScores: 'WITHSCORES'): Promise<string[]>;
+  zrem(key: string, member: string): Promise<number>;
+  sadd(key: string, member: string): Promise<number>;
+  srem(key: string, member: string): Promise<number>;
+  smembers(key: string): Promise<string[]>;
+  pexpire(key: string, ttlMs: number): Promise<number>;
+  disconnect(): void;
+}
+
+type RedisConstructor = new (redisUrl: string) => RedisClient;
+
 /**
  * Redis-backed cache implementation.
  *
@@ -23,9 +45,7 @@ export class RedisCache<T> implements ICacheProvider<T> {
   private readonly _type: 'nodes' | 'edges';
   private readonly _ttlMs: number | undefined;
 
-  // Dynamically loaded Redis client - typed as any to avoid compile-time dependency
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private _redis: any = null;
+  private _redis: RedisClient | null = null;
   private _redisReady = false;
 
   // In-memory size tracking (Redis doesn't expose key count efficiently)
@@ -45,8 +65,7 @@ export class RedisCache<T> implements ICacheProvider<T> {
 
   // ─── Lazy initialization ───────────────────────────────────────────────────
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async _ensureRedis(): Promise<any> {
+  private async _ensureRedis(): Promise<RedisClient> {
     if (this._redis && this._redisReady) {
       return this._redis;
     }
@@ -54,23 +73,30 @@ export class RedisCache<T> implements ICacheProvider<T> {
     // Dynamically import ioredis (peer dependency) using require to avoid
     // TypeScript module resolution issues with optional peer dependencies
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const Redis = require('ioredis');
+    const Redis = require('ioredis') as RedisConstructor;
     this._redis = new Redis(this._redisUrl);
 
     // Wait for connection
     await new Promise<void>((resolve, reject) => {
-      if (!this._redis) return reject(new Error('Redis client not initialized'));
+      const redis = this._redis;
+      if (!redis) {
+        reject(new Error('Redis client not initialized'));
+        return;
+      }
 
-      this._redis.once('ready', () => {
+      redis.once('ready', () => {
         this._redisReady = true;
         resolve();
       });
 
-      this._redis.once('error', (err: Error) => {
+      redis.once('error', (err: Error) => {
         reject(err);
       });
     });
 
+    if (!this._redis) {
+      throw new Error('Redis client was closed during initialization');
+    }
     return this._redis;
   }
 

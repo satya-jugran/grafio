@@ -27,7 +27,11 @@ export type { TraversalOptions } from '../../src/Graph/TraversalOptions';
 export type { MermaidOptions } from '../../src/Graph/GraphToMermaid';
 
 // ── Storage ─────────────────────────────────────────────────────
-export type { IStorageProvider } from '../../src/storage/IStorageProvider';
+export {
+  isCacheWarmableStorageProvider,
+  type IStorageProvider,
+  type CacheWarmableStorageProvider,
+} from '../../src/storage/IStorageProvider';
 export { InMemoryStorageProvider } from '../../src/storage/InMemoryStorageProvider';
 export type { InMemoryStorageProviderOptions } from '../../src/storage/InMemoryStorageProvider';
 

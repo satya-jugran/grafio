@@ -74,11 +74,18 @@ export class Planner {
         all: ast.all,
       }];
       
+      const projectionAst: QueryAst = {
+        kind: 'Query',
+        segments: [],
+        readingClauses: [],
+        return: ast.queries[0].return,
+      };
+
       if (ast.orderBy) {
-        steps.push(this._projPlanner.planSort({ orderBy: ast.orderBy, return: ast.queries[0].return } as any, true));
+        steps.push(this._projPlanner.planSort({ ...projectionAst, orderBy: ast.orderBy }, true));
       }
       if (ast.skip || ast.limit) {
-        steps.push(this._projPlanner.planLimit({ skip: ast.skip, limit: ast.limit } as any));
+        steps.push(this._projPlanner.planLimit({ ...projectionAst, skip: ast.skip, limit: ast.limit }));
       }
       return { steps };
     }
@@ -110,10 +117,10 @@ export class Planner {
           });
         }
         if (segment.with.orderBy) {
-          steps.push(this._projPlanner.planSort({ orderBy: segment.with.orderBy, return: fakeAst.return } as any));
+          steps.push(this._projPlanner.planSort({ ...fakeAst, orderBy: segment.with.orderBy }));
         }
         if (segment.with.skip || segment.with.limit) {
-          steps.push(this._projPlanner.planLimit({ skip: segment.with.skip, limit: segment.with.limit } as any));
+          steps.push(this._projPlanner.planLimit({ ...fakeAst, skip: segment.with.skip, limit: segment.with.limit }));
         }
       }
     }

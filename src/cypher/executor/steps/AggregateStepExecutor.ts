@@ -227,7 +227,7 @@ export class AggregateStepExecutor {
         filter: typeFilter,
         distinct,
         transaction,
-      } as any);
+      });
       for (const spec of specs) {
         resultRow.set(spec.alias, this._extractAggField(aggResult, spec.function));
       }

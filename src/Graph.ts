@@ -7,7 +7,10 @@ import { GraphAdminOps } from './Graph/GraphAdminOps';
 import { GraphTransaction } from './Graph/GraphTransaction';
 import type { TraversalOptions } from './Graph/TraversalOptions';
 import type { GraphQueryOptions } from './Graph/GraphQueryOptions';
-import type { IStorageProvider } from './storage/IStorageProvider';
+import {
+  isCacheWarmableStorageProvider,
+  type IStorageProvider,
+} from './storage/IStorageProvider';
 
 // Re-export for external use
 export type { GraphQueryOptions } from './Graph/GraphQueryOptions';
@@ -83,8 +86,8 @@ export class Graph {
    */
   async warmCache(): Promise<void> {
     const store = this._index._getStore();
-    if (typeof (store as any).warmCache === 'function') {
-      await (store as any).warmCache();
+    if (isCacheWarmableStorageProvider(store)) {
+      await store.warmCache();
     }
   }
 

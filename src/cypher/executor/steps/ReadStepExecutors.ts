@@ -16,10 +16,49 @@ import {
   NodeSeekStep,
   EdgeExpandStep,
   VerifyNodeStep,
+  PropertyFilter,
 } from '../../plan/QueryPlan';
+import type { GraphQueryOptions } from '../../../Graph/GraphQueryOptions';
 import { UnboundParameterError } from '../../errors';
 import { Row, ExpressionEvaluator } from '../ExpressionEvaluator';
 import { parallelMap } from '../parallelMap';
+
+interface ParameterReference {
+  kind: 'Parameter';
+  name: string;
+}
+
+function isParameterReference(value: object): value is ParameterReference {
+  const candidate = value as Partial<ParameterReference>;
+  return candidate.kind === 'Parameter' && typeof candidate.name === 'string';
+}
+
+type ComparisonOperator = '>' | '<' | '>=' | '<=';
+
+function compareValues(
+  actual: unknown,
+  expected: unknown,
+  operator: ComparisonOperator,
+): boolean {
+  if (typeof actual === 'string' && typeof expected === 'string') {
+    return compareComparableValues(actual, expected, operator);
+  }
+
+  return compareComparableValues(Number(actual), Number(expected), operator);
+}
+
+function compareComparableValues(
+  actual: string | number,
+  expected: string | number,
+  operator: ComparisonOperator,
+): boolean {
+  switch (operator) {
+    case '>': return actual > expected;
+    case '<': return actual < expected;
+    case '>=': return actual >= expected;
+    case '<=': return actual <= expected;
+  }
+}
 
 /**
  * Executes read-only plan steps (NodeScan, NodeSeek, EdgeExpand)
@@ -53,7 +92,7 @@ export class ReadStepExecutor {
     params: Record<string, unknown>,
     transaction?: GraphTransaction,
   ): Promise<Row[]> {
-    const filter: Record<string, unknown> = {};
+    const filter: NonNullable<GraphQueryOptions['filter']> = {};
 
     if (step.types?.length) {
       filter.types = step.types;
@@ -63,14 +102,14 @@ export class ReadStepExecutor {
 
     if (step.propertyFilters?.length) {
       filter.properties = this._resolvePropertyFilterParams(
-        step.propertyFilters as Array<Record<string, unknown>>,
+        step.propertyFilters,
         params,
       );
     }
 
     const nodes = Object.keys(filter).length > 0
-      ? await this._graph.getNodes({ filter: filter as any, transaction } as any) as unknown as Node[]
-      : await this._graph.getNodes({ transaction } as any);
+      ? await this._graph.getNodes({ filter, transaction })
+      : await this._graph.getNodes({ transaction });
 
     return parallelMap(rows, (rowChunk) => {
       const chunkResult: Row[] = [];
@@ -90,39 +129,35 @@ export class ReadStepExecutor {
    * against the runtime parameter map.
    */
   private _resolvePropertyFilterParams(
-    filters: Array<Record<string, unknown>>,
+    filters: PropertyFilter[],
     params: Record<string, unknown>,
-  ): Array<Record<string, unknown>> {
+  ): PropertyFilter[] {
     return filters.map((f) => this._resolveOneFilter(f, params));
   }
 
   private _resolveOneFilter(
-    f: Record<string, unknown>,
+    f: PropertyFilter,
     params: Record<string, unknown>,
-  ): Record<string, unknown> {
-    const resolved: Record<string, unknown> = {};
+  ): PropertyFilter {
+    const resolved: PropertyFilter = {};
 
-    for (const [k, v] of Object.entries(f)) {
-      if (k === 'AND' && Array.isArray(v)) {
-        resolved[k] = v.map((child: Record<string, unknown>) =>
-          this._resolveOneFilter(child, params),
-        );
-      } else if (k === 'OR' && Array.isArray(v)) {
-        resolved[k] = v.map((child: Record<string, unknown>) =>
-          this._resolveOneFilter(child, params),
-        );
-      } else if (
-        typeof v === 'object' &&
-        v !== null &&
-        (v as Record<string, unknown>).kind === 'Parameter'
-      ) {
-        const paramName = (v as Record<string, unknown>).name as string;
-        if (!(paramName in params)) {
-          throw new UnboundParameterError(paramName);
+    if (f.key !== undefined) resolved.key = f.key;
+    if (f.op !== undefined) resolved.op = f.op;
+    if (f.AND) {
+      resolved.AND = f.AND.map(child => this._resolveOneFilter(child, params));
+    }
+    if (f.OR) {
+      resolved.OR = f.OR.map(child => this._resolveOneFilter(child, params));
+    }
+    if ('value' in f) {
+      const value = f.value;
+      if (typeof value === 'object' && value !== null && isParameterReference(value)) {
+        if (!(value.name in params)) {
+          throw new UnboundParameterError(value.name);
         }
-        resolved[k] = params[paramName];
+        resolved.value = params[value.name];
       } else {
-        resolved[k] = v;
+        resolved.value = value;
       }
     }
 
@@ -141,10 +176,10 @@ export class ReadStepExecutor {
     params: Record<string, unknown>,
     transaction?: GraphTransaction,
   ): Promise<Row[]> {
-    let resolvedFilters: Array<Record<string, unknown>> | undefined;
+    let resolvedFilters: PropertyFilter[] | undefined;
     if (step.propertyFilters?.length) {
       resolvedFilters = this._resolvePropertyFilterParams(
-        step.propertyFilters as Array<Record<string, unknown>>,
+        step.propertyFilters,
         params,
       );
     }
@@ -169,14 +204,14 @@ export class ReadStepExecutor {
     }, this._maxDegreeOfParallelism);
   }
 
-  private _evaluatePropertyFilters(nodeProps: Record<string, unknown>, filters: Array<Record<string, unknown>>): boolean {
+  private _evaluatePropertyFilters(nodeProps: Record<string, unknown>, filters: PropertyFilter[]): boolean {
     for (const filter of filters) {
       if (!this._evaluateOneFilter(nodeProps, filter)) return false;
     }
     return true;
   }
 
-  private _evaluateOneFilter(nodeProps: Record<string, unknown>, filter: Record<string, unknown>): boolean {
+  private _evaluateOneFilter(nodeProps: Record<string, unknown>, filter: PropertyFilter): boolean {
     if (filter.AND && Array.isArray(filter.AND)) {
       return filter.AND.every(f => this._evaluateOneFilter(nodeProps, f));
     }
@@ -192,10 +227,10 @@ export class ReadStepExecutor {
     switch (op) {
       case '=': return actualValue === expectedValue;
       case '<>': return actualValue !== expectedValue;
-      case '>': return (actualValue as any) > (expectedValue as any);
-      case '<': return (actualValue as any) < (expectedValue as any);
-      case '>=': return (actualValue as any) >= (expectedValue as any);
-      case '<=': return (actualValue as any) <= (expectedValue as any);
+      case '>': return compareValues(actualValue, expectedValue, '>');
+      case '<': return compareValues(actualValue, expectedValue, '<');
+      case '>=': return compareValues(actualValue, expectedValue, '>=');
+      case '<=': return compareValues(actualValue, expectedValue, '<=');
       case 'CONTAINS': return typeof actualValue === 'string' && actualValue.includes(expectedValue as string);
       case 'STARTS_WITH': return typeof actualValue === 'string' && actualValue.startsWith(expectedValue as string);
       case 'ENDS_WITH': return typeof actualValue === 'string' && actualValue.endsWith(expectedValue as string);
@@ -219,7 +254,7 @@ export class ReadStepExecutor {
     params: Record<string, unknown>,
     transaction?: GraphTransaction,
   ): Promise<Row[]> {
-    let nodes: Node[];
+    let nodes: readonly Node[];
 
     switch (step.index) {
       case 'id': {
@@ -237,7 +272,7 @@ export class ReadStepExecutor {
           properties: [{ key: step.key!, value: resolvedValue, op: '=' }],
         };
         if (step.types?.length) filter.types = step.types;
-        nodes = await this._graph.getNodes({ filter, transaction } as any) as unknown as Node[];
+         nodes = await this._graph.getNodes({ filter, transaction });
         break;
       }
       default:
@@ -305,8 +340,8 @@ export class ReadStepExecutor {
 
     const edges =
       step.direction === 'out'
-        ? await this._graph.getEdgesFrom(sourceNode.id, { ...filterArg, transaction } as any)
-        : await this._graph.getEdgesTo(sourceNode.id, { ...filterArg, transaction } as any);
+        ? await this._graph.getEdgesFrom(sourceNode.id, { ...filterArg, transaction })
+        : await this._graph.getEdgesTo(sourceNode.id, { ...filterArg, transaction });
 
     const targetIds = edges.map(e => step.direction === 'out' ? e.targetId : e.sourceId);
     const uniqueIds = [...new Set(targetIds)];
@@ -391,8 +426,8 @@ export class ReadStepExecutor {
 
       const edges =
         step.direction === 'out'
-          ? await this._graph.getEdgesFrom(node.id, { ...filterArg, transaction } as any)
-          : await this._graph.getEdgesTo(node.id, { ...filterArg, transaction } as any);
+          ? await this._graph.getEdgesFrom(node.id, { ...filterArg, transaction })
+          : await this._graph.getEdgesTo(node.id, { ...filterArg, transaction });
 
       const edgeIds = edges.map(e => step.direction === 'out' ? e.targetId : e.sourceId);
       const uniqueIds = [...new Set(edgeIds)];
