@@ -202,6 +202,23 @@ export class RedisCache<T> implements ICacheProvider<T> {
     return this._maxSize;
   }
 
+  /**
+   * Closes the Redis client owned by this cache instance.
+   *
+   * RedisCache connects lazily, so closing an unused cache is a no-op. This is
+   * useful for application shutdown and for test cleanup when a cache owns a
+   * client created by the dynamically loaded Redis implementation.
+   */
+  async close(): Promise<void> {
+    const redis = this._redis;
+    this._redis = null;
+    this._redisReady = false;
+
+    if (redis && typeof redis.disconnect === 'function') {
+      redis.disconnect();
+    }
+  }
+
   async getAll(prefix: string, limit?: number): Promise<T[]> {
     const redis = await this._ensureRedis();
     const results: T[] = [];

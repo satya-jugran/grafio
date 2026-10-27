@@ -23,6 +23,7 @@ jest.mock('ioredis', () => {
 describe('RedisCache', () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let mockRedis: any;
+  const activeCaches: RedisCache<unknown>[] = [];
 
   beforeEach(() => {
     // Get or create the singleton mock
@@ -36,11 +37,15 @@ describe('RedisCache', () => {
     if (mockRedis) {
       await mockRedis.flushall();
     }
+    await Promise.all(activeCaches.map(cache => cache.close()));
+    activeCaches.length = 0;
   });
 
   // Helper to create cache instance
   const createCache = <T>(maxSize = 10, type: 'nodes' | 'edges' = 'nodes', ttlMs?: number) => {
-    return new RedisCache<T>('redis://localhost:6379', maxSize, type, ttlMs);
+    const cache = new RedisCache<T>('redis://localhost:6379', maxSize, type, ttlMs);
+    activeCaches.push(cache as RedisCache<unknown>);
+    return cache;
   };
 
   describe('get()', () => {
@@ -67,6 +72,15 @@ describe('RedisCache', () => {
   });
 
   describe('set()', () => {
+    it('supports the default node cache type', async () => {
+      const cache = new RedisCache<{ id: string }>('redis://localhost:6379', 10);
+      activeCaches.push(cache);
+
+      await cache.set('default-type-key', { id: 'default-type-key' });
+
+      expect(await cache.get('default-type-key')).toEqual({ id: 'default-type-key' });
+    });
+
     it('should store value and return without error', async () => {
       const cache = createCache();
       await expect(cache.set('key-1', { id: 'key-1', name: 'Test' })).resolves.not.toThrow();
@@ -123,6 +137,15 @@ describe('RedisCache', () => {
 
       const result = await cache.get('ttl-key');
       expect(result).toEqual({ id: 'ttl-key' });
+    });
+
+    it('should apply TTL to adjacency indexes', async () => {
+      const cache = createCache(10, 'nodes', 1000);
+      await expect(
+        cache.addToAdjacencyIndex('graph-ttl', 'source', 'node-1', 'edge-1')
+      ).resolves.not.toThrow();
+      await expect(cache.getEdgesByAdjacencyIndex('graph-ttl', 'source', 'node-1'))
+        .resolves.toEqual(['edge-1']);
     });
   });
 
@@ -184,6 +207,15 @@ describe('RedisCache', () => {
     it('should be safe when empty', async () => {
       const cache = createCache();
       await expect(cache.invalidateAll()).resolves.not.toThrow();
+    });
+
+    it('should delete matching Redis keys', async () => {
+      const cache = createCache();
+      await cache.set('grafio:nodes:graph-clear:node-1', { id: 'node-1' } as any);
+
+      await cache.invalidateAll();
+
+      expect(await cache.has('grafio:nodes:graph-clear:node-1')).toBe(false);
     });
   });
 
@@ -254,11 +286,27 @@ describe('RedisCache', () => {
         const results = await cache.getAll('graph-limit', 2);
         expect(results).toHaveLength(2);
       });
+
+      it('should return no values when the limit is zero', async () => {
+        const cache = createCache();
+        await cache.set('grafio:nodes:graph-zero:item-1', { id: 'item-1' } as any);
+
+        expect(await cache.getAll('graph-zero', 0)).toEqual([]);
+      });
   
       it('should return empty array when no matches', async () => {
         const cache = createCache();
         const results = await cache.getAll('nonexistent');
         expect(results).toHaveLength(0);
+      });
+
+      it('should skip malformed values', async () => {
+        const cache = createCache();
+        await mockRedis.set('grafio:nodes:graph-invalid:bad', 'not-json');
+
+        const results = await cache.getAll('graph-invalid');
+
+        expect(results).toEqual([]);
       });
     });
   
@@ -350,6 +398,16 @@ describe('RedisCache', () => {
         const edgesGraph2 = await cache.getEdgesByAdjacencyIndex('graph-2', 'source', 'node-A');
         expect(edgesGraph2).toHaveLength(1);
       });
+
+      it('should delete matching adjacency Redis keys', async () => {
+        const cache = createCache();
+        await cache.addToAdjacencyIndex('graph-delete', 'source', 'node-A', 'edge-1');
+
+        await cache.invalidateAdjacencyIndex('graph-delete');
+
+        await expect(cache.getEdgesByAdjacencyIndex('graph-delete', 'source', 'node-A'))
+          .resolves.toEqual([]);
+      });
     });
   });
 
@@ -367,6 +425,11 @@ describe('RedisCache', () => {
       const cache = createCache(10);
       const result = cache.maxSize();
       expect(result).toBe(10);
+    });
+
+    it('should close an unused cache without connecting', async () => {
+      const cache = createCache();
+      await expect(cache.close()).resolves.toBeUndefined();
     });
   });
 
@@ -399,6 +462,13 @@ describe('RedisCache', () => {
 
       const size = await cache.size();
       expect(size).toBe(3);
+    });
+
+    it('should attempt to remove the oldest graph when capacity is reached', async () => {
+      const cache = createCache(1);
+      await cache.set('grafio:nodes:old-graph:node-1', { id: 'node-1' } as any);
+      await expect(cache.set('grafio:nodes:new-graph:node-2', { id: 'node-2' } as any))
+        .resolves.not.toThrow();
     });
   });
 

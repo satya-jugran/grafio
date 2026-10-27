@@ -54,6 +54,8 @@ describe('GraphManager', () => {
     });
 
     it('should retain first instance on subsequent init() calls', () => {
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
       GraphManager.init({ cache: defaultCacheConfig });
       const firstInstance = GraphManager.getInstance();
 
@@ -61,6 +63,7 @@ describe('GraphManager', () => {
       const secondInstance = GraphManager.getInstance();
 
       expect(firstInstance).toBe(secondInstance);
+      warnSpy.mockRestore();
     });
   });
 
