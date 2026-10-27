@@ -42,7 +42,7 @@ RETURN a.name, b.name
 ```
 
 ```typescript
-const result = await engine.query(`
+const result = await engine.execute(`
   MATCH (a:Person)-[:KNOWS]->(b:Person)
   RETURN a.name, b.name
 `);
@@ -57,7 +57,7 @@ RETURN a.name, c.name
 ```
 
 ```typescript
-const result = await engine.query(`
+const result = await engine.execute(`
   MATCH (a:Person)-[:KNOWS*2]->(c:Person)
   RETURN a.name, c.name
 `);
@@ -72,7 +72,7 @@ RETURN a.name, d.name
 ```
 
 ```typescript
-const result = await engine.query(`
+const result = await engine.execute(`
   MATCH (a:Person)-[:KNOWS*3]->(d:Person)
   RETURN a.name, d.name
 `);
@@ -87,7 +87,7 @@ RETURN a.name, reachable.name
 ```
 
 ```typescript
-const result = await engine.query(`
+const result = await engine.execute(`
   MATCH (a:Person)-[:KNOWS*1..3]->(r:Person)
   RETURN a.name, r.name
 `);
@@ -102,7 +102,7 @@ RETURN a.name, b.name
 ```
 
 ```typescript
-const result = await engine.query(`
+const result = await engine.execute(`
   MATCH (a:Person)-[:KNOWS*2..2]->(b:Person)
   RETURN a.name, b.name
 `);
@@ -117,7 +117,7 @@ RETURN a.name, b.name
 ```
 
 ```typescript
-const result = await engine.query(`
+const result = await engine.execute(`
   MATCH (a:Person)-[:KNOWS*]->(b:Person)
   RETURN a.name, b.name
 `);
@@ -133,7 +133,7 @@ RETURN p
 ```
 
 ```typescript
-const result = await engine.query(`
+const result = await engine.execute(`
   MATCH p = (a:Person)-[:KNOWS*]->(b:Person)
   WHERE length(p) > 1
   RETURN p
@@ -148,7 +148,7 @@ RETURN DISTINCT a.name, b.name
 ```
 
 ```typescript
-const result = await engine.query(`
+const result = await engine.execute(`
   MATCH (a:Person)-[:KNOWS*1..2]->(b:Person)
   RETURN DISTINCT a.name, b.name
 `);
@@ -164,7 +164,7 @@ RETURN a.name, e.name
 ```
 
 ```typescript
-const result = await engine.query(`
+const result = await engine.execute(`
   MATCH (a:Person {name: 'Alice'})-[:KNOWS*1..3]->(e:Person {name: 'Eve'})
   RETURN a.name, e.name
 `);
@@ -200,12 +200,12 @@ async function main() {
   `);
 
   // Multi-hop queries
-  const foaf = await engine.query(`
+  const foaf = await engine.execute(`
     MATCH (me:Person {name: 'Alice'})-[:KNOWS*2]->(friend)
     RETURN DISTINCT friend.name
   `);
 
-  const reachable = await engine.query(`
+  const reachable = await engine.execute(`
     MATCH (me:Person {name: 'Alice'})-[:KNOWS*1..3]->(reachable)
     RETURN DISTINCT reachable.name
     ORDER BY reachable.name

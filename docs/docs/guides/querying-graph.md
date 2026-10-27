@@ -22,7 +22,7 @@ MATCH (n) RETURN n
 ```
 
 ```typescript
-const result = await engine.query('MATCH (n) RETURN n');
+const result = await engine.execute('MATCH (n) RETURN n');
 ```
 
 ### Match Nodes by Label

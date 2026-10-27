@@ -29,8 +29,8 @@ function pickId(meta: GraphMeta, offset: number): string {
 
 /**
  * Builds benchmark scenarios using Cypher queries instead of graph methods.
- * Only includes Read, Navigation, and Traversal categories since Cypher
- * is read-only and doesn't support write/delete operations.
+ * Includes read, write, navigation, and traversal categories supported by
+ * the Cypher execution layer.
  *
  * @param nodeCount - Node count used to determine if graph is "large"
  * @param factor - Iteration multiplier for this provider

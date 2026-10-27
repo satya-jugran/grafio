@@ -44,7 +44,7 @@ await engine.execute(`
 ### Filter by Category
 
 ```typescript
-const electronicsProducts = await engine.query(`
+const electronicsProducts = await engine.execute(`
   MATCH (c:Category {name: 'Electronics'})-[:CONTAINS]->(p:Product)
   RETURN p.name, p.price
 `);
@@ -53,7 +53,7 @@ const electronicsProducts = await engine.query(`
 ### Filter by Price
 
 ```typescript
-const affordableProducts = await engine.query(`
+const affordableProducts = await engine.execute(`
   MATCH (p:Product)
   WHERE p.price < 100
   RETURN p.name, p.price
@@ -65,7 +65,7 @@ const affordableProducts = await engine.query(`
 ### AND Conditions
 
 ```typescript
-const cheapInStock = await engine.query(`
+const cheapInStock = await engine.execute(`
   MATCH (p:Product)
   WHERE p.price < 100 AND p.inStock = true
   RETURN p.name, p.price
@@ -75,7 +75,7 @@ const cheapInStock = await engine.query(`
 ### OR Conditions
 
 ```typescript
-const premiumOrInStock = await engine.query(`
+const premiumOrInStock = await engine.execute(`
   MATCH (p:Product)
   WHERE p.price > 500 OR p.inStock = true
   RETURN p.name, p.price, p.inStock
@@ -85,7 +85,7 @@ const premiumOrInStock = await engine.query(`
 ### Complex Filters
 
 ```typescript
-const electronicsUnder500 = await engine.query(`
+const electronicsUnder500 = await engine.execute(`
   MATCH (c:Category {name: 'Electronics'})-[:CONTAINS]->(p:Product)
   WHERE p.price < 500 AND p.inStock = true
   RETURN p.name, p.price
@@ -98,7 +98,7 @@ const electronicsUnder500 = await engine.query(`
 ### CONTAINS
 
 ```typescript
-const nameSearch = await engine.query(`
+const nameSearch = await engine.execute(`
   MATCH (p:Product)
   WHERE p.name CONTAINS 'phone'
   RETURN p.name
@@ -108,7 +108,7 @@ const nameSearch = await engine.query(`
 ### STARTS WITH / ENDS WITH
 
 ```typescript
-const tProducts = await engine.query(`
+const tProducts = await engine.execute(`
   MATCH (p:Product)
   WHERE p.name STARTS WITH 'T'
   RETURN p.name
@@ -118,7 +118,7 @@ const tProducts = await engine.query(`
 ## Step 5: List Filters (IN / NOT IN)
 
 ```typescript
-const specificProducts = await engine.query(`
+const specificProducts = await engine.execute(`
   MATCH (p:Product)
   WHERE p.name IN ['Laptop', 'Jeans']
   RETURN p.name
@@ -128,7 +128,7 @@ const specificProducts = await engine.query(`
 ### NOT IN
 
 ```typescript
-const excludeCategories = await engine.query(`
+const excludeCategories = await engine.execute(`
   MATCH (p:Product)
   WHERE p.name NOT IN ['T-Shirt']
   RETURN p.name
@@ -139,14 +139,14 @@ const excludeCategories = await engine.query(`
 
 ```typescript
 // Products without discount
-const noDiscount = await engine.query(`
+const noDiscount = await engine.execute(`
   MATCH (p:Product)
   WHERE p.discount IS NULL
   RETURN p.name
 `);
 
 // Products with discount
-const withDiscount = await engine.query(`
+const withDiscount = await engine.execute(`
   MATCH (p:Product)
   WHERE p.discount IS NOT NULL
   RETURN p.name
@@ -157,7 +157,7 @@ const withDiscount = await engine.query(`
 
 ```typescript
 // First page
-const page1 = await engine.query(`
+const page1 = await engine.execute(`
   MATCH (p:Product)
   RETURN p.name, p.price
   ORDER BY p.price
@@ -165,7 +165,7 @@ const page1 = await engine.query(`
 `);
 
 // Second page
-const page2 = await engine.query(`
+const page2 = await engine.execute(`
   MATCH (p:Product)
   RETURN p.name, p.price
   ORDER BY p.price
@@ -176,7 +176,7 @@ const page2 = await engine.query(`
 ## Step 8: Aggregation with Filters
 
 ```typescript
-const stats = await engine.query(`
+const stats = await engine.execute(`
   MATCH (p:Product)
   WHERE p.inStock = true
   RETURN COUNT(*) AS total,
@@ -189,7 +189,7 @@ const stats = await engine.query(`
 ### Group by Category
 
 ```typescript
-const byCategory = await engine.query(`
+const byCategory = await engine.execute(`
   MATCH (c:Category)-[:CONTAINS]->(p:Product)
   WHERE p.inStock = true
   RETURN c.name AS category,
@@ -238,7 +238,7 @@ async function filterProducts(filters: {
     query += ` SKIP ${filters.page * filters.pageSize} LIMIT ${filters.pageSize}`;
   }
 
-  return engine.query(query);
+  return engine.execute(query);
 }
 
 // Usage

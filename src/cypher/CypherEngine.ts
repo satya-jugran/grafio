@@ -5,10 +5,10 @@
  * {@link Lexer} → {@link Parser} → {@link Semantic} → {@link Planner} → {@link Executor}.
  *
  * ### Validation gate
- * After tokenisation, the engine scans for unsupported clauses (write,
- * aggregation, UNWIND, etc.) and throws
- * {@link CypherNotSupportedError}. This keeps the public API read-only
- * while the internal pipeline remains permissive and extensible.
+ * After tokenisation, the engine scans for unsupported constructs and throws
+ * {@link CypherNotSupportedError}. This keeps unsupported syntax from reaching
+ * the planner while allowing the implemented read, write, aggregation, and
+ * query-pipeline features to share one public API.
  *
  * ### Transaction support
  * Transactions can be passed via {@link CypherQueryOptions.transaction}.
@@ -117,15 +117,16 @@ export class CypherEngine {
   public async execute(query: string, params: Record<string, unknown>, options?: CypherQueryOptions): Promise<CypherResult & { executionPlan?: string }>;
 
   /**
-   * Parse, plan, and execute a read-only Cypher query string.
+   * Parse, plan, and execute a Cypher query string.
    *
-   * Supported clauses: `MATCH`, `WHERE`, `RETURN`, `ORDER BY`, `SKIP`, `LIMIT`.
+   * The engine supports the implemented openCypher read, write, aggregation,
+   * filtering, ordering, pagination, and query-pipeline features.
    *
    * @param query  - Cypher query string.
    * @param params - Named parameter map (`$key` → value).
    * @returns A {@link CypherResult} containing rows and execution summary.
    * @throws {CypherSyntaxError}       on tokenisation / parse errors.
-   * @throws {CypherNotSupportedError} on unsupported clauses (UNWIND, etc.).
+   * @throws {CypherNotSupportedError} on unsupported clauses or constructs.
    * @throws {CypherSemanticError}     on variable scope violations.
    * @throws {CypherRuntimeError}      on execution-time errors (unbound parameter, etc.).
    */

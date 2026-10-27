@@ -59,7 +59,7 @@ await engine.execute(`
 const { CypherEngine } = await import('grafio/cypher');
 const engine = new CypherEngine(graph);
 
-const result = await engine.query(`
+const result = await engine.execute(`
   MATCH (course:Course {title: 'TypeScript Fundamentals'})-[:CONTAINS]->(chapter:Chapter)
   RETURN chapter.title AS title, chapter.order AS order
   ORDER BY chapter.order
@@ -71,7 +71,7 @@ console.log(`Chapters: ${result.rows.map(r => r.title)}`);
 ### Get Author of a Course
 
 ```typescript
-const result = await engine.query(`
+const result = await engine.execute(`
   MATCH (author:Author)-[:AUTHOR_OF]->(course:Course {title: 'TypeScript Fundamentals'})
   RETURN author.name AS authorName
 `);
@@ -82,7 +82,7 @@ console.log(`Author: ${result.rows[0]?.authorName}`);
 ### Get Full Course Structure with Cypher
 
 ```typescript
-const result = await engine.query(`
+const result = await engine.execute(`
   MATCH (author:Author)-[:AUTHOR_OF]->(course:Course)-[:CONTAINS]->(chapter:Chapter)
   RETURN author.name AS author, course.title AS course, chapter.title AS chapter, chapter.order AS order
   ORDER BY course, chapter.order
@@ -147,7 +147,7 @@ async function main() {
   `);
 
   // Query
-  const chapters = await engine.query(`
+  const chapters = await engine.execute(`
     MATCH (course:Course)-[:CONTAINS]->(chapter:Chapter)
     RETURN chapter.title AS title, chapter.order AS order
   `);

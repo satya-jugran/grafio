@@ -39,7 +39,7 @@ await engine.execute(`
 `);
 
 // Query
-const result = await engine.query(`
+const result = await engine.execute(`
   MATCH (c:Course)-[:CONTAINS]->(ch:Chapter)
   RETURN c.name AS course, collect(ch.name) AS chapters
 `);

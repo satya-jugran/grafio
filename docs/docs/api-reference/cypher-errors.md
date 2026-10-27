@@ -21,7 +21,7 @@ import {
 ```
 CypherError (base)
 ├── CypherSyntaxError      — Lexer/Parser errors with line:column
-├── CypherNotSupportedError — Unsupported syntax (CREATE, WITH, etc.)
+├── CypherNotSupportedError — Syntax not implemented by the current engine
 ├── CypherSemanticError     — Unresolved variables, duplicate bindings
 └── CypherRuntimeError
     ├── UnboundParameterError — $param not provided in params map
@@ -34,7 +34,7 @@ Thrown when the query string has syntax errors.
 
 ```typescript
 try {
-  const result = await engine.query('MATCH (p) RETURN p.');
+  const result = await engine.execute('MATCH (p) RETURN p.');
 } catch (error) {
   if (error instanceof CypherSyntaxError) {
     console.log(`Line ${error.line}, Column ${error.column}`);
@@ -49,7 +49,7 @@ Thrown when using unsupported Cypher features.
 
 ```typescript
 try {
-  const result = await engine.query('CREATE (p:Person)');
+  const result = await engine.execute('CREATE (p:Person)');
 } catch (error) {
   if (error instanceof CypherNotSupportedError) {
     console.log(`Unsupported: ${error.message}`);
@@ -57,9 +57,9 @@ try {
 }
 ```
 
-**Common unsupported features:**
-- `CREATE` / `DELETE` / `SET` / `REMOVE` / `MERGE`
-- `WITH` / `UNWIND`
+The engine supports the implemented read, write, aggregation, and query-pipeline
+features. This error is reserved for syntax that is not implemented by the
+current version.
 
 ## CypherSemanticError
 
@@ -67,7 +67,7 @@ Thrown when the query has valid syntax but invalid semantics.
 
 ```typescript
 try {
-  const result = await engine.query('MATCH (p:NonExistent) RETURN x.y.z');
+  const result = await engine.execute('MATCH (p:NonExistent) RETURN x.y.z');
 } catch (error) {
   if (error instanceof CypherSemanticError) {
     console.log(`Semantic error: ${error.message}`);
@@ -90,7 +90,7 @@ Thrown when a `$parameter` is not provided in the params object.
 
 ```typescript
 try {
-  const result = await engine.query(
+  const result = await engine.execute(
     'MATCH (p:Person {name: $name}) RETURN p',
     {}  // missing 'name' parameter
   );
@@ -107,7 +107,7 @@ Thrown when an operator receives the wrong type.
 
 ```typescript
 try {
-  const result = await engine.query(
+  const result = await engine.execute(
     "MATCH (p:Person) WHERE p.age IN 'not an array' RETURN p"
   );
 } catch (error) {
@@ -128,7 +128,7 @@ try {
 import { CypherError } from 'grafio/cypher';
 
 try {
-  const result = await engine.query('INVALID QUERY');
+  const result = await engine.execute('INVALID QUERY');
 } catch (error) {
   if (error instanceof CypherError) {
     console.log(`Cypher error: ${error.message}`);

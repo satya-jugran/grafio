@@ -24,8 +24,8 @@ npm install grafio
 ## Quick Start
 
 ```typescript
-import { CypherEngine } from 'grafio';
-import { InMemoryGraphFactory } from 'grafio/storage';
+import { InMemoryGraphFactory } from 'grafio';
+import { CypherEngine } from 'grafio/cypher';
 
 // Create graph via factory
 const factory = new InMemoryGraphFactory();
@@ -33,23 +33,24 @@ const graph = factory.forGraph('social-network');
 const cypher = new CypherEngine(graph);
 
 // Adding social network
-cypher.execute(`
+await cypher.execute(`
     CREATE (a:Person {id: 'alice', name: 'Alice', age: 30}),
     CREATE (b:Person {id: 'bob', name: 'Bob', age: 25}),
     CREATE (c:Person {id: 'charlie', name: 'Charlie', age: 35})
 `);
 // Adding relationships
-cypher.execute(`
+await cypher.execute(`
   MATCH (a:Person {id: 'alice'}), (b:Person {id: 'bob'})
   CREATE (a)-[:KNOWS {since: 2020}]->(b)
 `);
-cypher.execute(`
+await cypher.execute(`
   MATCH (b:Person {id: 'bob'}), (c:Person {id: 'charlie'})
   CREATE (b)-[:KNOWS {since: 2019}]->(c)
 `);
 
 // Querying the network
-const friends = cypher.execute('MATCH (p:Person)-[:KNOWS]->(friend:Person) RETURN p.name as name, friend.name as friend');
+const result = await cypher.execute('MATCH (p:Person)-[:KNOWS]->(friend:Person) RETURN p.name as name, friend.name as friend');
+const friends = result.rows;
 
 /* Returns: 
     [

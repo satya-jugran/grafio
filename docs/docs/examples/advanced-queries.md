@@ -5,7 +5,7 @@ Complex Cypher query patterns.
 ## Variable-Length Paths
 
 ```typescript
-const result = await engine.query(`
+const result = await engine.execute(`
   MATCH (a:Person)-[:KNOWS*2..3]->(b:Person)
   RETURN DISTINCT a.name, b.name
 `);
@@ -14,7 +14,7 @@ const result = await engine.query(`
 ## Aggregations with GROUP BY
 
 ```typescript
-const result = await engine.query(`
+const result = await engine.execute(`
   MATCH (p:Person)
   RETURN p.city, COUNT(*) AS count, AVG(p.age) AS avgAge
   ORDER BY count DESC
@@ -24,7 +24,7 @@ const result = await engine.query(`
 ## Named Paths
 
 ```typescript
-const result = await engine.query(`
+const result = await engine.execute(`
   MATCH p = (a:Person)-[:KNOWS]->(b:Person)-[:KNOWS]->(c:Person)
   RETURN p
 `);

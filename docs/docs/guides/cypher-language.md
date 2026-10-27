@@ -25,7 +25,7 @@ RETURN p.name, p.age
 ```
 
 ```typescript
-const result = await engine.query(`
+const result = await engine.execute(`
   MATCH (p:Person) 
   RETURN p.name, p.age
 `);

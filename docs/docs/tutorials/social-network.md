@@ -47,7 +47,7 @@ await engine.execute(`
 ### Find All Friends of Alice
 
 ```typescript
-const result = await engine.query(`
+const result = await engine.execute(`
   MATCH (alice:User {name: 'Alice'})-[:KNOWS]->(friend:User)
   RETURN friend.name AS friendName
 `);
@@ -58,7 +58,7 @@ console.log(`Alice's friends: ${result.rows.map(r => r.friendName)}`);
 ### Find Alice's Followers
 
 ```typescript
-const result = await engine.query(`
+const result = await engine.execute(`
   MATCH (follower:User)-[:FOLLOWS]->(alice:User {name: 'Alice'})
   RETURN follower.name AS followerName
 `);
@@ -71,7 +71,7 @@ console.log(`Alice's followers: ${result.rows.map(r => r.followerName)}`);
 ### Find Users in NYC using Cypher
 
 ```typescript
-const result = await engine.query(`
+const result = await engine.execute(`
   MATCH (u:User) WHERE u.city = 'NYC' RETURN u.name, u.age
 `);
 ```
@@ -79,7 +79,7 @@ const result = await engine.query(`
 ### Find Users Over 30
 
 ```typescript
-const result = await engine.query(`
+const result = await engine.execute(`
   MATCH (u:User) WHERE u.age > 30 RETURN u.name, u.age
 `);
 ```
@@ -124,14 +124,14 @@ async function main() {
   `);
 
   // Find Alice's friends
-  const friends = await engine.query(`
+  const friends = await engine.execute(`
     MATCH (alice:User {name: 'Alice'})-[:KNOWS]->(friend:User)
     RETURN friend.name AS friendName
   `);
   console.log(`Alice's friends: ${friends.rows.map(r => r.friendName)}`);
 
   // Find users in NYC
-  const nycUsers = await engine.query(`
+  const nycUsers = await engine.execute(`
     MATCH (u:User {city: 'NYC'}) RETURN u.name AS name
   `);
   console.log(`NYC users: ${nycUsers.rows.map(r => r.name)}`);

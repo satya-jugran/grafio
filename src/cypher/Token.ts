@@ -8,13 +8,13 @@
  * Enumeration of all token kinds recognised by the Cypher lexer.
  *
  * The enum is split into logical groups:
- * - **Read keywords** — used in the v1 read-only grammar.
- * - **Future keywords** — tokenised but gated by {@link CypherEngine}; reserved for future extensibility.
+ * - **Query keywords** — clauses and operators used by the query grammar.
+ * - **Mutation and advanced keywords** — write, aggregation, DDL, and pipeline constructs.
  * - **Literals** — scalar values and parameter placeholders.
  * - **Identifiers & punctuation** — names, operators, and structural tokens.
  */
 export const enum TokenKind {
-  // ── Read keywords (v1) ──────────────────────────────────────────
+  // ── Query keywords ──────────────────────────────────────────────
   MATCH = 'MATCH',
   WHERE = 'WHERE',
   RETURN = 'RETURN',
@@ -48,7 +48,7 @@ export const enum TokenKind {
   ENDS = 'ENDS',
   CONTAINS = 'CONTAINS',
 
-  // ── Future keywords (tokenised, gated in CypherEngine) ──────────
+  // ── Mutation and advanced query keywords ────────────────────────
   CREATE = 'CREATE',
   MERGE = 'MERGE',
   SET = 'SET',

@@ -50,7 +50,7 @@ async function main() {
 
   // 4. Query the graph using Cypher
 
-  const result = await engine.query(`
+  const result = await engine.execute(`
     MATCH (author:Author)-[:AUTHOR_OF]->(course:Course)
     RETURN author.name AS authorName, course.title AS courseTitle
   `);
@@ -60,7 +60,7 @@ async function main() {
   }
 
   // Get all nodes
-  const allNodes = await engine.query('MATCH (n) RETURN n');
+  const allNodes = await engine.execute('MATCH (n) RETURN n');
   console.log(`Total nodes: ${allNodes.rows.length}`);
 }
 

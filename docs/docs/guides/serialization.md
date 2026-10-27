@@ -81,7 +81,8 @@ const graph = await Graph.importJSON(testData);
 ## Complete Example
 
 ```typescript
-import { InMemoryGraphFactory, CypherEngine } from 'grafio';
+import { InMemoryGraphFactory } from 'grafio';
+import { CypherEngine } from 'grafio/cypher';
 
 const factory = new InMemoryGraphFactory();
 const graph = factory.forGraph('default');

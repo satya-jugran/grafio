@@ -35,9 +35,8 @@ export interface CypherResult {
 /**
  * Execution summary returned with every query result.
  *
- * Write counters are always `0` for read-only v1 queries; they are
- * initialised by the Executor and incremented by write steps when
- * ungated in a future version.
+ * Write counters are initialised by the Executor and incremented by the
+ * applicable write steps. They remain `0` for read-only queries.
  */
 export interface CypherSummary {
   /** Total execution time in milliseconds. */

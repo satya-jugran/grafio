@@ -142,7 +142,7 @@ await engine.execute(`
 `);
 
 // Query the graph
-const result = await engine.query(`
+const result = await engine.execute(`
   MATCH (a:Person)-[:KNOWS]->(b:Person)
   RETURN a.name, b.name
 `);

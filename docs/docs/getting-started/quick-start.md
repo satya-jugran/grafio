@@ -39,7 +39,7 @@ await engine.execute(`
 `);
 
 // Find all authors and their courses
-const result = await engine.query(`
+const result = await engine.execute(`
   MATCH (author:Author)-[:AUTHOR_OF]->(course:Course)
   RETURN author.name AS authorName, course.name AS courseName
 `);
@@ -49,7 +49,7 @@ for (const row of result.rows) {
 }
 
 // Get all nodes using Cypher
-const allNodes = await engine.query('MATCH (n) RETURN n');
+const allNodes = await engine.execute('MATCH (n) RETURN n');
 ```
 
 ## Key Concepts

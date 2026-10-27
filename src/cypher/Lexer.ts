@@ -59,7 +59,7 @@ const KEYWORDS: Record<string, TokenKind> = {
   starts: TokenKind.STARTS,
   ends: TokenKind.ENDS,
   contains: TokenKind.CONTAINS,
-  // Future keywords
+  // Mutation and advanced query keywords
   create: TokenKind.CREATE,
   merge: TokenKind.MERGE,
   set: TokenKind.SET,

@@ -23,13 +23,14 @@ new CypherEngine(graph: Graph, options?: CypherEngineOptions)
 | `graph` | `Graph` | ✅ | The graph to query |
 | `options` | `CypherEngineOptions` | ❌ | Engine configuration |
 
-## query()
+## execute()
 
 ```typescript
-async query(
+async execute(
   cypher: string,
-  params?: Record<string, unknown>
-): Promise<CypherResult>
+  params?: Record<string, unknown> | CypherQueryOptions,
+  options?: CypherQueryOptions
+): Promise<CypherResult & { executionPlan?: string }>
 ```
 
 Executes a Cypher query and returns the results.
@@ -39,48 +40,33 @@ Executes a Cypher query and returns the results.
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
 | `cypher` | `string` | ✅ | The Cypher query string |
-| `params` | `Record<string, unknown>` | ❌ | Query parameters |
+| `params` | `Record<string, unknown> \| CypherQueryOptions` | ❌ | Query parameters or per-query options |
+| `options` | `CypherQueryOptions` | ❌ | Per-query options |
 
-**Returns:** `Promise<CypherResult>`
+**Returns:** `Promise<CypherResult & { executionPlan?: string }>`
 
 ### CypherResult Shape
 
 ```typescript
 interface CypherResult {
+  columns: string[];       // Ordered output column names
   rows: CypherRow[];     // Array of row objects
   summary: CypherSummary; // Execution metadata
 }
 
-type CypherRow = Map<string, unknown>;  // Column name → value
+type CypherRow = Record<string, unknown>;  // Column name → value
 
 interface CypherSummary {
   queryTimeMs: number;     // Execution duration
-  nodesCreated: number;    // Always 0 (read-only)
-  edgesCreated: number;    // Always 0 (read-only)
+  nodesCreated: number;
+  nodesDeleted: number;
+  edgesCreated: number;
+  edgesDeleted: number;
+  propertiesSet: number;
+  indexesCreated: number;
+  indexesDeleted: number;
 }
 ```
-
-## execute()
-
-```typescript
-async execute(
-  cypher: string,
-  params?: Record<string, unknown>,
-  options?: CypherEngineOptions
-): Promise<CypherResult & { executionPlan: string }>
-```
-
-Executes a query with runtime statistics.
-
-**Parameters:**
-
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| `cypher` | `string` | ✅ | The Cypher query string |
-| `params` | `Record<string, unknown>` | ❌ | Query parameters |
-| `options` | `CypherEngineOptions` | ❌ | Execution options |
-
-**Returns:** `Promise<CypherResult & { executionPlan: string }>`
 
 ### executionPlan Option
 
@@ -88,7 +74,7 @@ Executes a query with runtime statistics.
 const result = await engine.execute(
   'MATCH (p:Person) RETURN p.name',
   {},
-  { executionPlan: { format: 'json' | 'text' | 'mermaid' } }
+  { executionPlan: { format: 'json' } }
 );
 ```
 
@@ -118,7 +104,7 @@ Returns the logical query plan without executing the query.
 
 ```typescript
 const plan = await engine.getQueryPlan('MATCH (p:Person) RETURN p.name');
-// { plan: { steps: [...] } }
+// JSON string containing the planned steps
 ```
 
 ### Text Format
@@ -155,7 +141,7 @@ import {
 } from 'grafio/cypher';
 
 try {
-  const result = await engine.query('MATCH (p) RETURN p');
+  const result = await engine.execute('MATCH (p) RETURN p');
 } catch (error) {
   if (error instanceof CypherSyntaxError) {
     console.log(`Syntax error at line ${error.line}, column ${error.column}`);
@@ -170,14 +156,14 @@ try {
 ### Basic Query
 
 ```typescript
-const result = await engine.query('MATCH (p:Person) RETURN p.name, p.age');
+const result = await engine.execute('MATCH (p:Person) RETURN p.name, p.age');
 // result.rows = [{ 'p.name': 'Alice', 'p.age': 30 }, ...]
 ```
 
 ### Parameterized Query
 
 ```typescript
-const result = await engine.query(
+const result = await engine.execute(
   'MATCH (p:Person {name: $name}) RETURN p',
   { name: 'Alice' }
 );
@@ -186,7 +172,7 @@ const result = await engine.query(
 ### Aggregation
 
 ```typescript
-const result = await engine.query(`
+const result = await engine.execute(`
   MATCH (p:Person) 
   RETURN p.city, COUNT(*) AS cnt 
   ORDER BY cnt DESC
@@ -196,7 +182,7 @@ const result = await engine.query(`
 ### Pattern Matching
 
 ```typescript
-const result = await engine.query(`
+const result = await engine.execute(`
   MATCH (a:Person)-[:KNOWS]->(b:Person)-[:KNOWS]->(c:Person) 
   RETURN DISTINCT a.name, c.name
 `);
