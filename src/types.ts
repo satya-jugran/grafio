@@ -86,6 +86,20 @@ export interface StorageQueryOptions extends QueryOptions {
   transaction?: ITransactionHandle;
 }
 
+export type PrimitiveProperty = string | number | boolean | null | undefined;
+
+/**
+ * Patch descriptor for updating properties on a node or edge in a single operation.
+ */
+export interface PropertyPatch {
+  /** Key-value pairs to set or upsert */
+  set?: Readonly<Record<string, unknown>>;
+  /** Property keys to remove */
+  unset?: readonly string[];
+  /** If true, clears existing properties before applying `set` */
+  replace?: boolean;
+}
+
 /**
  * Data transfer object for Node serialization
  */
@@ -95,6 +109,17 @@ export interface NodeData {
   createdOn?: number;
   updatedOn?: number;
   properties: Record<string, unknown>;
+}
+
+/**
+ * Immutable Node data view returned by Copy-on-Write storage reads.
+ */
+export interface ReadonlyNodeData {
+  readonly id: string;
+  readonly labels: readonly string[];
+  readonly createdOn?: number;
+  readonly updatedOn?: number;
+  readonly properties: Readonly<Record<string, unknown>>;
 }
 
 /**
@@ -108,6 +133,19 @@ export interface EdgeData {
   createdOn?: number;
   updatedOn?: number;
   properties: Record<string, unknown>;
+}
+
+/**
+ * Immutable Edge data view returned by Copy-on-Write storage reads.
+ */
+export interface ReadonlyEdgeData {
+  readonly id: string;
+  readonly sourceId: string;
+  readonly targetId: string;
+  readonly type: string;
+  readonly createdOn?: number;
+  readonly updatedOn?: number;
+  readonly properties: Readonly<Record<string, unknown>>;
 }
 
 /**

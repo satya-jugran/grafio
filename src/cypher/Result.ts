@@ -51,6 +51,8 @@ export interface CypherSummary {
   edgesDeleted: number;
   /** Number of properties set */
   propertiesSet: number;
+  /** Number of labels removed */
+  labelsRemoved: number;
   /** Number of indexes created by this query. */
   indexesCreated: number;
   /** Number of indexes deleted by this query. */

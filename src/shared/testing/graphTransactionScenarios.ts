@@ -278,7 +278,7 @@ export function runGraphTransactionScenarios(
         const txn = graph.createTransaction();
         await txn.begin();
 
-        await graph.addNodeProperty(node.id, 'age', 30, txn);
+        await graph.setNodeProperties(node.id, { age: 30 }, { transaction: txn });
         await txn.commit();
 
         const updated = await graph.getNode(node.id);
@@ -291,7 +291,7 @@ export function runGraphTransactionScenarios(
         const txn = graph.createTransaction();
         await txn.begin();
 
-        await graph.addNodeProperty(node.id, 'age', 30, txn);
+        await graph.setNodeProperties(node.id, { age: 30 }, { transaction: txn });
         await txn.rollback();
 
         const updated = await graph.getNode(node.id);
@@ -304,7 +304,7 @@ export function runGraphTransactionScenarios(
         const txn = graph.createTransaction();
         await txn.begin();
 
-        await graph.updateNodeProperty(node.id, 'age', 30, txn);
+        await graph.setNodeProperties(node.id, { age: 30 }, { transaction: txn });
         await txn.commit();
 
         const updated = await graph.getNode(node.id);
@@ -317,7 +317,7 @@ export function runGraphTransactionScenarios(
         const txn = graph.createTransaction();
         await txn.begin();
 
-        await graph.updateNodeProperty(node.id, 'age', 30, txn);
+        await graph.setNodeProperties(node.id, { age: 30 }, { transaction: txn });
         await txn.rollback();
 
         const updated = await graph.getNode(node.id);
@@ -330,7 +330,7 @@ export function runGraphTransactionScenarios(
         const txn = graph.createTransaction();
         await txn.begin();
 
-        await graph.deleteNodeProperty(node.id, 'age', txn);
+        await graph.unsetNodeProperties(node.id, ['age'], txn);
         await txn.commit();
 
         const updated = await graph.getNode(node.id);
@@ -343,7 +343,7 @@ export function runGraphTransactionScenarios(
         const txn = graph.createTransaction();
         await txn.begin();
 
-        await graph.deleteNodeProperty(node.id, 'age', txn);
+        await graph.unsetNodeProperties(node.id, ['age'], txn);
         await txn.rollback();
 
         const updated = await graph.getNode(node.id);
@@ -356,7 +356,7 @@ export function runGraphTransactionScenarios(
         const txn = graph.createTransaction();
         await txn.begin();
 
-        await graph.clearNodeProperties(node.id, txn);
+        await graph.setNodeProperties(node.id, {}, { merge: false, transaction: txn });
         await txn.commit();
 
         const updated = await graph.getNode(node.id);
@@ -369,7 +369,7 @@ export function runGraphTransactionScenarios(
         const txn = graph.createTransaction();
         await txn.begin();
 
-        await graph.clearNodeProperties(node.id, txn);
+        await graph.setNodeProperties(node.id, {}, { merge: false, transaction: txn });
         await txn.rollback();
 
         const updated = await graph.getNode(node.id);
@@ -390,7 +390,7 @@ export function runGraphTransactionScenarios(
         const txn = graph.createTransaction();
         await txn.begin();
 
-        await graph.addEdgeProperty(edge.id, 'since', 2020, txn);
+        await graph.setEdgeProperties(edge.id, { since: 2020 }, { transaction: txn });
         await txn.commit();
 
         const updated = await graph.getEdge(edge.id);
@@ -405,7 +405,7 @@ export function runGraphTransactionScenarios(
         const txn = graph.createTransaction();
         await txn.begin();
 
-        await graph.addEdgeProperty(edge.id, 'since', 2020, txn);
+        await graph.setEdgeProperties(edge.id, { since: 2020 }, { transaction: txn });
         await txn.rollback();
 
         const updated = await graph.getEdge(edge.id);
@@ -420,7 +420,7 @@ export function runGraphTransactionScenarios(
         const txn = graph.createTransaction();
         await txn.begin();
 
-        await graph.updateEdgeProperty(edge.id, 'since', 2020, txn);
+        await graph.setEdgeProperties(edge.id, { since: 2020 }, { transaction: txn });
         await txn.commit();
 
         const updated = await graph.getEdge(edge.id);
@@ -435,7 +435,7 @@ export function runGraphTransactionScenarios(
         const txn = graph.createTransaction();
         await txn.begin();
 
-        await graph.updateEdgeProperty(edge.id, 'since', 2020, txn);
+        await graph.setEdgeProperties(edge.id, { since: 2020 }, { transaction: txn });
         await txn.rollback();
 
         const updated = await graph.getEdge(edge.id);
@@ -450,7 +450,7 @@ export function runGraphTransactionScenarios(
         const txn = graph.createTransaction();
         await txn.begin();
 
-        await graph.deleteEdgeProperty(edge.id, 'since', txn);
+        await graph.unsetEdgeProperties(edge.id, ['since'], txn);
         await txn.commit();
 
         const updated = await graph.getEdge(edge.id);
@@ -465,7 +465,7 @@ export function runGraphTransactionScenarios(
         const txn = graph.createTransaction();
         await txn.begin();
 
-        await graph.deleteEdgeProperty(edge.id, 'since', txn);
+        await graph.unsetEdgeProperties(edge.id, ['since'], txn);
         await txn.rollback();
 
         const updated = await graph.getEdge(edge.id);
@@ -480,7 +480,7 @@ export function runGraphTransactionScenarios(
         const txn = graph.createTransaction();
         await txn.begin();
 
-        await graph.clearEdgeProperties(edge.id, txn);
+        await graph.setEdgeProperties(edge.id, {}, { merge: false, transaction: txn });
         await txn.commit();
 
         const updated = await graph.getEdge(edge.id);
@@ -495,7 +495,7 @@ export function runGraphTransactionScenarios(
         const txn = graph.createTransaction();
         await txn.begin();
 
-        await graph.clearEdgeProperties(edge.id, txn);
+        await graph.setEdgeProperties(edge.id, {}, { merge: false, transaction: txn });
         await txn.rollback();
 
         const updated = await graph.getEdge(edge.id);
@@ -515,7 +515,7 @@ export function runGraphTransactionScenarios(
         const alice = await graph.addNode('Person', { name: 'Alice' }, txn);
         const bob = await graph.addNode('Person', { name: 'Bob' }, txn);
         await graph.addEdge(alice.id, bob.id, 'KNOWS', { since: 2020 }, txn);
-        await graph.addNodeProperty(alice.id, 'age', 30, txn);
+        await graph.setNodeProperties(alice.id, { age: 30 }, { transaction: txn });
 
         await txn.commit();
 
@@ -535,7 +535,7 @@ export function runGraphTransactionScenarios(
         const alice = await graph.addNode('Person', { name: 'Alice' }, txn);
         const bob = await graph.addNode('Person', { name: 'Bob' }, txn);
         await graph.addEdge(alice.id, bob.id, 'KNOWS', { since: 2020 }, txn);
-        await graph.addNodeProperty(alice.id, 'age', 30, txn);
+        await graph.setNodeProperties(alice.id, { age: 30 }, { transaction: txn });
 
         await txn.rollback();
 
@@ -567,12 +567,12 @@ export function runGraphTransactionScenarios(
         const newEdge = await graph.addEdge(alice.id, carol.id, 'KNOWS', { weight: 0.9 }, txn);
 
         // Add properties within transaction
-        await graph.addNodeProperty(bob.id, 'status', 'active', txn);
-        await graph.addEdgeProperty(existingEdge.id, 'status', 'verified', txn);
+        await graph.setNodeProperties(bob.id, { status: 'active' }, { transaction: txn });
+        await graph.setEdgeProperties(existingEdge.id, { status: 'verified' }, { transaction: txn });
 
         // Add new properties to existing nodes within transaction
-        await graph.addNodeProperty(alice.id, 'age', 30, txn);
-        await graph.addEdgeProperty(newEdge.id, 'verified', true, txn);
+        await graph.setNodeProperties(alice.id, { age: 30 }, { transaction: txn });
+        await graph.setEdgeProperties(newEdge.id, { verified: true }, { transaction: txn });
 
         // Query transaction-aware methods WITHIN transaction - should see uncommitted changes
         expect(await graph.getNodes({ transaction: txn })).toHaveLength(4); // alice, bob, carol, dave
@@ -613,7 +613,7 @@ export function runGraphTransactionScenarios(
         await txn.begin();
 
         const carol = await graph.addNode('Person', { name: 'Carol', email: 'carol@example.com' }, txn);
-        await graph.addNodeProperty(carol.id, 'age', 30, txn);
+        await graph.setNodeProperties(carol.id, { age: 30 }, { transaction: txn });
 
         await txn.commit();
 
@@ -647,7 +647,7 @@ export function runGraphTransactionScenarios(
         await txn.begin();
 
         const edge = await graph.addEdge(alice.id, bob.id, 'KNOWS', { weight: 0.8 }, txn);
-        await graph.addEdgeProperty(edge.id, 'since', 2020, txn);
+        await graph.setEdgeProperties(edge.id, { since: 2020 }, { transaction: txn });
 
         await txn.commit();
 
@@ -698,12 +698,12 @@ export function runGraphTransactionScenarios(
 
         const txn1 = graph.createTransaction();
         await txn1.begin();
-        await graph.updateNodeProperty(node.id, 'age', 30, txn1);
+        await graph.setNodeProperties(node.id, { age: 30 }, { transaction: txn1 });
         await txn1.commit();
 
         const txn2 = graph.createTransaction();
         await txn2.begin();
-        await graph.updateNodeProperty(node.id, 'city', 'NYC', txn2);
+        await graph.setNodeProperties(node.id, { city: 'NYC' }, { transaction: txn2 });
         await txn2.commit();
 
         const updated = await graph.getNode(node.id);
@@ -786,11 +786,11 @@ export function runGraphTransactionScenarios(
         await txn2.begin();
 
         // Txn1 updates age to 30
-        await graph.updateNodeProperty(node.id, 'age', 30, txn1);
+        await graph.setNodeProperties(node.id, { age: 30 }, { transaction: txn1 });
         await txn1.commit();
 
         // Txn2 updates city to NYC
-        await graph.updateNodeProperty(node.id, 'city', 'NYC', txn2);
+        await graph.setNodeProperties(node.id, { city: 'NYC' }, { transaction: txn2 });
         await txn2.commit();
 
         // Both changes should be visible after both commit

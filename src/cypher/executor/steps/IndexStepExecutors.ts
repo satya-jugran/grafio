@@ -8,11 +8,13 @@
  */
 
 import { Graph } from '../../../Graph';
+import type { ISyncGraphKernel } from '../../../storage/IStorageProvider';
 import {
   CreateIndexStep,
   DropIndexStep,
   ShowIndexesStep,
 } from '../../plan/QueryPlan';
+import type { VarSlotTable } from '../../plan/CompiledPlanMeta';
 import { Row, StepResult } from '../ExpressionEvaluator';
 
 /**
@@ -31,7 +33,18 @@ export class IndexStepExecutor {
     step: CreateIndexStep,
     rows: Row[],
   ): Promise<StepResult> {
-    await this._graph.createIndex(step.name, step.target, step.propertyKeys);
+    const opts = step.labelOrType ? { labelOrType: step.labelOrType } : undefined;
+    await this._graph.createIndex(step.name, step.target, step.propertyKeys, opts);
+    return { rows, indexesCreated: 1 };
+  }
+
+  executeCreateIndexSync(
+    kernel: ISyncGraphKernel,
+    step: CreateIndexStep,
+    rows: Row[],
+  ): StepResult {
+    const opts = step.labelOrType ? { labelOrType: step.labelOrType } : undefined;
+    kernel.createIndexSync(step.name, step.target, step.propertyKeys, opts);
     return { rows, indexesCreated: 1 };
   }
 
@@ -45,17 +58,46 @@ export class IndexStepExecutor {
     return { rows, indexesDeleted: 1 };
   }
 
+  executeDropIndexSync(
+    kernel: ISyncGraphKernel,
+    step: DropIndexStep,
+    rows: Row[],
+  ): StepResult {
+    kernel.deleteIndexSync(step.name);
+    return { rows, indexesDeleted: 1 };
+  }
+
   // ── ShowIndexesStep ────────────────────────────────────────────
 
   async executeShowIndexes(
     step: ShowIndexesStep,
-    rows: Row[],
+    _rows: Row[],
+    slotTable: VarSlotTable,
   ): Promise<Row[]> {
     const indexes = await this._graph.getIndexes();
+    return this._indexesToRows(step, indexes, slotTable);
+  }
+
+  executeShowIndexesSync(
+    kernel: ISyncGraphKernel,
+    step: ShowIndexesStep,
+    _rows: Row[],
+    slotTable: VarSlotTable,
+  ): Row[] {
+    const indexes = kernel.getIndexesSync();
+    return this._indexesToRows(step, indexes, slotTable);
+  }
+
+  private _indexesToRows(
+    step: ShowIndexesStep,
+    indexes: ReadonlyArray<unknown>,
+    slotTable: VarSlotTable,
+  ): Row[] {
     return indexes.map((idx) => {
-      const row = new Map<string, unknown>();
+      const row = slotTable.createEmptyRow();
       for (const col of step.columns) {
-        row.set(col.alias, (idx as Record<string, unknown>)[col.source]);
+        const slot = slotTable.getOrAdd(col.alias);
+        row[slot] = (idx as Record<string, unknown>)[col.source];
       }
       return row;
     });

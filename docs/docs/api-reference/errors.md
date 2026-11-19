@@ -5,10 +5,25 @@ Error types exported by Grafio.
 ## Import
 
 ```typescript
-import { 
+import {
   TransactionNotActiveError,
-  TransactionFailedError 
+  TransactionFailedError,
+  TransactionConflictError,
 } from 'grafio';
+
+// Full set of core storage/graph errors:
+import {
+  GraphError,
+  NodeAlreadyExistsError,
+  EdgeAlreadyExistsError,
+  NodeNotFoundError,
+  EdgeNotFoundError,
+  NodeHasEdgesError,
+  InvalidPropertyError,
+  InvalidGraphDataError,
+  TraversalLimitExceededError,
+  TransactionConflictError,
+} from 'grafio/errors';
 ```
 
 ## Transaction Errors
@@ -65,6 +80,50 @@ try {
   }
 }
 ```
+
+### TransactionConflictError
+
+Thrown during `commit()` when concurrent transactions modify overlapping property keys, labels, or entity deletions on the same node or edge.
+
+```typescript
+import { Graph, TransactionConflictError } from 'grafio';
+
+const graph = new Graph();
+const alice = await graph.addNode('Person', { name: 'Alice', age: 25 });
+
+const tx1 = graph.createTransaction();
+const tx2 = graph.createTransaction();
+await tx1.begin();
+await tx2.begin();
+
+await graph.setNodeProperties(alice.id, { age: 26 }, { transaction: tx1 });
+await graph.setNodeProperties(alice.id, { age: 27 }, { transaction: tx2 });
+
+await tx1.commit();
+
+try {
+  await tx2.commit();
+} catch (error) {
+  if (error instanceof TransactionConflictError) {
+    await tx2.rollback();
+  }
+}
+```
+
+Note: Disjoint writes on different property keys of the same node/edge merge cleanly without conflict.
+
+## Entity & Validation Errors (`grafio/errors`)
+
+| Error Class | When Thrown |
+|---|---|
+| `NodeAlreadyExistsError` | Inserting a node with an existing ID |
+| `EdgeAlreadyExistsError` | Inserting an edge with an existing ID |
+| `NodeNotFoundError` | Mutating a non-existent node or missing edge endpoint via Graph/Cypher |
+| `EdgeNotFoundError` | Mutating a non-existent edge |
+| `NodeHasEdgesError` | Removing a node with incident edges when `cascade` is `false` |
+| `InvalidPropertyError` | Supplying non-primitive values (e.g., nested objects or functions) in properties |
+| `InvalidGraphDataError` | Importing malformed `GraphData` in `Graph.importJSON()` |
+| `TraversalLimitExceededError` | Wildcard traversal exceeds safety limit |
 
 ## Next Steps
 

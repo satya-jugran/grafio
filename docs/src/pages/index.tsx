@@ -15,7 +15,7 @@ function HomepageHeader() {
     <header className={styles.hero}>
       <div style={{ position: 'absolute', top: '1rem', right: '1rem', zIndex: 10 }}>
         <span className="badge badge--primary" style={{ fontSize: '0.9rem', padding: '0.3rem 0.8rem' }}>
-          Latest Version: v7.15.0
+          Latest Version: v8.0.0
         </span>
       </div>
       <div className={styles.heroInner}>
@@ -91,86 +91,70 @@ function HomepageFeatures() {
 }
 
 function CodeExamples() {
-  const socialCode = `import { CypherEngine } from 'grafio';
-import { InMemoryGraphFactory } from 'grafio/storage';
+  const socialCode = `import { InMemoryGraphFactory } from 'grafio';
 
 const graph = new InMemoryGraphFactory().forGraph('social');
-const cypher = new CypherEngine(graph);
 
 // Build graph
-await cypher.execute(\`
+graph.querySync(\`
   CREATE (alice:Person {name: 'Alice'}),
          (bob:Person {name: 'Bob'}),
-         (charlie:Person {name: 'Charlie'})
-\`);
-
-await cypher.execute(\`
-  MATCH (a:Person {name: 'Alice'}), (b:Person {name: 'Bob'})
-  CREATE (a)-[:KNOWS]->(b)
-\`);
-
-await cypher.execute(\`
-  MATCH (a:Person {name: 'Bob'}), (b:Person {name: 'Charlie'})
-  CREATE (a)-[:KNOWS]->(b)
+         (charlie:Person {name: 'Charlie'}),
+         (alice)-[:KNOWS]->(bob),
+         (bob)-[:KNOWS]->(charlie)
 \`);
 
 // Query
-const suggestions = await cypher.execute(\`
+const suggestions = await graph.query(\`
   MATCH (p:Person)-[:KNOWS]->(f)-[:KNOWS]->(s)
   WHERE p.name = 'Alice' AND p <> s
-  RETURN s.name as suggested
+  RETURN s.name AS suggested
 \`);
 // Result: [{ suggested: 'Charlie' }]`;
 
-  const ecommerceCode = `import { CypherEngine } from 'grafio';
-import { InMemoryGraphFactory } from 'grafio/storage';
+  const ecommerceCode = `import { InMemoryGraphFactory } from 'grafio';
 
 const graph = new InMemoryGraphFactory().forGraph('shop');
-const cypher = new CypherEngine(graph);
 
 // Build graph
-await cypher.execute(\`
+graph.querySync(\`
   CREATE (laptop:Product {name: 'Laptop', price: 999}),
          (mouse:Product {name: 'Mouse', price: 29}),
          (john:Customer {name: 'John'}),
-         (order1:Order {total: 1028})
+         (order1:Order {total: 1028}),
+         (john)-[:PLACED]->(order1),
+         (order1)-[:CONTAINS]->(laptop),
+         (order1)-[:CONTAINS]->(mouse)
 \`);
 
-await cypher.execute(\`MATCH (c:Customer {name: 'John'}), (o:Order {total: 1028}) CREATE (c)-[:PLACED]->(o)\`);
-await cypher.execute(\`MATCH (o:Order {total: 1028}), (p:Product {name: 'Laptop'}) CREATE (o)-[:CONTAINS]->(p)\`);
-await cypher.execute(\`MATCH (o:Order {total: 1028}), (p:Product {name: 'Mouse'}) CREATE (o)-[:CONTAINS]->(p)\`);
-
 // Query
-const orders = await cypher.execute(\`
+const orders = await graph.query(\`
   MATCH (c:Customer)-[:PLACED]->(o:Order)-[:CONTAINS]->(p:Product)
-  RETURN c.name as customer, collect(p.name) as products
+  RETURN c.name AS customer, collect(p.name) AS products
 \`);
 // Result: [{ customer: 'John', products: ['Laptop', 'Mouse'] }]`;
 
-  const healthcareCode = `import { CypherEngine } from 'grafio';
-import { InMemoryGraphFactory } from 'grafio/storage';
+  const healthcareCode = `import { InMemoryGraphFactory } from 'grafio';
 
 const graph = new InMemoryGraphFactory().forGraph('clinic');
-const cypher = new CypherEngine(graph);
 
 // Build graph
-await cypher.execute(\`
+graph.querySync(\`
   CREATE (john:Patient {name: 'John'}),
          (emily:Patient {name: 'Emily'}),
          (dr_chen:Doctor {name: 'Dr. Chen'}),
          (hbp:Condition {name: 'Hypertension'}),
-         (migraine:Condition {name: 'Migraine'})
+         (migraine:Condition {name: 'Migraine'}),
+         (john)-[:SEES]->(dr_chen),
+         (john)-[:DIAGNOSED_WITH]->(hbp),
+         (emily)-[:SEES]->(dr_chen),
+         (emily)-[:DIAGNOSED_WITH]->(migraine)
 \`);
 
-await cypher.execute(\`MATCH (j:Patient {name: 'John'}), (d:Doctor {name: 'Dr. Chen'}) CREATE (j)-[:SEES]->(d)\`);
-await cypher.execute(\`MATCH (j:Patient {name: 'John'}), (c:Condition {name: 'Hypertension'}) CREATE (j)-[:DIAGNOSED_WITH]->(c)\`);
-await cypher.execute(\`MATCH (e:Patient {name: 'Emily'}), (d:Doctor {name: 'Dr. Chen'}) CREATE (e)-[:SEES]->(d)\`);
-await cypher.execute(\`MATCH (e:Patient {name: 'Emily'}), (c:Condition {name: 'Migraine'}) CREATE (e)-[:DIAGNOSED_WITH]->(c)\`);
-
 // Query
-const patients = await cypher.execute(\`
+const patients = await graph.query(\`
   MATCH (doc)-[:SEES]-(p:Patient)-[:DIAGNOSED_WITH]-(c)
-  RETURN doc.name as doctor, p.name as patient, c.name as condition
+  RETURN doc.name AS doctor, p.name AS patient, c.name AS condition
 \`);
 // Result: [{ doctor: 'Dr. Chen', patient: 'John', condition: 'Hypertension' }, ...]`;
 

@@ -1,6 +1,6 @@
 {
   "name": "@grafio/visualizer",
-  "version": "7.15.1",
+  "version": "8.0.0",
   "publishConfig": {
     "access": "public"
   },
@@ -50,6 +50,6 @@
     "@types/three": "^0.184.1",
     "esbuild": "^0.25.0",
     "rimraf": "^5.0.0",
-    "typescript": "~5.6.2"
+    "typescript": "^7.0.2"
   }
 }

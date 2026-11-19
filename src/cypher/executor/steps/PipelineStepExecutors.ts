@@ -2,36 +2,50 @@
  * Pipeline step executor for the Cypher execution layer.
  *
  * Executes {@link FilterStep}, {@link ProjectStep}, {@link SortStep},
- * and {@link LimitStep} as pure row-buffer transformations.
+ * {@link LimitStep}, and {@link UnwindStep} against {@link SlotRow} buffers
+ * using pre-compiled CSP-safe closures from {@link CompiledPlanMeta}.
  *
  * @module cypher/executor/steps/PipelineStepExecutors
  */
 
+import type { Expression } from '../../ast/AstNode';
+import type { ISyncGraphKernel } from '../../../storage/IStorageProvider';
 import {
   FilterStep,
   ProjectStep,
   SortStep,
   LimitStep,
+  UnwindStep,
 } from '../../plan/QueryPlan';
-import { Row, ExpressionEvaluator } from '../ExpressionEvaluator';
-import { parallelMap } from '../parallelMap';
+import {
+  UNBOUND,
+  type CompiledPlanMeta,
+} from '../../plan/CompiledPlanMeta';
+import { compileExpression, type CompiledExprFn } from '../ClosureCompiler';
+import {
+  Row,
+  ExpressionEvaluator,
+  serializeCypherKey,
+  serializeSlotRowKey,
+} from '../ExpressionEvaluator';
 
 /**
  * Executes pure pipeline (row-transformation) steps.
- *
- * These steps do not touch the {@link Graph} — they only transform
- * the row buffer using the expression evaluator.
  */
 export class PipelineStepExecutor {
   private readonly _evaluator: ExpressionEvaluator;
-  private readonly _maxDegreeOfParallelism: number;
 
-  constructor(
-    evaluator: ExpressionEvaluator,
-    maxDegreeOfParallelism: number = 1,
-  ) {
+  constructor(evaluator: ExpressionEvaluator) {
     this._evaluator = evaluator;
-    this._maxDegreeOfParallelism = Math.max(1, maxDegreeOfParallelism);
+  }
+
+  private _getCompiled(expr: Expression, meta: CompiledPlanMeta): CompiledExprFn {
+    let fn = meta.compiledExprs.get(expr);
+    if (!fn) {
+      fn = compileExpression(expr, meta.slotTable);
+      meta.compiledExprs.set(expr, fn);
+    }
+    return fn;
   }
 
   // ── FilterStep ─────────────────────────────────────────────────
@@ -40,14 +54,28 @@ export class PipelineStepExecutor {
     step: FilterStep,
     rows: Row[],
     params: Record<string, unknown>,
+    meta: CompiledPlanMeta,
   ): Promise<Row[]> {
-    return parallelMap(rows, (chunk) => {
-      const filtered = chunk.filter((row) => {
-        const result = this._evaluator.evaluate(step.predicate, row, params);
-        return Boolean(result);
-      });
-      return Promise.resolve(filtered);
-    }, this._maxDegreeOfParallelism);
+    return this.executeFilterSync(step, rows, params, meta);
+  }
+
+  executeFilterSync(
+    step: FilterStep,
+    rows: Row[],
+    params: Record<string, unknown>,
+    meta: CompiledPlanMeta,
+    kernel?: ISyncGraphKernel,
+  ): Row[] {
+    if (rows.length === 0) return [];
+    const fn = this._getCompiled(step.predicate, meta);
+    const out: Row[] = [];
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      if (Boolean(fn(row, params, kernel))) {
+        out.push(row);
+      }
+    }
+    return out;
   }
 
   // ── ProjectStep ────────────────────────────────────────────────
@@ -56,46 +84,100 @@ export class PipelineStepExecutor {
     step: ProjectStep,
     rows: Row[],
     params: Record<string, unknown>,
+    meta: CompiledPlanMeta,
   ): Promise<Row[]> {
-    const projected = await parallelMap(rows, (chunk) => {
-      const mapped = chunk.map((row) => {
-        const newRow = new Map<string, unknown>();
-        if (step.star) {
-          for (const [k, v] of row.entries()) {
-            newRow.set(k, v);
-          }
-        }
-        for (const col of step.columns) {
-          newRow.set(col.alias, this._evaluator.evaluate(col.expression, row, params));
-        }
-        return newRow;
-      });
-      return Promise.resolve(mapped);
-    }, this._maxDegreeOfParallelism);
+    return this.executeProjectSync(step, rows, params, meta);
+  }
 
-    if (!step.distinct) return projected;
+  executeProjectSync(
+    step: ProjectStep,
+    rows: Row[],
+    params: Record<string, unknown>,
+    meta: CompiledPlanMeta,
+    kernel?: ISyncGraphKernel,
+  ): Row[] {
+    if (rows.length === 0) return [];
+    const { colFns, colSlots } = this._prepareProjectCols(step, meta);
+    const projected = new Array<Row>(rows.length);
+    for (let i = 0; i < rows.length; i++) {
+      projected[i] = this._projectOneRow(rows[i], step.star === true, colFns, colSlots, params, meta, kernel);
+    }
+    return step.distinct ? this._dedupeProjected(projected, step, colSlots, meta) : projected;
+  }
 
+  private _prepareProjectCols(
+    step: ProjectStep,
+    meta: CompiledPlanMeta,
+  ): { colFns: CompiledExprFn[]; colSlots: number[] } {
+    const len = step.columns.length;
+    const colFns = new Array<CompiledExprFn>(len);
+    const colSlots = new Array<number>(len);
+    for (let i = 0; i < len; i++) {
+      colFns[i] = this._getCompiled(step.columns[i].expression, meta);
+      colSlots[i] = meta.slotTable.getOrAdd(step.columns[i].alias);
+    }
+    return { colFns, colSlots };
+  }
+
+  private _projectOneRow(
+    row: Row,
+    preserveAll: boolean,
+    colFns: CompiledExprFn[],
+    colSlots: number[],
+    params: Record<string, unknown>,
+    meta: CompiledPlanMeta,
+    kernel?: ISyncGraphKernel,
+  ): Row {
+    const newRow = preserveAll ? row.slice() : meta.slotTable.createEmptyRow();
+    // Evaluate all projections against original `row` before writing `newRow` so alias shadowing is safe
+    for (let c = 0; c < colFns.length; c++) {
+      newRow[colSlots[c]] = colFns[c](row, params, kernel);
+    }
+    return newRow;
+  }
+
+  private _dedupeProjected(
+    projected: Row[],
+    step: ProjectStep,
+    colSlots: number[],
+    meta: CompiledPlanMeta,
+  ): Row[] {
     const seen = new Set<string>();
     const deduped: Row[] = [];
 
-    for (const row of projected) {
-      const keyParts: string[] = [];
-      const keys = step.star ? Array.from(row.keys()).sort() : step.columns.map(c => c.alias);
-      for (const colName of keys) {
-        keyParts.push(getDistinctKey(row.get(colName)));
-      }
-      const key = keyParts.join('\x00');
+    if (step.star) {
+      const slotToVar = meta.slotTable.slotToVar;
+      const sortedSlots = slotToVar
+        .map((name, slot) => ({ name, slot }))
+        .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+        .map((x) => x.slot);
 
+      for (let i = 0; i < projected.length; i++) {
+        const row = projected[i];
+        const key = serializeSlotRowKey(row, sortedSlots);
+        if (!seen.has(key)) {
+          seen.add(key);
+          deduped.push(row);
+        }
+      }
+      return deduped;
+    }
+
+    for (let i = 0; i < projected.length; i++) {
+      const row = projected[i];
+      let key = '';
+      for (let c = 0; c < colSlots.length; c++) {
+        const sk = serializeCypherKey(row[colSlots[c]]);
+        const part = `${c}:${sk.length}:${sk}`;
+        key = c === 0 ? part : `${key}\x00${part}`;
+      }
       if (!seen.has(key)) {
         seen.add(key);
         deduped.push(row);
       }
     }
-
     return deduped;
   }
-
-
 
   // ── SortStep ───────────────────────────────────────────────────
 
@@ -103,16 +185,58 @@ export class PipelineStepExecutor {
     step: SortStep,
     rows: Row[],
     params: Record<string, unknown>,
+    meta: CompiledPlanMeta,
+    kernel?: ISyncGraphKernel,
   ): Row[] {
-    return [...rows].sort((a, b) => {
-      for (const spec of step.items) {
-        const va = this._evaluator.evaluate(spec.expression, a, params);
-        const vb = this._evaluator.evaluate(spec.expression, b, params);
-        const cmp = this._evaluator.compare(va, vb);
-        if (cmp !== 0) return spec.direction === 'DESC' ? -cmp : cmp;
+    if (rows.length <= 1) return rows.slice();
+    const specCount = step.items.length;
+    if (specCount === 0) return rows.slice();
+
+    const itemFns = new Array<CompiledExprFn>(specCount);
+    const dirs = new Array<'ASC' | 'DESC'>(specCount);
+    for (let s = 0; s < specCount; s++) {
+      itemFns[s] = this._getCompiled(step.items[s].expression, meta);
+      dirs[s] = step.items[s].direction;
+    }
+
+    // Schwartzian pre-evaluation avoids O(N log N) expression re-evaluations
+    const keysByRow = new Array<unknown[]>(rows.length);
+    const indices = new Array<number>(rows.length);
+    for (let r = 0; r < rows.length; r++) {
+      indices[r] = r;
+      const row = rows[r];
+      const vals = new Array<unknown>(specCount);
+      for (let s = 0; s < specCount; s++) {
+        vals[s] = itemFns[s](row, params, kernel);
+      }
+      keysByRow[r] = vals;
+    }
+
+    indices.sort((ia, ib) => {
+      const ka = keysByRow[ia];
+      const kb = keysByRow[ib];
+      for (let s = 0; s < specCount; s++) {
+        const cmp = this._evaluator.compare(ka[s], kb[s]);
+        if (cmp !== 0) return dirs[s] === 'DESC' ? -cmp : cmp;
       }
       return 0;
     });
+
+    const sorted = new Array<Row>(rows.length);
+    for (let i = 0; i < rows.length; i++) {
+      sorted[i] = rows[indices[i]];
+    }
+    return sorted;
+  }
+
+  executeSortSync(
+    step: SortStep,
+    rows: Row[],
+    params: Record<string, unknown>,
+    meta: CompiledPlanMeta,
+    kernel?: ISyncGraphKernel,
+  ): Row[] {
+    return this.executeSort(step, rows, params, meta, kernel);
   }
 
   // ── LimitStep ──────────────────────────────────────────────────
@@ -121,70 +245,79 @@ export class PipelineStepExecutor {
     step: LimitStep,
     rows: Row[],
     params: Record<string, unknown>,
+    meta: CompiledPlanMeta,
+    kernel?: ISyncGraphKernel,
   ): Row[] {
     if (rows.length === 0) return [];
 
     const start = step.skipExpr
-      ? Math.max(0, Number(this._evaluator.evaluate(step.skipExpr, rows[0], params)))
+      ? Math.max(0, Number(this._getCompiled(step.skipExpr, meta)(rows[0], params, kernel)))
       : 0;
     const limitVal = step.limitExpr
-      ? Number(this._evaluator.evaluate(step.limitExpr, rows[0], params))
+      ? Number(this._getCompiled(step.limitExpr, meta)(rows[0], params, kernel))
       : Infinity;
     const end = limitVal === Infinity ? undefined : start + limitVal;
     return rows.slice(start, end);
   }
 
+  executeLimitSync(
+    step: LimitStep,
+    rows: Row[],
+    params: Record<string, unknown>,
+    meta: CompiledPlanMeta,
+    kernel?: ISyncGraphKernel,
+  ): Row[] {
+    return this.executeLimit(step, rows, params, meta, kernel);
+  }
+
   // ── UnwindStep ─────────────────────────────────────────────────
 
   async executeUnwind(
-    step: import('../../plan/QueryPlan').UnwindStep,
+    step: UnwindStep,
     rows: Row[],
     params: Record<string, unknown>,
+    meta: CompiledPlanMeta,
   ): Promise<Row[]> {
-    return parallelMap(rows, (chunk) => {
-      const result: Row[] = [];
-      for (const row of chunk) {
-        const val = this._evaluator.evaluate(step.expression, row, params);
-        if (val === null || val === undefined) {
-          continue;
-        } else if (Array.isArray(val)) {
-          for (const item of val) {
-            const newRow = new Map(row);
-            newRow.set(step.variable, item);
-            result.push(newRow);
-          }
-        } else {
-          const newRow = new Map(row);
-          newRow.set(step.variable, val);
+    return this.executeUnwindSync(step, rows, params, meta);
+  }
+
+  executeUnwindSync(
+    step: UnwindStep,
+    rows: Row[],
+    params: Record<string, unknown>,
+    meta: CompiledPlanMeta,
+    kernel?: ISyncGraphKernel,
+  ): Row[] {
+    if (rows.length === 0) return [];
+    const fn = this._getCompiled(step.expression, meta);
+    const varSlot = meta.slotTable.getOrAdd(step.variable);
+    const result: Row[] = [];
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const val = fn(row, params, kernel);
+      if (val === null || val === undefined) {
+        continue;
+      } else if (Array.isArray(val)) {
+        for (let j = 0; j < val.length; j++) {
+          const newRow = row.slice();
+          newRow[varSlot] = val[j];
           result.push(newRow);
         }
+      } else {
+        const newRow = row.slice();
+        newRow[varSlot] = val;
+        result.push(newRow);
       }
-      return Promise.resolve(result);
-    }, this._maxDegreeOfParallelism);
+    }
+    return result;
   }
 }
 
 /**
  * Serialize a single value into a stable, collision-free string key
  * for DISTINCT deduplication.
- *
- * Handles primitives, entities (nodes/edges with `.id`), arrays of
- * entities (e.g. result of `nodes(path)` / `relationships(path)`),
- * and arbitrary objects.
  */
 export function getDistinctKey(value: unknown): string {
-  if (value === null) return '\x00null';
-  if (value === undefined) return '\x00undef';
-
-  if (typeof value === 'object') {
-    if ('id' in (value as object)) {
-      return (value as { id: string }).id;
-    }
-
-    if (Array.isArray(value)) {
-      return value.map((el) => getDistinctKey(el)).join('\x1F');
-    }
-  }
-
-  return String(value);
+  return serializeCypherKey(value);
 }

@@ -6,7 +6,7 @@ Grafio's pluggable storage architecture lets you swap backends without changing 
 
 | Provider | Description | Package |
 |----------|-------------|---------|
-| `InMemoryStorageProvider` | Zero-dependency, in-memory | Built-in |
+| `InMemoryStorageProvider` | Zero-dependency, in-memory SoA + CSR | Built-in |
 | `MongoStorageProvider` | MongoDB-backed persistence | `grafio-mongo` |
 
 ## InMemoryStorageProvider
@@ -24,7 +24,8 @@ const graph = factory.forGraph();
 
 ```typescript
 interface InMemoryStorageProviderOptions {
-  graphId?: string;  // default: 'default'
+  graphId?: string;               // default: 'default'
+  idStrategy?: 'compact' | 'uuid'; // default: 'compact'
 }
 ```
 
@@ -41,50 +42,57 @@ Implement this interface to create custom storage backends:
 
 ```typescript
 interface IStorageProvider {
+  readonly indexEpoch: number;
+
   // Lifecycle
   clear(): Promise<void>;
+  compact?(): void;
 
   // Node mutations
   insertNode(node: NodeData, transaction?: ITransactionHandle): Promise<void>;
+  insertNodes(nodes: readonly NodeData[], transaction?: ITransactionHandle): Promise<void>;
   deleteNode(id: string, transaction?: ITransactionHandle): Promise<void>;
 
   // Node queries
   hasNode(id: string, transaction?: ITransactionHandle): Promise<boolean>;
-  getNode(id: string, transaction?: ITransactionHandle): Promise<NodeData | undefined>;
-  getNodesByIds(ids: string[], transaction?: ITransactionHandle): Promise<Map<string, NodeData>>;
+  getNode(id: string, transaction?: ITransactionHandle): Promise<ReadonlyNodeData | undefined>;
+  getNodesByIds(ids: string[], transaction?: ITransactionHandle): Promise<Map<string, ReadonlyNodeData>>;
   getNodeCount(options?: StorageQueryOptions): Promise<number>;
   aggregateNodeProperty(key: string, options?: StorageQueryOptions): Promise<AggregateResult>;
-  getNodes(options?: StorageQueryOptions): Promise<NodeData[]>;
+  getNodes(options?: StorageQueryOptions): Promise<ReadonlyNodeData[]>;
 
   // Edge mutations
   insertEdge(edge: EdgeData, transaction?: ITransactionHandle): Promise<void>;
+  insertEdges(edges: readonly EdgeData[], transaction?: ITransactionHandle): Promise<void>;
   deleteEdge(id: string, transaction?: ITransactionHandle): Promise<void>;
 
   // Edge queries
   hasEdge(id: string, transaction?: ITransactionHandle): Promise<boolean>;
-  getEdge(id: string, transaction?: ITransactionHandle): Promise<EdgeData | undefined>;
+  getEdge(id: string, transaction?: ITransactionHandle): Promise<ReadonlyEdgeData | undefined>;
   getEdgeCount(options?: StorageQueryOptions): Promise<number>;
   aggregateEdgeProperty(key: string, options?: StorageQueryOptions): Promise<AggregateResult>;
-  getEdges(options?: StorageQueryOptions): Promise<EdgeData[]>;
+  getEdges(options?: StorageQueryOptions): Promise<ReadonlyEdgeData[]>;
+  getEdgesBySource(nodeId: string, options?: StorageQueryOptions): Promise<ReadonlyEdgeData[]>;
+  getEdgesByTarget(nodeId: string, options?: StorageQueryOptions): Promise<ReadonlyEdgeData[]>;
 
-  // Adjacency queries
-  getEdgesBySource(nodeId: string, options?: StorageQueryOptions): Promise<EdgeData[]>;
-  getEdgesByTarget(nodeId: string, options?: StorageQueryOptions): Promise<EdgeData[]>;
-  getDirectEdgesBetween(sourceId: string, targetId: string, options?: StorageQueryOptions): Promise<EdgeData[]>;
-
-  // Property mutations
-  addProperty(target: 'node' | 'edge', id: string, key: string, value: unknown, transaction?: ITransactionHandle): Promise<void>;
-  updateProperty(target: 'node' | 'edge', id: string, key: string, value: unknown, transaction?: ITransactionHandle): Promise<void>;
-  deleteProperty(target: 'node' | 'edge', id: string, key: string, transaction?: ITransactionHandle): Promise<void>;
-  clearProperties(target: 'node' | 'edge', id: string, transaction?: ITransactionHandle): Promise<void>;
+  // Property and label mutations
+  removeNodeLabels(nodeId: string, labels: string[], transaction?: ITransactionHandle): Promise<void>;
+  patchProperties(target: 'node' | 'edge', id: string, patch: PropertyPatch, transaction?: ITransactionHandle): Promise<void>;
 
   // Index management
-  createIndex(target: 'node' | 'edge', propertyKey: string, type?: string): Promise<void>;
-  hasIndex(target: 'node' | 'edge', propertyKey: string): Promise<boolean>;
+  createIndex(name: string, target: 'node' | 'edge', propertyKeys: string[], options?: CreateIndexOptions): Promise<void>;
+  hasIndex(target: 'node' | 'edge', propertyKeys: string[], labelOrType?: string): Promise<boolean>;
+  getIndex(name: string): Promise<IndexMetadata | undefined>;
+  deleteIndex(name: string): Promise<void>;
+  getIndexes(): Promise<IndexMetadata[]>;
 
-  // Serialization
+  // Serialization & transactions
   exportJSON(): Promise<GraphData>;
   importJSON(data: GraphData): Promise<void>;
+  supportsTransactions(): boolean;
+  beginTransaction(): Promise<ITransactionHandle>;
+  commitTransaction(handle: ITransactionHandle): Promise<void>;
+  rollbackTransaction(handle: ITransactionHandle): Promise<void>;
 }
 ```
 
@@ -97,22 +105,23 @@ The [`grafio-mongo`](https://www.npmjs.com/package/grafio-mongo) package provide
 - Custom collection names
 - GraphManager caching integration
 
-## GraphManager Integration
+## GraphManager & Remote Caching
+
+`GraphManager` coordinates caching for remote/async storage providers (like `grafio-mongo`) via `CachedStorageProvider`. In-memory instances created via `InMemoryGraphFactory` run directly on `InMemoryStorageProvider` with zero caching overhead.
 
 ```typescript
-import { GraphManager, InMemoryGraphFactory } from 'grafio';
+import { GraphManager } from 'grafio';
+// Plus a remote factory/provider such as `MongoGraphFactory` from `grafio-mongo`
 
 GraphManager.init({
   cache: {
     cacheStore: 'in-memory',
     maxNodesCount: 10000,
     maxEdgesCount: 20000,
-  }
+    evictionStrategy: 'LRU',
+    preloadStrategy: 'none',
+  },
 });
-
-// Graph instances from factory automatically use caching when GraphManager is initialized
-const factory = new InMemoryGraphFactory();
-const graph = factory.forGraph();
 ```
 
 ## Next Steps

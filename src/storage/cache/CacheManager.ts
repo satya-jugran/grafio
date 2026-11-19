@@ -65,6 +65,12 @@ export class CacheManager {
   /** graphId → metadata */
   private readonly _registry: Map<string, GraphIdMetadata> = new Map();
 
+  /** Tracks which graphId / (graphId, nodeId) pairs hold complete cached adjacency lists */
+  private readonly _allOutAdjacencyComplete = new Set<string>();
+  private readonly _allInAdjacencyComplete = new Set<string>();
+  private readonly _completeOutNodes = new Map<string, Set<string>>();
+  private readonly _completeInNodes = new Map<string, Set<string>>();
+
   // Stats counters
   private _hitCount = 0;
   private _missCount = 0;
@@ -190,6 +196,8 @@ export class CacheManager {
     const existed = await this._nodeCache.has(key);
 
     await this._nodeCache.invalidate(key);
+    this._completeOutNodes.get(graphId)?.delete(nodeId);
+    this._completeInNodes.get(graphId)?.delete(nodeId);
 
     if (existed) {
       this._decrementNodeCount(graphId);
@@ -270,6 +278,7 @@ export class CacheManager {
    * @param graphId - The graph partition key
    */
   async invalidateAllForGraph(graphId: string): Promise<void> {
+    this._clearAdjacencyCompleteness(graphId);
     const meta = this._registry.get(graphId);
     if (meta) {
       // Evict all nodes by prefix (inefficient but correct for now)
@@ -293,6 +302,10 @@ export class CacheManager {
       await this._edgeCache.invalidateAdjacencyIndex(graphId);
     }
     this._registry.clear();
+    this._allOutAdjacencyComplete.clear();
+    this._allInAdjacencyComplete.clear();
+    this._completeOutNodes.clear();
+    this._completeInNodes.clear();
     this._hitCount = 0;
     this._missCount = 0;
     this._evictionCount = 0;
@@ -382,7 +395,49 @@ export class CacheManager {
    * Removes all adjacency index entries for a graphId.
    */
   async invalidateAdjacencyIndex(graphId: string): Promise<void> {
+    this._clearAdjacencyCompleteness(graphId);
     await this._edgeCache.invalidateAdjacencyIndex(graphId);
+  }
+
+  markAllAdjacencyComplete(graphId: string): void {
+    this._allOutAdjacencyComplete.add(graphId);
+    this._allInAdjacencyComplete.add(graphId);
+  }
+
+  markNodeAdjacencyComplete(graphId: string, direction: 'source' | 'target', nodeId: string): void {
+    const map = direction === 'source' ? this._completeOutNodes : this._completeInNodes;
+    let set = map.get(graphId);
+    if (!set) {
+      set = new Set<string>();
+      map.set(graphId, set);
+    }
+    set.add(nodeId);
+  }
+
+  markNodeAdjacencyIncomplete(graphId: string, direction: 'source' | 'target', nodeId: string): void {
+    if (direction === 'source') {
+      this._allOutAdjacencyComplete.delete(graphId);
+      this._completeOutNodes.get(graphId)?.delete(nodeId);
+    } else {
+      this._allInAdjacencyComplete.delete(graphId);
+      this._completeInNodes.get(graphId)?.delete(nodeId);
+    }
+  }
+
+  isNodeAdjacencyComplete(graphId: string, direction: 'source' | 'target', nodeId: string): boolean {
+    if (direction === 'source') {
+      return this._allOutAdjacencyComplete.has(graphId) ||
+        (this._completeOutNodes.get(graphId)?.has(nodeId) ?? false);
+    }
+    return this._allInAdjacencyComplete.has(graphId) ||
+      (this._completeInNodes.get(graphId)?.has(nodeId) ?? false);
+  }
+
+  private _clearAdjacencyCompleteness(graphId: string): void {
+    this._allOutAdjacencyComplete.delete(graphId);
+    this._allInAdjacencyComplete.delete(graphId);
+    this._completeOutNodes.delete(graphId);
+    this._completeInNodes.delete(graphId);
   }
 
   // ─── Private helpers ───────────────────────────────────────────────────────
@@ -482,6 +537,7 @@ export class CacheManager {
     if (!oldest) return;
 
     this._evictionCount++;
+    this._clearAdjacencyCompleteness(oldest);
     await this._invalidateEdgesByPrefix(oldest);
     // Also invalidate adjacency index for this graphId
     await this._edgeCache.invalidateAdjacencyIndex(oldest);
@@ -518,6 +574,7 @@ export class CacheManager {
 
     if (Date.now() > meta.expiresAt) {
       this._evictionCount++;
+      this._clearAdjacencyCompleteness(graphId);
       await this._invalidateNodesByPrefix(graphId);
       await this._invalidateEdgesByPrefix(graphId);
       // Also invalidate adjacency index for this graphId
@@ -540,8 +597,10 @@ export class CacheManager {
     for (const [graphId, meta] of this._registry) {
       if (meta.expiresAt && now > meta.expiresAt) {
         this._evictionCount++;
+        this._clearAdjacencyCompleteness(graphId);
         await this._invalidateNodesByPrefix(graphId);
         await this._invalidateEdgesByPrefix(graphId);
+        await this._edgeCache.invalidateAdjacencyIndex(graphId);
         meta.cachedNodeCount = 0;
         meta.cachedEdgeCount = 0;
       }

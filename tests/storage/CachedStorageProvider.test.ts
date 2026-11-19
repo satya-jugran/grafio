@@ -5,6 +5,7 @@ import { CacheManager } from '../../src/storage/cache/CacheManager';
 import { CacheConfig } from '../../src/storage/cache/CacheConfig';
 import { ITransactionHandle } from '../../src/storage/IStorageProvider';
 import { InMemoryStorageProvider } from '../../src';
+import { Graph } from '../../src/Graph';
 
 describe('CachedStorageProvider', () => {
   const defaultConfig: CacheConfig = {
@@ -499,66 +500,60 @@ describe('CachedStorageProvider', () => {
   });
 
   describe('delegation to underlying — property operations', () => {
-    it('should delegate addProperty', async () => {
-      await provider.insertNode({ id: 'node-1', labels: ['Test'], properties: { } });
-      const spy = jest.spyOn(mockProvider, 'addProperty');
-      await provider.addProperty('node', 'node-1', 'name', 'Alice');
-      expect(spy).toHaveBeenCalledWith('node', 'node-1', 'name', 'Alice', undefined);
+    it('should delegate patchProperties with set and invalidate node cache', async () => {
+      await provider.insertNode({ id: 'node-1', labels: ['Test'], properties: {} });
+      const spy = jest.spyOn(mockProvider, 'patchProperties');
+      await provider.patchProperties('node', 'node-1', { set: { name: 'Alice' } });
+      expect(spy).toHaveBeenCalledWith('node', 'node-1', { set: { name: 'Alice' } }, undefined);
+      expect(await cacheManager.getNode('graph-test', 'node-1')).toBeUndefined();
     });
 
-    it('should delegate updateProperty', async () => {
+    it('should delegate patchProperties with unset', async () => {
       await provider.insertNode({ id: 'node-1', labels: ['Test'], properties: { name: 'Alice' } });
-      const spy = jest.spyOn(mockProvider, 'updateProperty');
-      await provider.updateProperty('node', 'node-1', 'name', 'Bob');
-      expect(spy).toHaveBeenCalledWith('node', 'node-1', 'name', 'Bob', undefined);
+      const spy = jest.spyOn(mockProvider, 'patchProperties');
+      await provider.patchProperties('node', 'node-1', { unset: ['name'] });
+      expect(spy).toHaveBeenCalledWith('node', 'node-1', { unset: ['name'] }, undefined);
     });
 
-    it('should delegate deleteProperty', async () => {
-      await provider.insertNode({ id: 'node-1', labels: ['Test'], properties: { name: 'Alice' } });
-      const spy = jest.spyOn(mockProvider, 'deleteProperty');
-      await provider.deleteProperty('node', 'node-1', 'name');
-      expect(spy).toHaveBeenCalledWith('node', 'node-1', 'name', undefined);
-    });
-
-    it('should delegate clearProperties', async () => {
+    it('should delegate patchProperties with replace', async () => {
       await provider.insertNode({ id: 'node-1', labels: ['Test'], properties: { name: 'Alice', age: 30 } });
-      const spy = jest.spyOn(mockProvider, 'clearProperties');
-      await provider.clearProperties('node', 'node-1');
-      expect(spy).toHaveBeenCalledWith('node', 'node-1', undefined);
+      const spy = jest.spyOn(mockProvider, 'patchProperties');
+      await provider.patchProperties('node', 'node-1', { set: {}, replace: true });
+      expect(spy).toHaveBeenCalledWith('node', 'node-1', { set: {}, replace: true }, undefined);
     });
 
-    it('should invalidate edge cache when addProperty targets edge', async () => {
+    it('should invalidate edge cache when patchProperties adds edge property', async () => {
       await provider.insertEdge({ id: 'edge-1', type: 'Test', sourceId: 'n1', targetId: 'n2', properties: {} });
       let cached = await cacheManager.getEdge('graph-test', 'edge-1');
       expect(cached).not.toBeUndefined();
-      await provider.addProperty('edge', 'edge-1', 'weight', 5);
+      await provider.patchProperties('edge', 'edge-1', { set: { weight: 5 } });
       cached = await cacheManager.getEdge('graph-test', 'edge-1');
       expect(cached).toBeUndefined();
     });
 
-    it('should invalidate edge cache when updateProperty targets edge', async () => {
+    it('should invalidate edge cache when patchProperties updates edge property', async () => {
       await provider.insertEdge({ id: 'edge-1', type: 'Test', sourceId: 'n1', targetId: 'n2', properties: { weight: 5 } });
       let cached = await cacheManager.getEdge('graph-test', 'edge-1');
       expect(cached).not.toBeUndefined();
-      await provider.updateProperty('edge', 'edge-1', 'weight', 10);
+      await provider.patchProperties('edge', 'edge-1', { set: { weight: 10 } });
       cached = await cacheManager.getEdge('graph-test', 'edge-1');
       expect(cached).toBeUndefined();
     });
 
-    it('should invalidate edge cache when deleteProperty targets edge', async () => {
+    it('should invalidate edge cache when patchProperties unsets edge property', async () => {
       await provider.insertEdge({ id: 'edge-1', type: 'Test', sourceId: 'n1', targetId: 'n2', properties: { weight: 5 } });
       let cached = await cacheManager.getEdge('graph-test', 'edge-1');
       expect(cached).not.toBeUndefined();
-      await provider.deleteProperty('edge', 'edge-1', 'weight');
+      await provider.patchProperties('edge', 'edge-1', { unset: ['weight'] });
       cached = await cacheManager.getEdge('graph-test', 'edge-1');
       expect(cached).toBeUndefined();
     });
 
-    it('should invalidate edge cache when clearProperties targets edge', async () => {
+    it('should invalidate edge cache when patchProperties clears edge properties', async () => {
       await provider.insertEdge({ id: 'edge-1', type: 'Test', sourceId: 'n1', targetId: 'n2', properties: {} });
       let cached = await cacheManager.getEdge('graph-test', 'edge-1');
       expect(cached).not.toBeUndefined();
-      await provider.clearProperties('edge', 'edge-1');
+      await provider.patchProperties('edge', 'edge-1', { set: {}, replace: true });
       cached = await cacheManager.getEdge('graph-test', 'edge-1');
       expect(cached).toBeUndefined();
     });
@@ -1037,6 +1032,65 @@ describe('CachedStorageProvider', () => {
 
       const sourceEdges = await cacheManager.getEdgeIdsByAdjacencyIndex('graph-test', 'source', 'n1');
       expect(sourceEdges).toHaveLength(0);
+    });
+
+    it('preserves pre-existing uncached edges on insertEdge with preloadStrategy: none and invalidates cache on commitTransaction', async () => {
+      const backing = new InMemoryStorageProvider();
+      const cm = new CacheManager(defaultConfig);
+      const cached = new CachedStorageProvider(backing, 'adj-complete-test', cm, defaultConfig);
+      const graph = new Graph(cached);
+
+      await backing.insertNode({ id: 'n1', labels: ['N'], properties: { score: 10 } });
+      await backing.insertNode({ id: 'n2', labels: ['N'], properties: {} });
+      await backing.insertEdge({ id: 'e-old', sourceId: 'n1', targetId: 'n2', type: 'T', properties: {} });
+
+      await cached.insertEdge({ id: 'e-new', sourceId: 'n1', targetId: 'n2', type: 'T', properties: {} });
+
+      const fromEdges = await cached.getEdgesBySource('n1');
+      const toEdges = await cached.getEdgesByTarget('n2');
+      expect(fromEdges.map((e) => e.id).sort()).toEqual(['e-new', 'e-old']);
+      expect(toEdges.map((e) => e.id).sort()).toEqual(['e-new', 'e-old']);
+
+      expect((await graph.getNode('n1'))?.properties.score).toBe(10);
+      const tx = graph.createTransaction();
+      await tx.begin();
+      await graph.setNodeProperties('n1', { score: 88 }, { merge: true, transaction: tx });
+      await graph.addEdge('n1', 'n2', 'T', {}, tx, 'e-tx');
+      await tx.commit();
+
+      expect((await graph.getNode('n1'))?.properties.score).toBe(88);
+      expect((await graph.getEdgesFrom('n1')).map((e) => e.id).sort()).toEqual([
+        'e-new',
+        'e-old',
+        'e-tx',
+      ]);
+      await cm.invalidateAll();
+    });
+
+    it('serves target edges after warmCache(all) and keeps rolled-back transaction writes isolated from cache', async () => {
+      const cfg: CacheConfig = { ...defaultConfig, preloadStrategy: 'all' };
+      const backing = new InMemoryStorageProvider();
+      await backing.insertNode({ id: 'n1', labels: ['N'], properties: { v: 1 } });
+      await backing.insertNode({ id: 'n2', labels: ['N'], properties: { v: 2 } });
+      await backing.insertEdge({ id: 'e1', sourceId: 'n1', targetId: 'n2', type: 'T', properties: {} });
+
+      const cm = new CacheManager(cfg);
+      const cached = new CachedStorageProvider(backing, 'warm-tx-test', cm, cfg);
+      const graph = new Graph(cached);
+
+      await graph.warmCache();
+      expect((await cached.getEdgesByTarget('n2')).map((e) => e.id)).toEqual(['e1']);
+      expect(await cached.getEdgesByTarget('n2', { filter: { types: ['T'] } })).toHaveLength(1);
+
+      const tx = graph.createTransaction();
+      await tx.begin();
+      await graph.setNodeProperties('n1', { v: 999 }, { merge: true, transaction: tx });
+      await graph.addEdge('n1', 'n2', 'T', {}, tx, 'e-tx-abort');
+      await tx.rollback();
+
+      expect((await graph.getNode('n1'))?.properties.v).toBe(1);
+      expect((await cached.getEdgesBySource('n1')).map((e) => e.id)).toEqual(['e1']);
+      await cm.invalidateAll();
     });
   });
 });

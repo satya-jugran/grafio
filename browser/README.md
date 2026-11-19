@@ -11,7 +11,8 @@ This package bundles the entire Grafio core (Graph engine, Cypher query language
 - **Cypher Queries** — Full OpenCypher-compatible query language (MATCH, CREATE, DELETE, MERGE, WHERE, ORDER BY, aggregations, variable-length paths)
 - **Execution Plans** — Inspect query plans in text, JSON, or Mermaid format
 - **Zero Dependencies** — Entire library bundled into a single file, no runtime dependencies
-- **Lightweight** — ~156KB minified, ~45KB gzipped
+- **Lightweight** — ~285KB minified (ESM + UMD bundles, zero runtime dependencies)
+- **Fast Path** — Synchronous `graph.querySync()` / `engine.executeSync()` and `graph.compact()` CSR compaction in addition to async `query()` / `execute()`
 - **ESM + UMD** — Works with `<script>` tags, `<script type="module">`, and modern bundlers
 
 ## Installation
@@ -117,7 +118,9 @@ console.log(plan);
 
 ## Browser Support
 
-Requires `crypto.randomUUID()` support (all modern browsers):
+Works in any modern ES2020+ browser:
+- Compact `@n<slot>:<gen>` / `@e<slot>:<gen>` IDs (default) require no Web Crypto APIs.
+- Opting into `new InMemoryStorageProvider({ idStrategy: 'uuid' })` uses Web Crypto CSPRNG:
 
 - Chrome 92+
 - Firefox 95+
@@ -133,7 +136,7 @@ Requires `crypto.randomUUID()` support (all modern browsers):
 | **Caching** | LRU/LFU/FIFO with Redis support | Not included |
 | **Cypher Engine** | ✅ Full | ✅ Full |
 | **Graph Core** | ✅ Full | ✅ Full |
-| **Package Size** | ~500KB (with all deps) | ~156KB minified |
+| **Bundle Size** | Node package (core + cache/testing exports) | ~285KB minified UMD |
 
 The Cypher engine and graph core are identical between both packages. The browser bundle excludes server-only features (Redis cache, MongoDB storage, GraphManager) and packages everything into a single self-contained file.
 

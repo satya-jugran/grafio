@@ -97,14 +97,16 @@ import {
  * Precedence levels for binary/ternary operators, used by the Pratt parser.
  * Higher number = tighter binding.
  */
-const enum Prec {
-  OR = 1,
-  AND = 2,
-  COMPARISON = 4,
-  ADD = 6,
-  MUL = 7,
-  EXP = 8,
-}
+const Prec = {
+  OR: 1,
+  AND: 2,
+  COMPARISON: 4,
+  ADD: 6,
+  MUL: 7,
+  EXP: 8,
+} as const;
+
+type Prec = (typeof Prec)[keyof typeof Prec];
 
 /**
  * Mapping from token kind to binary operator precedence level.

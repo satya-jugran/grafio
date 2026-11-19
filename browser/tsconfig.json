@@ -6,6 +6,8 @@
     "declarationMap": false,
     "sourceMap": false,
     "emitDeclarationOnly": true,
+    "stripInternal": true,
+    "removeComments": true,
     "rootDir": ".."
   },
   "include": [

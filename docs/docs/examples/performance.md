@@ -57,7 +57,7 @@ interface BenchmarkScenario {
 ### 4. Run Custom Benchmarks
 
 ```typescript
-import { buildGraph, runScenario } from 'grafio/shared/testing/perf';
+import { buildGraph, runScenario } from 'grafio/testing/perf';
 
 async function customBenchmark() {
   // Build graph with custom parameters
@@ -68,8 +68,7 @@ async function customBenchmark() {
     name: 'Custom Query',
     category: 'Traversal',
     fn: async (meta) => {
-      // Your benchmark logic here
-      return graph.traverse('start').depth(1..5).execute();
+      return meta.graph.traverse(meta.sampleNodeId, meta.targetNodeId);
     }
   };
   
@@ -80,10 +79,10 @@ async function customBenchmark() {
 
 ## Performance Tips
 
-1. **Use indexes** — `createIndex()` for O(1) property lookups
-2. **Enable caching** — `GraphManager.init()` with appropriate cache config
-3. **Limit results** — use `maxResults` in traversal options
-4. **Use Cypher LIMIT** — for large result sets
-5. **Use typed traversals** — specify relationship types for faster queries
+1. **Compact CSR storage** — call `graph.compact()` after incremental writes/deletes
+2. **Use `querySync()` in memory** — zero-microtask synchronous Cypher execution
+3. **Use indexes** — `createIndex()` for O(1) equality and sorted range lookups
+4. **Limit results** — use `maxResults` in traversal options or Cypher `LIMIT`
+5. **Use typed traversals** — specify relationship types and node labels for faster queries
 
-See the [Caching Guide](../guides/caching) for cache configuration.
+See the [Caching Guide](../guides/caching) for remote storage provider caching.

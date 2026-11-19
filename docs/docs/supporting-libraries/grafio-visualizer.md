@@ -6,7 +6,7 @@ description: Official Cypher graph renderer
 
 # @grafio/visualizer
 
-`@grafio/visualizer` is the official graph rendering library for Grafio. It provides the `CypherVisualizer` class, which is an aesthetic, highly interactive wrapper around `force-graph` and `3d-force-graph` designed to seamlessly consume and render Cypher execution results natively in the browser.
+`@grafio/visualizer` is the official graph rendering library for Grafio. It provides the `CypherVisualizer` class, an interactive wrapper around `force-graph` and `3d-force-graph` designed to seamlessly consume and render Cypher execution results natively in the browser.
 
 ## Installation
 
@@ -14,7 +14,9 @@ description: Official Cypher graph renderer
 npm install @grafio/visualizer
 ```
 
-> **Note:** If you are using this package in a server-side rendered (SSR) framework like Next.js or Docusaurus, rest assured it uses dynamic imports to ensure window/document dependencies do not crash your server build!
+Its 2D/3D rendering dependencies (`three`, `3d-force-graph`, `three-spritetext`, and `force-graph`) are externalized from the bundle and resolved via npm so host apps never load duplicate copies of Three.js.
+
+> **Note:** If you are using this package in a server-side rendered (SSR) framework like Next.js or Docusaurus, it uses dynamic imports to ensure window/document dependencies do not crash your server build.
 
 ## Initialization
 
@@ -24,7 +26,7 @@ To create a visualizer, instantiate the `CypherVisualizer` class by passing it a
 import { CypherVisualizer } from '@grafio/visualizer';
 
 // Grab your container element
-const container = document.getElementById('graph-container');
+const container = document.getElementById('graph-container')!;
 
 // Initialize the visualizer
 const visualizer = new CypherVisualizer(container, {
@@ -53,10 +55,10 @@ The `CypherVisualizer` constructor accepts a `VisualizerOptions` object:
 ## Methods
 
 ### `render(cypherResult: any)`
-The most powerful feature of the visualizer. It accepts a raw `CypherResult` object returned directly from `@grafio/browser` or `@grafio/core` engine. It automatically extracts all nodes and relationships from the `rows` and updates the physics simulation immediately!
+Accepts a `CypherResult` object returned directly from `@grafio/browser` or `grafio`. It automatically extracts all nodes and relationships from `rows` and updates the physics simulation immediately.
 
 ```typescript
-// Pass the result directly from engine.execute()
+// Pass the result directly from graph.query() or engine.execute()
 visualizer.render(result);
 ```
 
@@ -76,22 +78,22 @@ visualizer.destroy();
 
 ## Complete Usage Example
 
-Below is an example showing how seamlessly `@grafio/visualizer` connects to a `CypherEngine` execution result:
+Below is an example showing how `@grafio/visualizer` connects to a `Graph` query result:
 
 ```typescript
-import { CypherEngine } from '@grafio/browser';
+import { Graph } from '@grafio/browser';
 import { CypherVisualizer } from '@grafio/visualizer';
 
 async function visualizeResults() {
   // 1. Run a query that returns nodes and edges
-  const engine = new CypherEngine({ /* ... */ });
-  const result = await engine.execute(`MATCH (n)-[r]->(m) RETURN n, r, m`);
+  const graph = new Graph();
+  const result = await graph.query(`MATCH (n)-[r]->(m) RETURN n, r, m`);
 
   // 2. Grab container and initialize visualizer
-  const container = document.getElementById('my-container');
+  const container = document.getElementById('my-container')!;
   const visualizer = new CypherVisualizer(container, { mode: '2d' });
-  
-  // 3. Render the result instantly!
+
+  // 3. Render the result instantly
   visualizer.render(result);
 }
 ```

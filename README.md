@@ -8,11 +8,12 @@ High-performance graph database with **native Cypher support** and **pluggable s
 
 ## Features
 
-- **Cypher Queries** - OpenCypher-compatible query language with aggregations and variable-length paths
-- **Pluggable Storage** - In-memory built-in, MongoDB available separately
+- **In-Memory SoA & Hybrid CSR Engine** - Dense slot arenas, adaptive typed columns, `compact()` CSR adjacency lists, and synchronous `querySync()` execution
+- **Cypher Queries** - OpenCypher-compatible query language with aggregations, variable-length paths, `PlanCache`, and `graph.query()` / `graph.querySync()`
+- **Pluggable Storage** - Built-in zero-dependency `InMemoryStorageProvider`, with MongoDB available separately
 - **Multi-Hop Traversal** - BFS/DFS with type and property filtering
-- **Transactions** - Atomic multi-operation updates with automatic rollback
-- **Smart Caching** - LRU/LFU/FIFO with budget enforcement
+- **Transactions** - Optimistic property-level conflict detection (`TransactionConflictError`) and atomic rollback
+- **Smart Caching** - Optional LRU/LFU/FIFO caching (`CachedStorageProvider` / Redis) for remote or async storage providers
 - **Graph Analysis** - DAG validation, topological sort, Mermaid export
 
 ## Installation
@@ -24,39 +25,31 @@ npm install grafio
 ## Quick Start
 
 ```typescript
-import { InMemoryGraphFactory } from 'grafio';
-import { CypherEngine } from 'grafio/cypher';
+import { Graph } from 'grafio';
+// Or use InMemoryGraphFactory / CypherEngine when configuring planCacheSize or named partitions:
+// import { InMemoryGraphFactory, CypherEngine } from 'grafio';
 
-// Create graph via factory
-const factory = new InMemoryGraphFactory();
-const graph = factory.forGraph('social-network');
-const cypher = new CypherEngine(graph);
+const graph = new Graph();
 
-// Adding social network
-await cypher.execute(`
-    CREATE (a:Person {id: 'alice', name: 'Alice', age: 30}),
-    CREATE (b:Person {id: 'bob', name: 'Bob', age: 25}),
-    CREATE (c:Person {id: 'charlie', name: 'Charlie', age: 35})
-`);
-// Adding relationships
-await cypher.execute(`
-  MATCH (a:Person {id: 'alice'}), (b:Person {id: 'bob'})
-  CREATE (a)-[:KNOWS {since: 2020}]->(b)
-`);
-await cypher.execute(`
-  MATCH (b:Person {id: 'bob'}), (c:Person {id: 'charlie'})
-  CREATE (b)-[:KNOWS {since: 2019}]->(c)
+// Build a social network via Cypher
+graph.querySync(`
+  CREATE (a:Person { name: 'Alice', age: 30 }),
+         (b:Person { name: 'Bob', age: 25 }),
+         (c:Person { name: 'Charlie', age: 35 }),
+         (a)-[:KNOWS { since: 2020 }]->(b),
+         (b)-[:KNOWS { since: 2019 }]->(c)
 `);
 
-// Querying the network
-const result = await cypher.execute('MATCH (p:Person)-[:KNOWS]->(friend:Person) RETURN p.name as name, friend.name as friend');
-const friends = result.rows;
-
-/* Returns: 
-    [
-        {"name":"Alice","friend":"Bob"},
-        {"name":"Bob","friend":"Charlie"}
-    ]
+// Query the network (await graph.query(...) works for both in-memory and async providers)
+const result = await graph.query(
+  'MATCH (p:Person)-[:KNOWS]->(friend:Person) RETURN p.name AS name, friend.name AS friend',
+);
+console.log(result.rows);
+/* Returns:
+  [
+    { name: 'Alice', friend: 'Bob' },
+    { name: 'Bob', friend: 'Charlie' }
+  ]
 */
 ```
 

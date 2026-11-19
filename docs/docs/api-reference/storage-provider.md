@@ -5,59 +5,112 @@ Interface for implementing custom storage backends.
 ## Import
 
 ```typescript
-import { IStorageProvider, NodeData, EdgeData } from 'grafio';
+import {
+  IStorageProvider,
+  ISyncGraphKernel,
+  NodeData,
+  EdgeData,
+  PropertyPatch,
+} from 'grafio';
 ```
 
 ## Interface
 
 ```typescript
 interface IStorageProvider {
+  readonly indexEpoch: number;
+
   // Lifecycle
   clear(): Promise<void>;
+  compact?(): void;
 
   // Node mutations
   insertNode(node: NodeData, transaction?: ITransactionHandle): Promise<void>;
+  insertNodes(nodes: readonly NodeData[], transaction?: ITransactionHandle): Promise<void>;
   deleteNode(id: string, transaction?: ITransactionHandle): Promise<void>;
 
   // Node queries
   hasNode(id: string, transaction?: ITransactionHandle): Promise<boolean>;
-  getNode(id: string, transaction?: ITransactionHandle): Promise<NodeData | undefined>;
-  getNodesByIds(ids: string[], transaction?: ITransactionHandle): Promise<Map<string, NodeData>>;
+  getNode(id: string, transaction?: ITransactionHandle): Promise<ReadonlyNodeData | undefined>;
+  getNodesByIds(
+    ids: string[],
+    transaction?: ITransactionHandle,
+  ): Promise<Map<string, ReadonlyNodeData>>;
   getNodeCount(options?: StorageQueryOptions): Promise<number>;
-  aggregateNodeProperty(key: string, options?: StorageQueryOptions): Promise<AggregateResult>;
-  getNodes(options?: StorageQueryOptions): Promise<NodeData[]>;
+  aggregateNodeProperty(
+    key: string,
+    options?: StorageQueryOptions,
+  ): Promise<AggregateResult>;
+  getNodes(options?: StorageQueryOptions): Promise<ReadonlyNodeData[]>;
 
   // Edge mutations
   insertEdge(edge: EdgeData, transaction?: ITransactionHandle): Promise<void>;
+  insertEdges(edges: readonly EdgeData[], transaction?: ITransactionHandle): Promise<void>;
   deleteEdge(id: string, transaction?: ITransactionHandle): Promise<void>;
 
   // Edge queries
   hasEdge(id: string, transaction?: ITransactionHandle): Promise<boolean>;
-  getEdge(id: string, transaction?: ITransactionHandle): Promise<EdgeData | undefined>;
+  getEdge(id: string, transaction?: ITransactionHandle): Promise<ReadonlyEdgeData | undefined>;
   getEdgeCount(options?: StorageQueryOptions): Promise<number>;
-  aggregateEdgeProperty(key: string, options?: StorageQueryOptions): Promise<AggregateResult>;
-  getEdges(options?: StorageQueryOptions): Promise<EdgeData[]>;
+  aggregateEdgeProperty(
+    key: string,
+    options?: StorageQueryOptions,
+  ): Promise<AggregateResult>;
+  getEdges(options?: StorageQueryOptions): Promise<ReadonlyEdgeData[]>;
+  getEdgesBySource(
+    nodeId: string,
+    options?: StorageQueryOptions,
+  ): Promise<ReadonlyEdgeData[]>;
+  getEdgesByTarget(
+    nodeId: string,
+    options?: StorageQueryOptions,
+  ): Promise<ReadonlyEdgeData[]>;
 
-  // Adjacency queries
-  getEdgesBySource(nodeId: string, options?: StorageQueryOptions): Promise<EdgeData[]>;
-  getEdgesByTarget(nodeId: string, options?: StorageQueryOptions): Promise<EdgeData[]>;
-  getDirectEdgesBetween(sourceId: string, targetId: string, options?: StorageQueryOptions): Promise<EdgeData[]>;
-
-  // Property mutations
-  addProperty(target: 'node' | 'edge', id: string, key: string, value: unknown, transaction?: ITransactionHandle): Promise<void>;
-  updateProperty(target: 'node' | 'edge', id: string, key: string, value: unknown, transaction?: ITransactionHandle): Promise<void>;
-  deleteProperty(target: 'node' | 'edge', id: string, key: string, transaction?: ITransactionHandle): Promise<void>;
-  clearProperties(target: 'node' | 'edge', id: string, transaction?: ITransactionHandle): Promise<void>;
+  // Property and label mutations
+  removeNodeLabels(
+    nodeId: string,
+    labels: string[],
+    transaction?: ITransactionHandle,
+  ): Promise<void>;
+  patchProperties(
+    target: 'node' | 'edge',
+    id: string,
+    patch: PropertyPatch,
+    transaction?: ITransactionHandle,
+  ): Promise<void>;
 
   // Index management
-  createIndex(target: 'node' | 'edge', propertyKey: string, type?: string): Promise<void>;
-  hasIndex(target: 'node' | 'edge', propertyKey: string): Promise<boolean>;
+  createIndex(
+    name: string,
+    target: 'node' | 'edge',
+    propertyKeys: string[],
+    options?: CreateIndexOptions,
+  ): Promise<void>;
+  hasIndex(
+    target: 'node' | 'edge',
+    propertyKeys: string[],
+    labelOrType?: string,
+  ): Promise<boolean>;
+  getIndex(name: string): Promise<IndexMetadata | undefined>;
+  deleteIndex(name: string): Promise<void>;
+  getIndexes(): Promise<IndexMetadata[]>;
 
-  // Serialization
+  // Data portability
   exportJSON(): Promise<GraphData>;
   importJSON(data: GraphData): Promise<void>;
+
+  // Transaction support
+  supportsTransactions(): boolean;
+  beginTransaction(): Promise<ITransactionHandle>;
+  commitTransaction(handle: ITransactionHandle): Promise<void>;
+  rollbackTransaction(handle: ITransactionHandle): Promise<void>;
 }
 ```
+
+## Optional Capabilities
+
+- **`ISyncGraphKernel`** (`isSyncGraphKernel(provider)`): Optional synchronous execution kernel implemented by `InMemoryStorageProvider` to power `graph.querySync()` and zero-allocation TypedArray traversal.
+- **`CacheWarmableStorageProvider`** (`isCacheWarmableStorageProvider(provider)`): Optional `warmCache(): Promise<void>` hook implemented by `CachedStorageProvider`.
 
 ## Data Types
 
@@ -66,8 +119,10 @@ interface IStorageProvider {
 ```typescript
 interface NodeData {
   id: string;
-  type: string;
-  properties: Record<string, Primitive>;
+  labels: string[];
+  createdOn?: number;
+  updatedOn?: number;
+  properties: Record<string, unknown>;
 }
 ```
 
@@ -79,7 +134,19 @@ interface EdgeData {
   sourceId: string;
   targetId: string;
   type: string;
-  properties: Record<string, Primitive>;
+  createdOn?: number;
+  updatedOn?: number;
+  properties: Record<string, unknown>;
+}
+```
+
+### PropertyPatch
+
+```typescript
+interface PropertyPatch {
+  set?: Readonly<Record<string, unknown>>;
+  unset?: readonly string[];
+  replace?: boolean;
 }
 ```
 
@@ -87,45 +154,14 @@ interface EdgeData {
 
 ```typescript
 interface StorageQueryOptions {
-  nodeType?: string;
-  edgeType?: string;
+  filter?: {
+    types?: string[];
+    properties?: QueryOptionsFilterProperty[];
+  };
+  orderBy?: IOrderBy;
   limit?: number;
-  offset?: number;
-}
-```
-
-## Example Implementation
-
-```typescript
-class MyStorageProvider implements IStorageProvider {
-  private nodes: Map<string, Node> = new Map();
-  private edges: Map<string, Edge> = new Map();
-
-  async addNode(nodeData: NodeData): Promise<Node> {
-    const node = new Node(nodeData.id, nodeData.type, nodeData.properties);
-    this.nodes.set(node.id, node);
-    return node;
-  }
-
-  async getNode(id: string): Promise<Node | undefined> {
-    return this.nodes.get(id);
-  }
-
-  async hasNode(id: string): Promise<boolean> {
-    return this.nodes.has(id);
-  }
-
-  async getNodes(options?: StorageQueryOptions): Promise<readonly Node[]> {
-    const nodes = Array.from(this.nodes.values());
-    return this.filterNodes(nodes, options);
-  }
-
-  // ... implement remaining methods ...
-
-  private filterNodes(nodes: Node[], options?: StorageQueryOptions): Node[] {
-    if (!options?.nodeType) return nodes;
-    return nodes.filter(n => n.type === options.nodeType);
-  }
+  distinct?: boolean;
+  transaction?: ITransactionHandle;
 }
 ```
 
@@ -135,5 +171,11 @@ class MyStorageProvider implements IStorageProvider {
 import { Graph } from 'grafio';
 import type { IStorageProvider } from 'grafio';
 
-const myProvider: IStorageProvider = new MyStorageProvider();
-const graph = new Graph(myProvider);
+class CustomStorageProvider implements IStorageProvider {
+  // Implement IStorageProvider methods for your backend
+  // ...
+}
+
+const provider: IStorageProvider = new CustomStorageProvider();
+const graph = new Graph(provider);
+```

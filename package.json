@@ -1,19 +1,21 @@
 {
   "name": "grafio",
-  "version": "7.15.1",
+  "version": "8.0.0",
   "description": "High-performance graph database with native Cypher support and pluggable storage",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
     "build:prod": "npm run clean && tsc -p tsconfig.prod.json",
-    "build:browser": "cd browser && node scripts/build.js",
-    "build:all": "npm run build:prod && npm run build:browser",
+    "build:browser": "cd browser && npm run build:all",
+    "build:visualizer": "cd visualizer && npm run build:all",
+    "build:all": "npm run build:prod && npm run build:browser && npm run build:visualizer",
+    "typecheck": "tsc -p tsconfig.test.json --noEmit",
     "clean": "rimraf dist",
     "test": "jest",
     "test:coverage": "jest --coverage --coverageReporters=text-summary --coverageReporters=html",
-    "perf": "ts-node --project tsconfig.perf.json tests/perf/entryPoint.ts",
-    "perf:gc": "cross-env TS_NODE_PROJECT=tsconfig.perf.json node --expose-gc -r ts-node/register tests/perf/entryPoint.ts"
+    "perf": "tsx tests/perf/entryPoint.ts",
+    "perf:gc": "node --expose-gc --import tsx tests/perf/entryPoint.ts"
   },
   "exports": {
     ".": {
@@ -71,15 +73,15 @@
   },
   "funding": "https://ko-fi.com/satyajugran",
   "devDependencies": {
+    "@swc/core": "^1.16.22",
+    "@swc/jest": "^0.2.39",
     "@types/jest": "^29.5.0",
     "@types/node": "^25.6.0",
-    "cross-env": "^10.1.0",
     "ioredis-mock": "^8.13.1",
     "jest": "^29.5.0",
     "rimraf": "^5.0.0",
-    "ts-jest": "^29.1.0",
-    "ts-node": "^10.9.0",
-    "typescript": "^5.0.0"
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
   },
   "peerDependencies": {
     "ioredis": "^5.0.0"

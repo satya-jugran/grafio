@@ -5,10 +5,11 @@ Execute openCypher-compatible queries against your graph.
 ## Import
 
 ```typescript
-import { CypherEngine } from 'grafio/cypher';
+import { CypherEngine } from 'grafio';
+// or: import { CypherEngine } from 'grafio/cypher';
 ```
 
-Note: The Cypher deep import path (`grafio/cypher`) is required separately from the main `grafio` import.
+You can also run queries directly on a `Graph` instance via `graph.query(...)` and `graph.querySync(...)`.
 
 ## Constructor
 
@@ -16,14 +17,21 @@ Note: The Cypher deep import path (`grafio/cypher`) is required separately from 
 new CypherEngine(graph: Graph, options?: CypherEngineOptions)
 ```
 
+```typescript
+interface CypherEngineOptions {
+  /** Maximum compiled query plans retained in LRU PlanCache (default: 512, 0 disables caching) */
+  planCacheSize?: number;
+}
+```
+
 **Parameters:**
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
 | `graph` | `Graph` | ✅ | The graph to query |
-| `options` | `CypherEngineOptions` | ❌ | Engine configuration |
+| `options` | `CypherEngineOptions` | ❌ | Engine configuration (`planCacheSize`) |
 
-## execute()
+## execute() & executeSync()
 
 ```typescript
 async execute(
@@ -31,9 +39,15 @@ async execute(
   params?: Record<string, unknown> | CypherQueryOptions,
   options?: CypherQueryOptions
 ): Promise<CypherResult & { executionPlan?: string }>
+
+executeSync(
+  cypher: string,
+  params?: Record<string, unknown> | CypherQueryOptions,
+  options?: CypherQueryOptions
+): CypherResult & { executionPlan?: string }
 ```
 
-Executes a Cypher query and returns the results.
+`executeSync()` runs queries synchronously on `InMemoryStorageProvider` (and any `ISyncGraphKernel` provider) without Promise microtask overhead. Both methods share the same LRU `PlanCache` keyed by query string and `graph.indexEpoch`.
 
 **Parameters:**
 
@@ -63,6 +77,7 @@ interface CypherSummary {
   edgesCreated: number;
   edgesDeleted: number;
   propertiesSet: number;
+  labelsRemoved: number;
   indexesCreated: number;
   indexesDeleted: number;
 }

@@ -1,1674 +1,2573 @@
-import type { NodeData, EdgeData, GraphData, AggregateOp, AggregateResult, QueryOptionsFilterProperty } from '../types';
-import type { IStorageProvider, IOrderBy, ITransactionHandle, StorageQueryOptions } from './IStorageProvider';
+/**
+ * High-performance in-memory storage engine backed by dense `uint32` slot arenas,
+ * columnar TypedArray properties, Hybrid Global CSR + Delta adjacency lists,
+ * opt-in scoped hash + sorted range indexes, and conflict-checked delta transactions.
+ *
+ * @module storage/InMemoryStorageProvider
+ */
+
+import type {
+  AggregateResult,
+  EdgeData,
+  GraphData,
+  ITransactionHandle,
+  NodeData,
+  ReadonlyNodeData,
+  ReadonlyEdgeData,
+  PropertyPatch,
+  QueryOptionsFilterProperty,
+  StorageQueryOptions,
+} from '../types';
 import {
-  NodeAlreadyExistsError,
   EdgeAlreadyExistsError,
-  NodeNotFoundError,
   EdgeNotFoundError,
   InvalidPropertyError,
-  PropertyAlreadyExistsError,
-  PropertyNotFoundError,
+  NodeAlreadyExistsError,
+  NodeHasEdgesError,
+  NodeNotFoundError,
 } from '../errors';
-import { deepClone, isPrimitive } from '../utils';
+import { Node } from '../Node';
+import { Edge } from '../Edge';
+import { findInvalidPropertyEntry, isPrimitive } from '../utils';
+import type {
+  CreateIndexOptions,
+  IndexMetadata,
+  IStorageProvider,
+  ISyncGraphKernel,
+} from './IStorageProvider';
+import { NONE_SLOT, SlotArena, type IdStrategy } from './engine/SlotArena';
+import { AdjacencyStore } from './engine/AdjacencyStore';
+import { PropertyIndexStore, type RangeOperator } from './engine/PropertyIndexStore';
+import {
+  TransactionManager,
+  type TransactionContext,
+  type UndoEntry,
+} from './engine/TransactionManager';
+import { Uint32SlotSet } from './engine/Uint32SlotSet';
+import { ColumnStore, TAG_ABSENT, TAG_VALUE } from './engine/ColumnStore';
 
-/**
- * Configuration options for InMemoryStorageProvider.
- */
 export interface InMemoryStorageProviderOptions {
   /**
-   * Graph partition key. Stored for metadata parity with MongoStorageProvider.
-   * @default 'default'
+   * Optional partition key identifying this graph.
+   * Returned in `exportJSON().graphId`. Defaults to `'default'`.
    */
   graphId?: string;
+
+  /**
+   * ID generation strategy when callers omit `id`:
+   * - `'compact'` (default): zero-CSPRNG `@n<slot>:<gen>` / `@e<slot>:<gen>` IDs
+   *   enabling O(1) hash-free decoding.
+   * - `'uuid'`: RFC-4122 v4 UUIDs via pooled CSPRNG.
+   */
+  idStrategy?: IdStrategy;
 }
 
-/**
- * Default in-memory implementation of IStorageProvider.
- *
- * Uses the same Map / Set structures that GraphIndex previously owned directly.
- * All operations are O(1) amortised (hash-map / set lookups) except
- * getAllNodes() / getAllEdges() which are O(n).
- *
- * Each instance is naturally scoped to its own Maps — graphId is stored for
- * metadata parity with MongoStorageProvider.
- *
- * All methods are async to satisfy the IStorageProvider contract, but this
- * implementation resolves immediately (synchronous) — no I/O overhead.
- */
-export class InMemoryStorageProvider implements IStorageProvider {
-  /** Partition key for metadata parity with MongoStorageProvider. */
+export class InMemoryStorageProvider implements IStorageProvider, ISyncGraphKernel {
+  readonly __isSyncGraphKernel = true as const;
   readonly graphId: string;
 
-  constructor(opts: InMemoryStorageProviderOptions = {}) {
-    this.graphId = opts.graphId ?? 'default';
+  readonly arena: SlotArena;
+  readonly adjacency: AdjacencyStore;
+  readonly propertyIndexes: PropertyIndexStore;
+  private readonly _txnManager: TransactionManager;
+  private _undoStack: UndoEntry[] | null = null;
+
+  constructor(options: InMemoryStorageProviderOptions = {}) {
+    this.graphId = options.graphId ?? 'default';
+    this.arena = new SlotArena(options.idStrategy ?? 'compact');
+    this.adjacency = new AdjacencyStore(this.arena.nodeCapacity);
+    this.propertyIndexes = new PropertyIndexStore();
+    this._txnManager = new TransactionManager();
+
+    this.arena.onNodeCapacityGrow = (newCap: number) => {
+      this.adjacency.growNodes(newCap);
+    };
+  }
+
+  get indexEpoch(): number {
+    return this.propertyIndexes.indexEpoch;
+  }
+
+  get hasActiveTransactions(): boolean {
+    return this._txnManager.hasActiveTransactions;
   }
 
   // ---------------------------------------------------------------------------
-  // Primary stores
-  // ---------------------------------------------------------------------------
-  private readonly _nodes = new Map<string, NodeData>();
-  private readonly _edges = new Map<string, EdgeData>();
-
-  // Type index maps
-  private readonly _nodesByType = new Map<string, Set<string>>();
-  private readonly _edgesByType = new Map<string, Set<string>>();
-
-  // Adjacency maps
-  private readonly _edgesBySource = new Map<string, Set<string>>();
-  private readonly _edgesByTarget = new Map<string, Set<string>>();
-
-  // Property value index: propKey → serializedValue → Set<nodeId>
-  private readonly _nodesByProperty = new Map<string, Map<string, Set<string>>>();
-  private _edgesByProperty = new Map<string, Map<string, Set<string>>>();
-
-  /** Tracks created index keys for nodes (single property indexes) */
-  private readonly _nodeIndexedKeys = new Set<string>();
-
-  /** Tracks created index keys for edges (single property indexes) */
-  private readonly _edgeIndexedKeys = new Set<string>();
-
-  /**
-   * Tracks compound indexes using sorted key tuple as string key.
-   * Format: "prop1|prop2|..." → target ('node' | 'edge')
-   * This allows O(1) lookup for compound index existence.
-   */
-  private readonly _compoundIndexes = new Map<string, 'node' | 'edge'>();
-
-  /**
-   * Named indexes map.
-   * Maps index name → index metadata (target type and property keys).
-   */
-  private readonly _namedIndexes = new Map<string, { target: 'node' | 'edge'; propertyKeys: string[] }>();
-
-  // ---------------------------------------------------------------------------
-  // Helpers
-  // ---------------------------------------------------------------------------
-
-  private _propKey(value: unknown): string {
-    return JSON.stringify(value) ?? 'undefined';
-  }
-
-  private _indexNodeProperties(node: NodeData): void {
-    for (const [key, value] of Object.entries(node.properties)) {
-      const serialized = this._propKey(value);
-      if (!this._nodesByProperty.has(key)) {
-        this._nodesByProperty.set(key, new Map());
-      }
-      const valueMap = this._nodesByProperty.get(key)!;
-      if (!valueMap.has(serialized)) {
-        valueMap.set(serialized, new Set());
-      }
-      valueMap.get(serialized)!.add(node.id);
-    }
-  }
-
-  private _unindexNodeProperties(node: NodeData): void {
-    for (const [key, value] of Object.entries(node.properties)) {
-      this._unindexNodeProperty(node.id, key, value);
-    }
-  }
-
-  private _indexNodeProperty(nodeId: string, key: string, value: unknown): void {
-    const serialized = this._propKey(value);
-    if (!this._nodesByProperty.has(key)) {
-      this._nodesByProperty.set(key, new Map());
-    }
-    const valueMap = this._nodesByProperty.get(key)!;
-    if (!valueMap.has(serialized)) {
-      valueMap.set(serialized, new Set());
-    }
-    valueMap.get(serialized)!.add(nodeId);
-  }
-
-  private _unindexNodeProperty(nodeId: string, key: string, value: unknown): void {
-    const serialized = this._propKey(value);
-    const valueMap = this._nodesByProperty.get(key);
-    if (!valueMap) return;
-    const idSet = valueMap.get(serialized);
-    if (!idSet) return;
-    idSet.delete(nodeId);
-    if (idSet.size === 0) {
-      valueMap.delete(serialized);
-      if (valueMap.size === 0) {
-        this._nodesByProperty.delete(key);
-      }
-    }
-  }
-
-  private _indexEdgeProperty(edgeId: string, key: string, value: unknown): void {
-    const serialized = this._propKey(value);
-    if (!this._edgesByProperty.has(key)) {
-      this._edgesByProperty.set(key, new Map());
-    }
-    const valueMap = this._edgesByProperty.get(key)!;
-    if (!valueMap.has(serialized)) {
-      valueMap.set(serialized, new Set());
-    }
-    valueMap.get(serialized)!.add(edgeId);
-  }
-
-  private _unindexEdgeProperty(edgeId: string, key: string, value: unknown): void {
-    const serialized = this._propKey(value);
-    const valueMap = this._edgesByProperty.get(key);
-    if (!valueMap) return;
-    const idSet = valueMap.get(serialized);
-    if (!idSet) return;
-    idSet.delete(edgeId);
-    if (idSet.size === 0) {
-      valueMap.delete(serialized);
-      if (valueMap.size === 0) {
-        this._edgesByProperty.delete(key);
-      }
-    }
-  }
-
-  /**
-   * Compute aggregate statistics (count, sum, avg, min, max) from an array of numbers.
-   * This is a private helper method used by aggregateNodeProperty and aggregateEdgeProperty.
-   */
-  private _computeAggregation(values: number[]): AggregateResult {
-    const count = values.length;
-    let sum: number | undefined;
-    let avg: number | undefined;
-    let min: number | undefined;
-    let max: number | undefined;
-
-    if (count > 0) {
-      sum = values.reduce((a, b) => a + b, 0);
-      avg = sum / count;
-      min = Math.min(...values);
-      max = Math.max(...values);
-    }
-
-    return { count, sum, avg, min, max };
-  }
-
-  // ---------------------------------------------------------------------------
-  // Lifecycle
+  // Lifecycle & Compaction
   // ---------------------------------------------------------------------------
 
   async clear(): Promise<void> {
-    this._nodes.clear();
-    this._edges.clear();
-    this._nodesByType.clear();
-    this._edgesByType.clear();
-    this._edgesBySource.clear();
-    this._edgesByTarget.clear();
-    this._nodesByProperty.clear();
-    this._edgesByProperty.clear();
-    this._nodeIndexedKeys.clear();
-    this._edgeIndexedKeys.clear();
-    this._compoundIndexes.clear();
-    // Clear transaction state so clear truly removes all stored data
-    this._transactionOverlays.clear();
-    this._activeTransaction = null;
+    this.clearSync();
+  }
+
+  clearSync(): void {
+    this.arena.clear();
+    this.adjacency.clear();
+    this.propertyIndexes.clear();
+    this._txnManager.clear();
+    this._undoStack = null;
+  }
+
+  compact(): void {
+    this.adjacency.buildCSR(
+      this.arena.nodeHighWater,
+      this.arena.edgeHighWater,
+      this.arena.edgeAlive,
+      this.arena.edgeSrcSlot,
+      this.arena.edgeTgtSlot,
+      this.arena.edgeTypeId,
+    );
+    this.arena.reclaimRetiredSlots();
   }
 
   // ---------------------------------------------------------------------------
-  // Count queries
+  // ISyncGraphKernel Direct Slot & Entity Helpers
   // ---------------------------------------------------------------------------
 
-  async getNodeCount(options?: StorageQueryOptions): Promise<number> {
-    const transaction = options?.transaction;
-    const overlay = this._getOverlay(transaction?.id);
+  getNodeSlot(id: string): number {
+    return this.arena.resolveNodeSlot(id);
+  }
 
-    // Optimization: O(1) when no filter is applied - just return the Map size
-    // instead of iterating through all nodes with getNodes()
-    if (!options?.filter) {
-      let count = this._nodes.size;
+  getEdgeSlot(id: string): number {
+    return this.arena.resolveEdgeSlot(id);
+  }
 
-      // If no filter but with transaction: need to iterate overlay - O(overlay size)
-      if (overlay) {
-        // Add overlay nodes that aren't overriding live nodes (new inserts)
-        for (const [id, node] of overlay.nodes) {
-          if (node && !this._nodes.has(id)) {
-            count++;
+  getNodeEntityBySlot(slot: number): Node {
+    return this.arena.getNodeEntity(slot);
+  }
+
+  getEdgeEntityBySlot(slot: number): Edge {
+    return this.arena.getEdgeEntity(slot);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Undo Checkpoints (Implicit Statement-Level Atomicity for Cypher Writes)
+  // ---------------------------------------------------------------------------
+
+  beginUndoCheckpoint(): void {
+    this._undoStack = [];
+  }
+
+  commitUndoCheckpoint(): void {
+    this._undoStack = null;
+  }
+
+  rollbackUndoCheckpoint(): void {
+    const stack = this._undoStack;
+    this._undoStack = null;
+    if (!stack || stack.length === 0) return;
+
+    for (let i = stack.length - 1; i >= 0; i--) {
+      const entry = stack[i];
+      switch (entry.kind) {
+        case 'deleteNode': {
+          const slot = this.arena.resolveNodeSlot(entry.id);
+          if (slot >= 0) {
+            const props = this.propertyIndexes.hasAnyNodeIndexes
+              ? this.arena.nodeColumns.materializeRecord(slot)
+              : {};
+            this.propertyIndexes.onNodeDeleted(slot, this.arena.nodeLabelIds[slot], props);
+            this.arena.detachNodeIncidentEdges(slot, this.adjacency);
+            const delayReuse = this.adjacency.hasCsrEntries(slot);
+            this.arena.freeNode(slot, delayReuse);
+            this.adjacency.clearNodeDelta(slot);
           }
+          break;
         }
-        // Subtract overlay nodes with null that are deleting live nodes
-        for (const [id, node] of overlay.nodes) {
-          if (node === null && this._nodes.has(id)) {
-            count--;
+        case 'deleteEdge': {
+          const slot = this.arena.resolveEdgeSlot(entry.id);
+          if (slot >= 0) {
+            const props = this.propertyIndexes.hasAnyEdgeIndexes
+              ? this.arena.edgeColumns.materializeRecord(slot)
+              : {};
+            this.propertyIndexes.onEdgeDeleted(slot, this.arena.edgeTypeId[slot], props);
+            const removedFromDelta = this.adjacency.removeEdge(
+              slot,
+              this.arena.edgeSrcSlot[slot],
+              this.arena.edgeTgtSlot[slot],
+            );
+            const delayReuse = !removedFromDelta || slot < this.adjacency.csrEdgeSlotBound;
+            this.arena.freeEdge(slot, delayReuse);
           }
+          break;
+        }
+        case 'restoreNode': {
+          const d = entry.data;
+          if (this.arena.resolveNodeSlot(d.id) < 0) {
+            const slot = this.arena.allocateNode(
+              d.labels,
+              d.properties,
+              d.id,
+              d.createdOn,
+              d.updatedOn,
+            );
+            this.arena.bindDanglingEdgesForNode(d.id, slot, this.adjacency);
+            this.propertyIndexes.onNodeInserted(slot, this.arena.nodeLabelIds[slot], d.properties);
+          }
+          break;
+        }
+        case 'restoreEdge': {
+          const e = entry.data;
+          if (this.arena.resolveEdgeSlot(e.id) < 0) {
+            const rawSrc = this.arena.resolveNodeSlot(e.sourceId);
+            const rawTgt = this.arena.resolveNodeSlot(e.targetId);
+            const srcSlot = rawSrc < 0 ? NONE_SLOT : rawSrc;
+            const tgtSlot = rawTgt < 0 ? NONE_SLOT : rawTgt;
+            const { slot, typeId } = this.arena.allocateEdge(
+              srcSlot,
+              tgtSlot,
+              e.type,
+              e.properties,
+              e.id,
+              e.createdOn,
+              e.updatedOn,
+              e.sourceId,
+              e.targetId,
+            );
+            if (srcSlot !== NONE_SLOT && tgtSlot !== NONE_SLOT) {
+              this.adjacency.addEdge(slot, srcSlot, tgtSlot, typeId);
+            }
+            this.propertyIndexes.onEdgeInserted(slot, typeId, e.properties);
+          }
+          break;
+        }
+        case 'restoreNodeProps': {
+          const slot = this.arena.resolveNodeSlot(entry.id);
+          if (slot >= 0) {
+            const curProps = this.arena.nodeColumns.materializeRecord(slot);
+            this.arena.invalidateNodeEntity(slot);
+            this.arena.nodeColumns.clearSlot(slot);
+            this.arena.nodeColumns.setRecord(slot, entry.props);
+            this.propertyIndexes.onNodePropertiesUpdated(
+              slot,
+              this.arena.nodeLabelIds[slot],
+              curProps,
+              entry.props,
+            );
+          }
+          break;
+        }
+        case 'restoreEdgeProps': {
+          const slot = this.arena.resolveEdgeSlot(entry.id);
+          if (slot >= 0) {
+            const curProps = this.arena.edgeColumns.materializeRecord(slot);
+            this.arena.invalidateEdgeEntity(slot);
+            this.arena.edgeColumns.clearSlot(slot);
+            this.arena.edgeColumns.setRecord(slot, entry.props);
+            this.propertyIndexes.onEdgePropertiesUpdated(
+              slot,
+              this.arena.edgeTypeId[slot],
+              curProps,
+              entry.props,
+            );
+          }
+          break;
+        }
+        case 'restoreNodeLabels': {
+          const slot = this.arena.resolveNodeSlot(entry.id);
+          if (slot >= 0) {
+            const props = this.propertyIndexes.hasAnyNodeIndexes
+              ? this.arena.nodeColumns.materializeRecord(slot)
+              : {};
+            this.propertyIndexes.onNodeDeleted(slot, this.arena.nodeLabelIds[slot], props);
+            this.arena.setNodeLabelsBySlot(slot, entry.labels);
+            this.propertyIndexes.onNodeInserted(slot, this.arena.nodeLabelIds[slot], props);
+          }
+          break;
         }
       }
+    }
+  }
 
-      return count;
+  // ---------------------------------------------------------------------------
+  // Node Mutations
+  // ---------------------------------------------------------------------------
+
+  async insertNode(node: NodeData, transaction?: ITransactionHandle): Promise<void> {
+    const ctx = this._txnManager.getContext(transaction);
+    if (ctx) {
+      this._txnManager.stageInsertNode(ctx, node, this.arena);
+      return;
     }
 
-    // With filter, get filtered results and return count
-    const nodes = await this.getNodes(options);
-    return nodes.length;
+    if (this.arena.resolveNodeSlot(node.id) >= 0) {
+      throw new NodeAlreadyExistsError(node.id);
+    }
+    const slot = this.arena.allocateNode(
+      node.labels,
+      node.properties,
+      node.id,
+      node.createdOn,
+      node.updatedOn,
+    );
+    this.arena.bindDanglingEdgesForNode(node.id, slot, this.adjacency);
+    this.propertyIndexes.onNodeInserted(slot, this.arena.nodeLabelIds[slot], node.properties);
+    this._txnManager.recordLiveNodeWrite(node.id);
+    this._undoStack?.push({ kind: 'deleteNode', id: node.id });
   }
 
-  async getNodesByIds(ids: string[], transaction?: ITransactionHandle): Promise<Map<string, NodeData>> {
-    const overlay = this._getOverlay(transaction?.id);
-    const result = new Map<string, NodeData>();
-    for (const id of ids) {
-      // Check overlay first (transactional writes)
-      const overlayNode = overlay?.nodes.get(id);
-      if (overlayNode !== undefined) {
-        if (overlayNode !== null) result.set(id, deepClone(overlayNode));
-        continue;
+  async insertNodes(nodes: readonly NodeData[], transaction?: ITransactionHandle): Promise<void> {
+    const ctx = this._txnManager.getContext(transaction);
+    if (ctx) {
+      for (let i = 0; i < nodes.length; i++) {
+        this._txnManager.stageInsertNode(ctx, nodes[i], this.arena);
       }
-      const node = this._nodes.get(id);
-      if (node) result.set(id, deepClone(node));
+      return;
+    }
+
+    const seenIds = new Set<string>();
+    for (let i = 0; i < nodes.length; i++) {
+      const nid = nodes[i].id;
+      if (seenIds.has(nid) || this.arena.resolveNodeSlot(nid) >= 0) {
+        throw new NodeAlreadyExistsError(nid);
+      }
+      seenIds.add(nid);
+    }
+
+    this.arena.ensureNodeCapacity(this.arena.nodeHighWater + nodes.length);
+    for (let i = 0; i < nodes.length; i++) {
+      const node = nodes[i];
+      const slot = this.arena.allocateNode(
+        node.labels,
+        node.properties,
+        node.id,
+        node.createdOn,
+        node.updatedOn,
+      );
+      this.arena.bindDanglingEdgesForNode(node.id, slot, this.adjacency);
+      this.propertyIndexes.onNodeInserted(slot, this.arena.nodeLabelIds[slot], node.properties);
+      this._txnManager.recordLiveNodeWrite(node.id);
+      this._undoStack?.push({ kind: 'deleteNode', id: node.id });
+    }
+  }
+
+  insertNodeSync(
+    labels: readonly string[],
+    properties: Readonly<Record<string, unknown>>,
+    id?: string,
+    transaction?: ITransactionHandle,
+  ): Node {
+    const ctx = this._txnManager.getContext(transaction);
+    if (ctx) {
+      const node = new Node(labels, properties, id);
+      this._txnManager.stageInsertNode(ctx, node.toJSON(), this.arena);
+      return node;
+    }
+
+    if (id !== undefined && this.arena.resolveNodeSlot(id) >= 0) {
+      throw new NodeAlreadyExistsError(id);
+    }
+    const slot = this.arena.allocateNode(labels, properties, id);
+    const createdId = this.arena.nodeIds[slot];
+    this.arena.bindDanglingEdgesForNode(createdId, slot, this.adjacency);
+    this.propertyIndexes.onNodeInserted(slot, this.arena.nodeLabelIds[slot], properties);
+    this._txnManager.recordLiveNodeWrite(createdId);
+    this._undoStack?.push({ kind: 'deleteNode', id: createdId });
+    return this.arena.getNodeEntity(slot);
+  }
+
+  insertNodesSync(
+    items: ReadonlyArray<{
+      labels: readonly string[];
+      properties?: Readonly<Record<string, unknown>>;
+      id?: string;
+    }>,
+    transaction?: ITransactionHandle,
+  ): Node[] {
+    const out = new Array<Node>(items.length);
+    const ctx = this._txnManager.getContext(transaction);
+    if (!ctx) {
+      const seenIds = new Set<string>();
+      for (let i = 0; i < items.length; i++) {
+        const explicitId = items[i].id;
+        if (explicitId !== undefined) {
+          if (seenIds.has(explicitId) || this.arena.resolveNodeSlot(explicitId) >= 0) {
+            throw new NodeAlreadyExistsError(explicitId);
+          }
+          seenIds.add(explicitId);
+        }
+      }
+      this.arena.ensureNodeCapacity(this.arena.nodeHighWater + items.length);
+    }
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      out[i] = this.insertNodeSync(item.labels, item.properties ?? {}, item.id, transaction);
+    }
+    return out;
+  }
+
+  async deleteNode(id: string, transaction?: ITransactionHandle): Promise<void> {
+    const ctx = this._txnManager.getContext(transaction);
+    if (ctx) {
+      this._txnManager.stageDeleteNode(ctx, id, this.arena);
+      return;
+    }
+
+    const slot = this.arena.resolveNodeSlot(id);
+    if (slot < 0) return;
+
+    const props = (this.propertyIndexes.hasAnyNodeIndexes || this._undoStack !== null)
+      ? this.arena.nodeColumns.materializeRecord(slot)
+      : {};
+    if (this._undoStack !== null) {
+      this._undoStack.push({
+        kind: 'restoreNode',
+        data: {
+          id,
+          labels: [...this.arena.nodeLabelStrings[slot]],
+          createdOn: this.arena.nodeCreatedOn[slot],
+          updatedOn: this.arena.nodeUpdatedOn[slot],
+          properties: { ...props },
+        },
+      });
+    }
+
+    this.propertyIndexes.onNodeDeleted(slot, this.arena.nodeLabelIds[slot], props);
+    this.arena.detachNodeIncidentEdges(slot, this.adjacency);
+    const delayReuse = this.adjacency.hasCsrEntries(slot);
+    this.arena.freeNode(slot, delayReuse);
+    this.adjacency.clearNodeDelta(slot);
+    this._txnManager.recordLiveNodeWrite(id, undefined, true);
+  }
+
+  deleteNodeByIdSync(
+    id: string,
+    cascade: boolean,
+    transaction?: ITransactionHandle,
+  ): { result: boolean; cascadeDeletedEdgesCount?: number } {
+    const ctx = this._txnManager.getContext(transaction);
+    if (ctx) {
+      if (!this._hasNodeInCtx(id, ctx)) return { result: false };
+      const outEdges = this._getEdgesBySourceInCtx(id, ctx);
+      const inEdges = this._getEdgesByTargetInCtx(id, ctx);
+      const incidentCount = outEdges.length + inEdges.length;
+      if (!cascade) {
+        if (incidentCount > 0) throw new NodeHasEdgesError(id, incidentCount);
+      } else {
+        for (let i = 0; i < outEdges.length; i++) {
+          this._txnManager.stageDeleteEdge(ctx, outEdges[i].id, this.arena);
+        }
+        for (let i = 0; i < inEdges.length; i++) {
+          this._txnManager.stageDeleteEdge(ctx, inEdges[i].id, this.arena);
+        }
+      }
+      this._txnManager.stageDeleteNode(ctx, id, this.arena);
+      return cascade ? { result: true, cascadeDeletedEdgesCount: incidentCount } : { result: true };
+    }
+
+    const slot = this.arena.resolveNodeSlot(id);
+    if (slot < 0) return { result: false };
+
+    const outDeg = this.adjacency.outDegree(slot);
+    const inDeg = this.adjacency.inDegree(slot);
+    const danglingOut = this.arena.hasDanglingEdges ? (this.arena.danglingOutEdges.get(id)?.size ?? 0) : 0;
+    const danglingIn = this.arena.hasDanglingEdges ? (this.arena.danglingInEdges.get(id)?.size ?? 0) : 0;
+    const incidentCount = outDeg + inDeg + danglingOut + danglingIn;
+
+    if (!cascade) {
+      if (incidentCount > 0) throw new NodeHasEdgesError(id, incidentCount);
+    } else if (incidentCount > 0) {
+      // Collect incident edge slots first since deletion mutates delta buffers
+      const edgeSlots: number[] = [];
+      this._collectIncidentEdgeSlots(slot, edgeSlots);
+      for (let i = 0; i < edgeSlots.length; i++) {
+        this._deleteEdgeBySlotLive(edgeSlots[i]);
+      }
+    }
+
+    const props = (this.propertyIndexes.hasAnyNodeIndexes || this._undoStack !== null)
+      ? this.arena.nodeColumns.materializeRecord(slot)
+      : {};
+    if (this._undoStack !== null) {
+      this._undoStack.push({
+        kind: 'restoreNode',
+        data: {
+          id,
+          labels: [...this.arena.nodeLabelStrings[slot]],
+          createdOn: this.arena.nodeCreatedOn[slot],
+          updatedOn: this.arena.nodeUpdatedOn[slot],
+          properties: { ...props },
+        },
+      });
+    }
+
+    this.propertyIndexes.onNodeDeleted(slot, this.arena.nodeLabelIds[slot], props);
+    this.arena.detachNodeIncidentEdges(slot, this.adjacency);
+    const delayReuse = this.adjacency.hasCsrEntries(slot);
+    this.arena.freeNode(slot, delayReuse);
+    this.adjacency.clearNodeDelta(slot);
+    this._txnManager.recordLiveNodeWrite(id, undefined, true);
+    return cascade
+      ? { result: true, cascadeDeletedEdgesCount: incidentCount }
+      : { result: true };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Node Queries
+  // ---------------------------------------------------------------------------
+
+  async hasNode(id: string, transaction?: ITransactionHandle): Promise<boolean> {
+    const ctx = this._txnManager.getContext(transaction);
+    if (ctx) return this._hasNodeInCtx(id, ctx);
+    return this.arena.resolveNodeSlot(id) >= 0;
+  }
+
+  async getNode(id: string, transaction?: ITransactionHandle): Promise<ReadonlyNodeData | undefined> {
+    const ctx = this._txnManager.getContext(transaction);
+    if (ctx) return this._getNodeDataInCtx(id, ctx);
+    const slot = this.arena.resolveNodeSlot(id);
+    return slot >= 0 ? this._nodeDataBySlot(slot) : undefined;
+  }
+
+  getNodeSync(id: string, transaction?: ITransactionHandle): Node | undefined {
+    const ctx = this._txnManager.getContext(transaction);
+    if (ctx) {
+      const data = this._getNodeDataInCtx(id, ctx);
+      return data
+        ? Node._fromFrozen(
+            data.id,
+            data.labels,
+            data.properties,
+            data.createdOn ?? Date.now(),
+            data.updatedOn ?? Date.now(),
+          )
+        : undefined;
+    }
+    const slot = this.arena.resolveNodeSlot(id);
+    return slot >= 0 ? this.arena.getNodeEntity(slot) : undefined;
+  }
+
+  async getNodesByIds(
+    ids: string[],
+    transaction?: ITransactionHandle,
+  ): Promise<Map<string, ReadonlyNodeData>> {
+    const result = new Map<string, ReadonlyNodeData>();
+    const ctx = this._txnManager.getContext(transaction);
+    if (ctx) {
+      for (let i = 0; i < ids.length; i++) {
+        const id = ids[i];
+        if (result.has(id)) continue;
+        const data = this._getNodeDataInCtx(id, ctx);
+        if (data) result.set(id, data);
+      }
+      return result;
+    }
+
+    for (let i = 0; i < ids.length; i++) {
+      const id = ids[i];
+      if (result.has(id)) continue;
+      const slot = this.arena.resolveNodeSlot(id);
+      if (slot >= 0) {
+        result.set(id, this._nodeDataBySlot(slot));
+      }
     }
     return result;
   }
 
+  getNodesByIdsSync(
+    ids: readonly string[],
+    transaction?: ITransactionHandle,
+  ): Map<string, Node> {
+    const result = new Map<string, Node>();
+    const ctx = this._txnManager.getContext(transaction);
+    if (ctx) {
+      for (let i = 0; i < ids.length; i++) {
+        const id = ids[i];
+        if (result.has(id)) continue;
+        const data = this._getNodeDataInCtx(id, ctx);
+        if (data) {
+          result.set(
+            id,
+            Node._fromFrozen(
+              data.id,
+              data.labels,
+              data.properties,
+              data.createdOn ?? Date.now(),
+              data.updatedOn ?? Date.now(),
+            ),
+          );
+        }
+      }
+      return result;
+    }
+
+    for (let i = 0; i < ids.length; i++) {
+      const id = ids[i];
+      if (result.has(id)) continue;
+      const slot = this.arena.resolveNodeSlot(id);
+      if (slot >= 0) {
+        result.set(id, this.arena.getNodeEntity(slot));
+      }
+    }
+    return result;
+  }
+
+  async getNodeCount(options?: StorageQueryOptions): Promise<number> {
+    return this.countNodesSync(options);
+  }
+
+  countNodesSync(options?: StorageQueryOptions): number {
+    const ctx = this._txnManager.getContext(options?.transaction);
+    if (!ctx && !options?.filter) {
+      return this.arena.liveNodeCount;
+    }
+
+    if (!ctx && options?.filter) {
+      const { types, properties } = options.filter;
+      if ((!properties || properties.length === 0) && types && types.length === 1) {
+        const lid = this.arena.labelDict.lookup(types[0]);
+        return lid >= 0 ? (this.arena.getNodesByLabelId(lid)?.size ?? 0) : 0;
+      }
+      return this._collectMatchingNodeSlotsLive(options, false).length;
+    }
+
+    return this._queryNodeDataInCtx(ctx!, options).length;
+  }
+
+  queryNodeSlotsSync(options?: StorageQueryOptions): Uint32Array | number[] {
+    return this._collectMatchingNodeSlotsLive(options, true);
+  }
+
+  queryNodesSync(options?: StorageQueryOptions): Node[] {
+    const ctx = this._txnManager.getContext(options?.transaction);
+    if (ctx) {
+      const rows = this._queryNodeDataInCtx(ctx, options);
+      const out = new Array<Node>(rows.length);
+      for (let i = 0; i < rows.length; i++) {
+        const d = rows[i];
+        out[i] = Node._fromFrozen(
+          d.id,
+          d.labels,
+          d.properties,
+          d.createdOn ?? Date.now(),
+          d.updatedOn ?? Date.now(),
+        );
+      }
+      return out;
+    }
+
+    const slots = this._collectMatchingNodeSlotsLive(options, true);
+    const out = new Array<Node>(slots.length);
+    for (let i = 0; i < slots.length; i++) {
+      out[i] = this.arena.getNodeEntity(slots[i]);
+    }
+    return out;
+  }
+
+  async getNodes(options?: StorageQueryOptions): Promise<ReadonlyNodeData[]> {
+    const ctx = this._txnManager.getContext(options?.transaction);
+    if (ctx) {
+      return this._queryNodeDataInCtx(ctx, options);
+    }
+
+    const slots = this._collectMatchingNodeSlotsLive(options, true);
+    const out = new Array<ReadonlyNodeData>(slots.length);
+    for (let i = 0; i < slots.length; i++) {
+      out[i] = this._nodeDataBySlot(slots[i]);
+    }
+    return out;
+  }
+
   async aggregateNodeProperty(
     key: string,
-    options?: StorageQueryOptions
+    options?: StorageQueryOptions,
   ): Promise<AggregateResult> {
-    const nodes = await this.getNodes(options);
-    let values: number[] = [];
+    return this.aggregateNodePropertySync(key, options);
+  }
 
-    for (const node of nodes) {
-      const value = node.properties?.[key];
-      if (typeof value === 'number' && !Number.isNaN(value)) {
-        values.push(value);
+  aggregateNodePropertySync(
+    key: string,
+    options?: StorageQueryOptions,
+  ): AggregateResult {
+    const ctx = this._txnManager.getContext(options?.transaction);
+    if (ctx) {
+      const nodes = this._queryNodeDataInCtx(ctx, options);
+      return this._aggregatePropertyOverRecords(nodes, key, options?.distinct);
+    }
+
+    const slots = this._collectMatchingNodeSlotsLive(options, false);
+    const keyId = this.arena.nodePropDict.lookup(key);
+    if (keyId < 0) return { count: 0 };
+
+    const col = this.arena.nodeColumns.getColumnByKeyId(keyId);
+    if (!col) return { count: 0 };
+
+    // Single-pass zero-allocation aggregation directly on typed ColumnStore!
+    if (options?.distinct) {
+      const seen = new Set<number>();
+      let count = 0;
+      let sum = 0;
+      let min = Infinity;
+      let max = -Infinity;
+
+      if (col.kind === 'number' && col.numValues) {
+        const tags = col.tags;
+        const vals = col.numValues;
+        for (let i = 0; i < slots.length; i++) {
+          const s = slots[i];
+          if (tags[s] !== TAG_VALUE) continue;
+          const v = vals[s];
+          if (Number.isNaN(v) || seen.has(v)) continue;
+          seen.add(v);
+          count++;
+          sum += v;
+          if (v < min) min = v;
+          if (v > max) max = v;
+        }
+      } else if (col.kind === 'mixed' && col.mixedValues) {
+        const tags = col.tags;
+        const vals = col.mixedValues;
+        for (let i = 0; i < slots.length; i++) {
+          const s = slots[i];
+          if (tags[s] !== TAG_VALUE) continue;
+          const v = vals[s];
+          if (typeof v !== 'number' || Number.isNaN(v) || seen.has(v)) continue;
+          seen.add(v);
+          count++;
+          sum += v;
+          if (v < min) min = v;
+          if (v > max) max = v;
+        }
+      }
+      if (count === 0) return { count: 0 };
+      return { count, sum, avg: sum / count, min, max };
+    }
+
+    let count = 0;
+    let sum = 0;
+    let min = Infinity;
+    let max = -Infinity;
+
+    if (col.kind === 'number' && col.numValues) {
+      const tags = col.tags;
+      const vals = col.numValues;
+      for (let i = 0; i < slots.length; i++) {
+        const s = slots[i];
+        if (tags[s] !== TAG_VALUE) continue;
+        const v = vals[s];
+        if (Number.isNaN(v)) continue;
+        count++;
+        sum += v;
+        if (v < min) min = v;
+        if (v > max) max = v;
+      }
+    } else if (col.kind === 'mixed' && col.mixedValues) {
+      const tags = col.tags;
+      const vals = col.mixedValues;
+      for (let i = 0; i < slots.length; i++) {
+        const s = slots[i];
+        if (tags[s] !== TAG_VALUE) continue;
+        const v = vals[s];
+        if (typeof v !== 'number' || Number.isNaN(v)) continue;
+        count++;
+        sum += v;
+        if (v < min) min = v;
+        if (v > max) max = v;
       }
     }
 
-    // Deduplicate property values when distinct is true
-    if (options?.distinct) {
-      values = [...new Set(values)];
+    if (count === 0) return { count: 0 };
+    return { count, sum, avg: sum / count, min, max };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Edge Mutations
+  // ---------------------------------------------------------------------------
+
+  async insertEdge(edge: EdgeData, transaction?: ITransactionHandle): Promise<void> {
+    const ctx = this._txnManager.getContext(transaction);
+    if (ctx) {
+      this._txnManager.stageInsertEdge(ctx, edge, this.arena, false);
+      return;
     }
 
-    return this._computeAggregation(values);
+    if (this.arena.resolveEdgeSlot(edge.id) >= 0) {
+      throw new EdgeAlreadyExistsError(edge.id);
+    }
+    const rawSrc = this.arena.resolveNodeSlot(edge.sourceId);
+    const rawTgt = this.arena.resolveNodeSlot(edge.targetId);
+    const srcSlot = rawSrc < 0 ? NONE_SLOT : rawSrc;
+    const tgtSlot = rawTgt < 0 ? NONE_SLOT : rawTgt;
+
+    const { slot, typeId } = this.arena.allocateEdge(
+      srcSlot,
+      tgtSlot,
+      edge.type,
+      edge.properties,
+      edge.id,
+      edge.createdOn,
+      edge.updatedOn,
+      edge.sourceId,
+      edge.targetId,
+    );
+    if (srcSlot !== NONE_SLOT && tgtSlot !== NONE_SLOT) {
+      this.adjacency.addEdge(slot, srcSlot, tgtSlot, typeId);
+    }
+    this.propertyIndexes.onEdgeInserted(slot, typeId, edge.properties);
+    this._txnManager.recordLiveEdgeWrite(edge.id);
+    this._undoStack?.push({ kind: 'deleteEdge', id: edge.id });
+  }
+
+  async insertEdges(edges: readonly EdgeData[], transaction?: ITransactionHandle): Promise<void> {
+    const ctx = this._txnManager.getContext(transaction);
+    if (ctx) {
+      for (let i = 0; i < edges.length; i++) {
+        this._txnManager.stageInsertEdge(ctx, edges[i], this.arena, false);
+      }
+      return;
+    }
+
+    const seenIds = new Set<string>();
+    for (let i = 0; i < edges.length; i++) {
+      const eid = edges[i].id;
+      if (seenIds.has(eid) || this.arena.resolveEdgeSlot(eid) >= 0) {
+        throw new EdgeAlreadyExistsError(eid);
+      }
+      seenIds.add(eid);
+    }
+
+    const wasEmpty = this.arena.liveEdgeCount === 0;
+    this.arena.ensureEdgeCapacity(this.arena.edgeHighWater + edges.length);
+    for (let i = 0; i < edges.length; i++) {
+      const edge = edges[i];
+      const rawSrc = this.arena.resolveNodeSlot(edge.sourceId);
+      const rawTgt = this.arena.resolveNodeSlot(edge.targetId);
+      const srcSlot = rawSrc < 0 ? NONE_SLOT : rawSrc;
+      const tgtSlot = rawTgt < 0 ? NONE_SLOT : rawTgt;
+
+      const { slot, typeId } = this.arena.allocateEdge(
+        srcSlot,
+        tgtSlot,
+        edge.type,
+        edge.properties,
+        edge.id,
+        edge.createdOn,
+        edge.updatedOn,
+        edge.sourceId,
+        edge.targetId,
+      );
+      if (!wasEmpty && srcSlot !== NONE_SLOT && tgtSlot !== NONE_SLOT) {
+        this.adjacency.addEdge(slot, srcSlot, tgtSlot, typeId);
+      }
+      this.propertyIndexes.onEdgeInserted(slot, typeId, edge.properties);
+      this._txnManager.recordLiveEdgeWrite(edge.id);
+      this._undoStack?.push({ kind: 'deleteEdge', id: edge.id });
+    }
+    if (wasEmpty && edges.length > 0) {
+      this.compact();
+    }
+  }
+
+  insertEdgeSync(
+    sourceId: string,
+    targetId: string,
+    type: string,
+    properties: Readonly<Record<string, unknown>>,
+    id?: string,
+    transaction?: ITransactionHandle,
+  ): Edge {
+    const ctx = this._txnManager.getContext(transaction);
+    if (ctx) {
+      if (!this._hasNodeInCtx(sourceId, ctx)) throw new NodeNotFoundError(sourceId);
+      if (!this._hasNodeInCtx(targetId, ctx)) throw new NodeNotFoundError(targetId);
+      const edge = new Edge(sourceId, targetId, type, properties, id);
+      this._txnManager.stageInsertEdge(ctx, edge.toJSON(), this.arena, true);
+      return edge;
+    }
+
+    if (id !== undefined && this.arena.resolveEdgeSlot(id) >= 0) {
+      throw new EdgeAlreadyExistsError(id);
+    }
+    const srcSlot = this.arena.resolveNodeSlot(sourceId);
+    const tgtSlot = this.arena.resolveNodeSlot(targetId);
+    if (srcSlot < 0) throw new NodeNotFoundError(sourceId);
+    if (tgtSlot < 0) throw new NodeNotFoundError(targetId);
+
+    const { slot, typeId } = this.arena.allocateEdge(
+      srcSlot,
+      tgtSlot,
+      type,
+      properties,
+      id,
+    );
+    this.adjacency.addEdge(slot, srcSlot, tgtSlot, typeId);
+    this.propertyIndexes.onEdgeInserted(slot, typeId, properties);
+    const createdId = this.arena.edgeIds[slot];
+    this._txnManager.recordLiveEdgeWrite(createdId);
+    this._undoStack?.push({ kind: 'deleteEdge', id: createdId });
+    return this.arena.getEdgeEntity(slot);
+  }
+
+  insertEdgesSync(
+    items: ReadonlyArray<{
+      sourceId: string;
+      targetId: string;
+      type: string;
+      properties?: Readonly<Record<string, unknown>>;
+      id?: string;
+    }>,
+    transaction?: ITransactionHandle,
+  ): Edge[] {
+    const ctx = this._txnManager.getContext(transaction);
+    const out = new Array<Edge>(items.length);
+    if (ctx) {
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i];
+        out[i] = this.insertEdgeSync(
+          it.sourceId,
+          it.targetId,
+          it.type,
+          it.properties ?? {},
+          it.id,
+          transaction,
+        );
+      }
+      return out;
+    }
+
+    const seenIds = new Set<string>();
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      if (it.id !== undefined) {
+        if (seenIds.has(it.id) || this.arena.resolveEdgeSlot(it.id) >= 0) {
+          throw new EdgeAlreadyExistsError(it.id);
+        }
+        seenIds.add(it.id);
+      }
+      if (this.arena.resolveNodeSlot(it.sourceId) < 0) throw new NodeNotFoundError(it.sourceId);
+      if (this.arena.resolveNodeSlot(it.targetId) < 0) throw new NodeNotFoundError(it.targetId);
+    }
+
+    const wasEmpty = this.arena.liveEdgeCount === 0;
+    this.arena.ensureEdgeCapacity(this.arena.edgeHighWater + items.length);
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      const srcSlot = this.arena.resolveNodeSlot(it.sourceId);
+      const tgtSlot = this.arena.resolveNodeSlot(it.targetId);
+
+      const props = it.properties ?? {};
+      const { slot, typeId } = this.arena.allocateEdge(
+        srcSlot,
+        tgtSlot,
+        it.type,
+        props,
+        it.id,
+      );
+      if (!wasEmpty) {
+        this.adjacency.addEdge(slot, srcSlot, tgtSlot, typeId);
+      }
+      this.propertyIndexes.onEdgeInserted(slot, typeId, props);
+      this._txnManager.recordLiveEdgeWrite(this.arena.edgeIds[slot]);
+      this._undoStack?.push({ kind: 'deleteEdge', id: this.arena.edgeIds[slot] });
+      out[i] = this.arena.getEdgeEntity(slot);
+    }
+    if (wasEmpty && items.length > 0) {
+      this.compact();
+    }
+    return out;
+  }
+
+  async deleteEdge(id: string, transaction?: ITransactionHandle): Promise<void> {
+    this.deleteEdgeByIdSync(id, transaction);
+  }
+
+  deleteEdgeByIdSync(id: string, transaction?: ITransactionHandle): boolean {
+    const ctx = this._txnManager.getContext(transaction);
+    if (ctx) {
+      const existed = this._hasEdgeInCtx(id, ctx);
+      if (!existed) return false;
+      this._txnManager.stageDeleteEdge(ctx, id, this.arena);
+      return true;
+    }
+
+    const slot = this.arena.resolveEdgeSlot(id);
+    if (slot < 0) return false;
+    this._deleteEdgeBySlotLive(slot);
+    return true;
+  }
+
+  private _deleteEdgeBySlotLive(slot: number): void {
+    const id = this.arena.edgeIds[slot];
+    const props = (this.propertyIndexes.hasAnyEdgeIndexes || this._undoStack !== null)
+      ? this.arena.edgeColumns.materializeRecord(slot)
+      : {};
+    if (this._undoStack !== null) {
+      this._undoStack.push({
+        kind: 'restoreEdge',
+        data: {
+          id,
+          sourceId: this.arena.getEdgeSourceId(slot),
+          targetId: this.arena.getEdgeTargetId(slot),
+          type: this.arena.edgeTypeDict.getString(this.arena.edgeTypeId[slot]),
+          createdOn: this.arena.edgeCreatedOn[slot],
+          updatedOn: this.arena.edgeUpdatedOn[slot],
+          properties: { ...props },
+        },
+      });
+    }
+    this.propertyIndexes.onEdgeDeleted(slot, this.arena.edgeTypeId[slot], props);
+    const removedFromDelta = this.adjacency.removeEdge(
+      slot,
+      this.arena.edgeSrcSlot[slot],
+      this.arena.edgeTgtSlot[slot],
+    );
+    const delayReuse = !removedFromDelta || slot < this.adjacency.csrEdgeSlotBound;
+    this.arena.freeEdge(slot, delayReuse);
+    this._txnManager.recordLiveEdgeWrite(id, undefined, true);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Edge Queries
+  // ---------------------------------------------------------------------------
+
+  async hasEdge(id: string, transaction?: ITransactionHandle): Promise<boolean> {
+    const ctx = this._txnManager.getContext(transaction);
+    if (ctx) return this._hasEdgeInCtx(id, ctx);
+    return this.arena.resolveEdgeSlot(id) >= 0;
+  }
+
+  async getEdge(id: string, transaction?: ITransactionHandle): Promise<ReadonlyEdgeData | undefined> {
+    const ctx = this._txnManager.getContext(transaction);
+    if (ctx) return this._getEdgeDataInCtx(id, ctx);
+    const slot = this.arena.resolveEdgeSlot(id);
+    return slot >= 0 ? this._edgeDataBySlot(slot) : undefined;
+  }
+
+  getEdgeSync(id: string, transaction?: ITransactionHandle): Edge | undefined {
+    const ctx = this._txnManager.getContext(transaction);
+    if (ctx) {
+      const data = this._getEdgeDataInCtx(id, ctx);
+      return data
+        ? Edge._fromFrozen(
+            data.id,
+            data.sourceId,
+            data.targetId,
+            data.type,
+            data.properties,
+            data.createdOn ?? Date.now(),
+            data.updatedOn ?? Date.now(),
+          )
+        : undefined;
+    }
+    const slot = this.arena.resolveEdgeSlot(id);
+    return slot >= 0 ? this.arena.getEdgeEntity(slot) : undefined;
   }
 
   async getEdgeCount(options?: StorageQueryOptions): Promise<number> {
-    const transaction = options?.transaction;
-    const overlay = this._getOverlay(transaction?.id);
+    return this.countEdgesSync(options);
+  }
 
-    // Optimization: O(1) when no filter is applied - just return the Map size
-    // instead of iterating through all edges with getEdges()
-    if (!options?.filter) {
-      let count = this._edges.size;
-
-      // If no filter but with transaction: need to iterate overlay - O(overlay size)
-      if (overlay) {
-        // Add overlay edges that aren't overriding live edges (new inserts)
-        for (const [id, edge] of overlay.edges) {
-          if (edge && !this._edges.has(id)) {
-            count++;
-          }
-        }
-        // Subtract overlay edges with null that are deleting live edges
-        for (const [id, edge] of overlay.edges) {
-          if (edge === null && this._edges.has(id)) {
-            count--;
-          }
-        }
+  countEdgesSync(options?: StorageQueryOptions): number {
+    const ctx = this._txnManager.getContext(options?.transaction);
+    if (!ctx && !options?.filter) {
+      return this.arena.liveEdgeCount;
+    }
+    if (!ctx && options?.filter) {
+      const { types, properties } = options.filter;
+      if ((!properties || properties.length === 0) && types && types.length === 1) {
+        const tid = this.arena.edgeTypeDict.lookup(types[0]);
+        return tid >= 0 ? (this.arena.getEdgesByTypeId(tid)?.size ?? 0) : 0;
       }
+      return this._collectMatchingEdgeSlotsLive(options, false).length;
+    }
+    return this._queryEdgeDataInCtx(ctx!, options).length;
+  }
 
-      return count;
+  async getEdges(options?: StorageQueryOptions): Promise<ReadonlyEdgeData[]> {
+    const ctx = this._txnManager.getContext(options?.transaction);
+    if (ctx) {
+      return this._queryEdgeDataInCtx(ctx, options);
+    }
+    const slots = this._collectMatchingEdgeSlotsLive(options, true);
+    const out = new Array<ReadonlyEdgeData>(slots.length);
+    for (let i = 0; i < slots.length; i++) {
+      out[i] = this._edgeDataBySlot(slots[i]);
+    }
+    return out;
+  }
+
+  queryEdgesSync(options?: StorageQueryOptions): Edge[] {
+    const ctx = this._txnManager.getContext(options?.transaction);
+    if (ctx) {
+      const rows = this._queryEdgeDataInCtx(ctx, options);
+      return rows.map((d) =>
+        Edge._fromFrozen(
+          d.id,
+          d.sourceId,
+          d.targetId,
+          d.type,
+          d.properties,
+          d.createdOn ?? Date.now(),
+          d.updatedOn ?? Date.now(),
+        ),
+      );
+    }
+    const slots = this._collectMatchingEdgeSlotsLive(options, true);
+    const out = new Array<Edge>(slots.length);
+    for (let i = 0; i < slots.length; i++) {
+      out[i] = this.arena.getEdgeEntity(slots[i]);
+    }
+    return out;
+  }
+
+  async getEdgesBySource(
+    nodeId: string,
+    options?: StorageQueryOptions,
+  ): Promise<ReadonlyEdgeData[]> {
+    const ctx = this._txnManager.getContext(options?.transaction);
+    if (ctx) {
+      return this._filterAndOrderEdgeData(this._getEdgesBySourceInCtx(nodeId, ctx), options);
     }
 
-    // With filter, get filtered results and return count
-    const edges = await this.getEdges(options);
-    return edges.length;
+    const srcSlot = this.arena.resolveNodeSlot(nodeId);
+    if (srcSlot < 0 && (!this.arena.hasDanglingEdges || !this.arena.danglingOutEdges.has(nodeId))) {
+      return [];
+    }
+    const slots = this._filterAdjacentEdgeSlotsLive(srcSlot, 'out', options, nodeId);
+    const out = new Array<ReadonlyEdgeData>(slots.length);
+    for (let i = 0; i < slots.length; i++) {
+      out[i] = this._edgeDataBySlot(slots[i]);
+    }
+    return out;
+  }
+
+  getEdgesBySourceSync(nodeId: string, options?: StorageQueryOptions): Edge[] {
+    const ctx = this._txnManager.getContext(options?.transaction);
+    if (ctx) {
+      const filtered = this._filterAndOrderEdgeData(this._getEdgesBySourceInCtx(nodeId, ctx), options);
+      return filtered.map((d) =>
+        Edge._fromFrozen(
+          d.id,
+          d.sourceId,
+          d.targetId,
+          d.type,
+          d.properties,
+          d.createdOn ?? Date.now(),
+          d.updatedOn ?? Date.now(),
+        ),
+      );
+    }
+    const srcSlot = this.arena.resolveNodeSlot(nodeId);
+    if (srcSlot < 0 && (!this.arena.hasDanglingEdges || !this.arena.danglingOutEdges.has(nodeId))) {
+      return [];
+    }
+    const slots = this._filterAdjacentEdgeSlotsLive(srcSlot, 'out', options, nodeId);
+    const out = new Array<Edge>(slots.length);
+    for (let i = 0; i < slots.length; i++) {
+      out[i] = this.arena.getEdgeEntity(slots[i]);
+    }
+    return out;
+  }
+
+  async getEdgesByTarget(
+    nodeId: string,
+    options?: StorageQueryOptions,
+  ): Promise<ReadonlyEdgeData[]> {
+    const ctx = this._txnManager.getContext(options?.transaction);
+    if (ctx) {
+      return this._filterAndOrderEdgeData(this._getEdgesByTargetInCtx(nodeId, ctx), options);
+    }
+
+    const tgtSlot = this.arena.resolveNodeSlot(nodeId);
+    if (tgtSlot < 0 && (!this.arena.hasDanglingEdges || !this.arena.danglingInEdges.has(nodeId))) {
+      return [];
+    }
+    const slots = this._filterAdjacentEdgeSlotsLive(tgtSlot, 'in', options, nodeId);
+    const out = new Array<ReadonlyEdgeData>(slots.length);
+    for (let i = 0; i < slots.length; i++) {
+      out[i] = this._edgeDataBySlot(slots[i]);
+    }
+    return out;
+  }
+
+  getEdgesByTargetSync(nodeId: string, options?: StorageQueryOptions): Edge[] {
+    const ctx = this._txnManager.getContext(options?.transaction);
+    if (ctx) {
+      const filtered = this._filterAndOrderEdgeData(this._getEdgesByTargetInCtx(nodeId, ctx), options);
+      return filtered.map((d) =>
+        Edge._fromFrozen(
+          d.id,
+          d.sourceId,
+          d.targetId,
+          d.type,
+          d.properties,
+          d.createdOn ?? Date.now(),
+          d.updatedOn ?? Date.now(),
+        ),
+      );
+    }
+    const tgtSlot = this.arena.resolveNodeSlot(nodeId);
+    if (tgtSlot < 0 && (!this.arena.hasDanglingEdges || !this.arena.danglingInEdges.has(nodeId))) {
+      return [];
+    }
+    const slots = this._filterAdjacentEdgeSlotsLive(tgtSlot, 'in', options, nodeId);
+    const out = new Array<Edge>(slots.length);
+    for (let i = 0; i < slots.length; i++) {
+      out[i] = this.arena.getEdgeEntity(slots[i]);
+    }
+    return out;
   }
 
   async aggregateEdgeProperty(
     key: string,
-    options?: StorageQueryOptions
+    options?: StorageQueryOptions,
   ): Promise<AggregateResult> {
-    const edges = await this.getEdges(options);
-    let values: number[] = [];
+    return this.aggregateEdgePropertySync(key, options);
+  }
 
-    for (const edge of edges) {
-      const value = edge.properties?.[key];
-      if (typeof value === 'number' && !Number.isNaN(value)) {
-        values.push(value);
-      }
+  aggregateEdgePropertySync(
+    key: string,
+    options?: StorageQueryOptions,
+  ): AggregateResult {
+    const ctx = this._txnManager.getContext(options?.transaction);
+    if (ctx) {
+      const edges = this._queryEdgeDataInCtx(ctx, options);
+      return this._aggregatePropertyOverRecords(edges, key, options?.distinct);
     }
 
-    // Deduplicate property values when distinct is true
+    const slots = this._collectMatchingEdgeSlotsLive(options, false);
+    const keyId = this.arena.edgePropDict.lookup(key);
+    if (keyId < 0) return { count: 0 };
+
+    const col = this.arena.edgeColumns.getColumnByKeyId(keyId);
+    if (!col) return { count: 0 };
+
     if (options?.distinct) {
-      values = [...new Set(values)];
-    }
+      const seen = new Set<number>();
+      let count = 0;
+      let sum = 0;
+      let min = Infinity;
+      let max = -Infinity;
 
-    return this._computeAggregation(values);
-  }
-
-  // ---------------------------------------------------------------------------
-  // Node mutations
-  // ---------------------------------------------------------------------------
-
-  async insertNode(node: NodeData, transaction?: ITransactionHandle): Promise<void> {
-    const now = Date.now();
-    // Clone first to avoid mutating the caller's object
-    const nodeToInsert = deepClone(node);
-
-    // Set createdOn and updatedOn at node level if not already set
-    if (nodeToInsert.createdOn === undefined) {
-      nodeToInsert.createdOn = now;
-    }
-    if (nodeToInsert.updatedOn === undefined) {
-      nodeToInsert.updatedOn = now;
-    }
-
-    const overlay = this._getOverlay(transaction?.id);
-
-    if (overlay) {
-      // Transaction active: write to overlay
-      overlay.nodes.set(nodeToInsert.id, nodeToInsert);
-      // Update overlay indexes
-      for (const label of nodeToInsert.labels) {
-        this._overlayAddToIndex(overlay.nodesByType, label, nodeToInsert.id);
-      }
-      this._overlayIndexNodeProperties(overlay, nodeToInsert);
-    } else {
-      // No transaction: modify live state directly
-      this._insertNodeLive(nodeToInsert, true);
-    }
-  }
-
-  /** @internal Used by importJSON — skips the defensive clone since the data is already owned. */
-  private _insertNodeLive(node: NodeData, skipClone: boolean): void {
-    if (this._nodes.has(node.id)) {
-      throw new NodeAlreadyExistsError(node.id);
-    }
-    const stored = skipClone ? node : deepClone(node);
-    this._nodes.set(node.id, stored);
-
-    // Label index (index each label separately for multi-label nodes)
-    for (const label of node.labels) {
-      if (!this._nodesByType.has(label)) {
-        this._nodesByType.set(label, new Set());
-      }
-      this._nodesByType.get(label)!.add(node.id);
-    }
-
-    // Property value index
-    this._indexNodeProperties(stored);
-  }
-
-  async deleteNode(id: string, transaction?: ITransactionHandle): Promise<void> {
-    const overlay = this._getOverlay(transaction?.id);
-
-    if (overlay) {
-      // Mark as deleted in overlay
-      overlay.nodes.set(id, null);
-      // Mark deletion in overlay indexes
-      this._overlayAddToIndex(overlay.nodesByType, '', id); // Will be handled specially
-    } else {
-      const node = this._nodes.get(id);
-      if (!node) return;
-
-      // Label index (unindex each label)
-      for (const label of node.labels) {
-        const typeSet = this._nodesByType.get(label);
-        if (typeSet) {
-          typeSet.delete(id);
-          if (typeSet.size === 0) this._nodesByType.delete(label);
+      if (col.kind === 'number' && col.numValues) {
+        const tags = col.tags;
+        const vals = col.numValues;
+        for (let i = 0; i < slots.length; i++) {
+          const s = slots[i];
+          if (tags[s] !== TAG_VALUE) continue;
+          const v = vals[s];
+          if (Number.isNaN(v) || seen.has(v)) continue;
+          seen.add(v);
+          count++;
+          sum += v;
+          if (v < min) min = v;
+          if (v > max) max = v;
+        }
+      } else if (col.kind === 'mixed' && col.mixedValues) {
+        const tags = col.tags;
+        const vals = col.mixedValues;
+        for (let i = 0; i < slots.length; i++) {
+          const s = slots[i];
+          if (tags[s] !== TAG_VALUE) continue;
+          const v = vals[s];
+          if (typeof v !== 'number' || Number.isNaN(v) || seen.has(v)) continue;
+          seen.add(v);
+          count++;
+          sum += v;
+          if (v < min) min = v;
+          if (v > max) max = v;
         }
       }
-
-      // Property value index
-      this._unindexNodeProperties(node);
-
-      this._nodes.delete(id);
+      if (count === 0) return { count: 0 };
+      return { count, sum, avg: sum / count, min, max };
     }
-  }
 
-  private _overlayAddToIndex(index: Map<string, Set<string>>, type: string, id: string): void {
-    if (!type) return; // Skip for deletions
-    let typeSet = index.get(type);
-    if (!typeSet) {
-      typeSet = new Set();
-      index.set(type, typeSet);
-    }
-    typeSet.add(id);
-  }
+    let count = 0;
+    let sum = 0;
+    let min = Infinity;
+    let max = -Infinity;
 
-  private _overlayIndexNodeProperties(overlay: TransactionOverlay, node: NodeData): void {
-    for (const [key, value] of Object.entries(node.properties)) {
-      const serialized = JSON.stringify(value) ?? 'undefined';
-      let keyMap = overlay.nodesByProperty.get(key);
-      if (!keyMap) {
-        keyMap = new Map();
-        overlay.nodesByProperty.set(key, keyMap);
+    if (col.kind === 'number' && col.numValues) {
+      const tags = col.tags;
+      const vals = col.numValues;
+      for (let i = 0; i < slots.length; i++) {
+        const s = slots[i];
+        if (tags[s] !== TAG_VALUE) continue;
+        const v = vals[s];
+        if (Number.isNaN(v)) continue;
+        count++;
+        sum += v;
+        if (v < min) min = v;
+        if (v > max) max = v;
       }
-      let idSet = keyMap.get(serialized);
-      if (!idSet) {
-        idSet = new Set();
-        keyMap.set(serialized, idSet);
+    } else if (col.kind === 'mixed' && col.mixedValues) {
+      const tags = col.tags;
+      const vals = col.mixedValues;
+      for (let i = 0; i < slots.length; i++) {
+        const s = slots[i];
+        if (tags[s] !== TAG_VALUE) continue;
+        const v = vals[s];
+        if (typeof v !== 'number' || Number.isNaN(v)) continue;
+        count++;
+        sum += v;
+        if (v < min) min = v;
+        if (v > max) max = v;
       }
-      idSet.add(node.id);
     }
-  }
 
-  private _overlayIndexEdgeProperties(overlay: TransactionOverlay, edge: EdgeData): void {
-    for (const [key, value] of Object.entries(edge.properties)) {
-      const serialized = JSON.stringify(value) ?? 'undefined';
-      let keyMap = overlay.edgesByProperty.get(key);
-      if (!keyMap) {
-        keyMap = new Map();
-        overlay.edgesByProperty.set(key, keyMap);
-      }
-      let idSet = keyMap.get(serialized);
-      if (!idSet) {
-        idSet = new Set();
-        keyMap.set(serialized, idSet);
-      }
-      idSet.add(edge.id);
-    }
+    if (count === 0) return { count: 0 };
+    return { count, sum, avg: sum / count, min, max };
   }
 
   // ---------------------------------------------------------------------------
-  // Node queries
+  // Property & Label Mutations
   // ---------------------------------------------------------------------------
 
-  async hasNode(id: string, transaction?: ITransactionHandle): Promise<boolean> {
-    const overlay = this._getOverlay(transaction?.id);
-    if (overlay) {
-      // Check overlay first
-      if (overlay.nodes.has(id)) {
-        return overlay.nodes.get(id) !== null;
-      }
-    }
-    return this._nodes.has(id);
+  async patchProperties(
+    target: 'node' | 'edge',
+    id: string,
+    patch: PropertyPatch,
+    transaction?: ITransactionHandle,
+  ): Promise<void> {
+    this.patchPropertiesSync(target, id, patch, transaction);
   }
 
-  async getNode(id: string, transaction?: ITransactionHandle): Promise<NodeData | undefined> {
-    const overlay = this._getOverlay(transaction?.id);
-    if (overlay) {
-      // Check overlay first
-      const overlayNode = overlay.nodes.get(id);
-      if (overlayNode !== undefined) {
-        return overlayNode ? deepClone(overlayNode) : undefined;
-      }
-    }
-    const node = this._nodes.get(id);
-    return node ? deepClone(node) : undefined;
-  }
-
-  // ---------------------------------------------------------------------------
-  // Edge mutations
-  // ---------------------------------------------------------------------------
-
-  async insertEdge(edge: EdgeData, transaction?: ITransactionHandle): Promise<void> {
-    const now = Date.now();
-    // Clone first to avoid mutating the caller's object
-    const edgeToInsert = deepClone(edge);
-
-    // Set createdOn and updatedOn at edge level if not already set
-    if (edgeToInsert.createdOn === undefined) {
-      edgeToInsert.createdOn = now;
-    }
-    if (edgeToInsert.updatedOn === undefined) {
-      edgeToInsert.updatedOn = now;
-    }
-
-    const overlay = this._getOverlay(transaction?.id);
-
-    if (overlay) {
-      // Transaction active: write to overlay
-      overlay.edges.set(edgeToInsert.id, edgeToInsert);
-      // Update overlay indexes
-      this._overlayAddToIndex(overlay.edgesByType, edgeToInsert.type, edgeToInsert.id);
-      this._overlayAddToIndex(overlay.edgesBySource, edgeToInsert.sourceId, edgeToInsert.id);
-      this._overlayAddToIndex(overlay.edgesByTarget, edgeToInsert.targetId, edgeToInsert.id);
-      this._overlayIndexEdgeProperties(overlay, edgeToInsert);
-    } else {
-      // No transaction: modify live state directly
-      this._insertEdgeLive(edgeToInsert, true);
-    }
-  }
-
-  /** @internal Used by importJSON — skips the defensive clone since the data is already owned. */
-  private _insertEdgeLive(edge: EdgeData, skipClone: boolean): void {
-    if (this._edges.has(edge.id)) {
-      throw new EdgeAlreadyExistsError(edge.id);
-    }
-    const stored = skipClone ? edge : deepClone(edge);
-    this._edges.set(edge.id, stored);
-
-    // Adjacency
-    if (!this._edgesBySource.has(edge.sourceId)) {
-      this._edgesBySource.set(edge.sourceId, new Set());
-    }
-    this._edgesBySource.get(edge.sourceId)!.add(edge.id);
-
-    if (!this._edgesByTarget.has(edge.targetId)) {
-      this._edgesByTarget.set(edge.targetId, new Set());
-    }
-    this._edgesByTarget.get(edge.targetId)!.add(edge.id);
-
-    // Type index
-    if (!this._edgesByType.has(edge.type)) {
-      this._edgesByType.set(edge.type, new Set());
-    }
-    this._edgesByType.get(edge.type)!.add(edge.id);
-
-    // Property value index
-    this._indexEdgeProperties(stored);
-  }
-
-  async deleteEdge(id: string, transaction?: ITransactionHandle): Promise<void> {
-    const overlay = this._getOverlay(transaction?.id);
-
-    if (overlay) {
-      // Mark as deleted in overlay
-      overlay.edges.set(id, null);
-    } else {
-      const edge = this._edges.get(id);
-      if (!edge) return;
-
-      // Adjacency
-      const srcSet = this._edgesBySource.get(edge.sourceId);
-      if (srcSet) {
-        srcSet.delete(id);
-        if (srcSet.size === 0) this._edgesBySource.delete(edge.sourceId);
-      }
-
-      const tgtSet = this._edgesByTarget.get(edge.targetId);
-      if (tgtSet) {
-        tgtSet.delete(id);
-        if (tgtSet.size === 0) this._edgesByTarget.delete(edge.targetId);
-      }
-
-      // Type index
-      const typeSet = this._edgesByType.get(edge.type);
-      if (typeSet) {
-        typeSet.delete(id);
-        if (typeSet.size === 0) this._edgesByType.delete(edge.type);
-      }
-
-      this._edges.delete(id);
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // Edge queries
-  // ---------------------------------------------------------------------------
-
-  async hasEdge(id: string, transaction?: ITransactionHandle): Promise<boolean> {
-    const overlay = this._getOverlay(transaction?.id);
-    if (overlay) {
-      if (overlay.edges.has(id)) {
-        return overlay.edges.get(id) !== null;
-      }
-    }
-    return this._edges.has(id);
-  }
-
-  async getEdge(id: string, transaction?: ITransactionHandle): Promise<EdgeData | undefined> {
-    const overlay = this._getOverlay(transaction?.id);
-    if (overlay) {
-      const overlayEdge = overlay.edges.get(id);
-      if (overlayEdge !== undefined) {
-        return overlayEdge ? deepClone(overlayEdge) : undefined;
-      }
-    }
-    const edge = this._edges.get(id);
-    return edge ? deepClone(edge) : undefined;
-  }
-
-  async getEdgesBySource(nodeId: string, options?: StorageQueryOptions): Promise<EdgeData[]> {
-    const transaction = options?.transaction;
-    const overlay = this._getOverlay(transaction?.id);
-    const seen = new Set<string>();
-    const result: EdgeData[] = [];
-
-    if (overlay) {
-      const overlayIds = overlay.edgesBySource.get(nodeId);
-      if (overlayIds) {
-        for (const id of overlayIds) {
-          const edge = overlay.edges.get(id);
-          if (edge && this._matchesEdgeFilters(edge, options)) {
-            result.push(deepClone(edge));
-            seen.add(id);
-          }
-        }
+  patchPropertiesSync(
+    target: 'node' | 'edge',
+    id: string,
+    patch: PropertyPatch,
+    transaction?: ITransactionHandle,
+  ): void {
+    if (patch.set) {
+      const invalid = findInvalidPropertyEntry(patch.set);
+      if (invalid) {
+        throw new InvalidPropertyError(invalid[0], invalid[1]);
       }
     }
 
-    const liveIds = this._edgesBySource.get(nodeId);
-    if (liveIds) {
-      for (const id of liveIds) {
-        if (seen.has(id)) continue;
-        const edge = this._edges.get(id);
-        if (edge) {
-          const overlayEdge = overlay?.edges.get(id);
-          if (overlayEdge !== null && this._matchesEdgeFilters(edge, options)) {
-            result.push(deepClone(edge));
-          }
-        }
-      }
+    const ctx = this._txnManager.getContext(transaction);
+    if (ctx) {
+      this._txnManager.stagePatchProperties(ctx, target, id, patch, this.arena);
+      return;
     }
-
-    return this._applyOrderAndLimit(result, options);
-  }
-
-  async getEdgesByTarget(nodeId: string, options?: StorageQueryOptions): Promise<EdgeData[]> {
-    const transaction = options?.transaction;
-    const overlay = this._getOverlay(transaction?.id);
-    const seen = new Set<string>();
-    const result: EdgeData[] = [];
-
-    if (overlay) {
-      const overlayIds = overlay.edgesByTarget.get(nodeId);
-      if (overlayIds) {
-        for (const id of overlayIds) {
-          const edge = overlay.edges.get(id);
-          if (edge && this._matchesEdgeFilters(edge, options)) {
-            result.push(deepClone(edge));
-            seen.add(id);
-          }
-        }
-      }
-    }
-
-    const liveIds = this._edgesByTarget.get(nodeId);
-    if (liveIds) {
-      for (const id of liveIds) {
-        if (seen.has(id)) continue;
-        const edge = this._edges.get(id);
-        if (edge) {
-          const overlayEdge = overlay?.edges.get(id);
-          if (overlayEdge !== null && this._matchesEdgeFilters(edge, options)) {
-            result.push(deepClone(edge));
-          }
-        }
-      }
-    }
-
-    return this._applyOrderAndLimit(result, options);
-  }
-
-  async getNodes(options?: StorageQueryOptions): Promise<NodeData[]> {
-    const transaction = options?.transaction;
-    const overlay = this._getOverlay(transaction?.id);
-    const result: NodeData[] = [];
-    const seen = new Set<string>();
-
-    if (overlay) {
-      // First add all overlay nodes
-      for (const [id, node] of overlay.nodes) {
-        if (node && this._matchesNodeFilters(node, options)) {
-          result.push(deepClone(node));
-          seen.add(id);
-        }
-      }
-    }
-
-    // Then add live nodes not overridden by overlay
-    for (const [id, node] of this._nodes) {
-      if (seen.has(id)) continue;
-      const overlayNode = overlay?.nodes.get(id);
-      if (overlayNode !== null && this._matchesNodeFilters(node, options)) {
-        result.push(deepClone(node));
-      }
-    }
-
-    return this._applyOrderAndLimit(result, options);
-  }
-
-  async getEdges(options?: StorageQueryOptions): Promise<EdgeData[]> {
-    const transaction = options?.transaction;
-    const overlay = this._getOverlay(transaction?.id);
-    const result: EdgeData[] = [];
-    const seen = new Set<string>();
-
-    if (overlay) {
-      // First add all overlay edges
-      for (const [id, edge] of overlay.edges) {
-        if (edge && this._matchesEdgeFilters(edge, options)) {
-          result.push(deepClone(edge));
-          seen.add(id);
-        }
-      }
-    }
-
-    // Then add live edges not overridden by overlay
-    for (const [id, edge] of this._edges) {
-      if (seen.has(id)) continue;
-      const overlayEdge = overlay?.edges.get(id);
-      if (overlayEdge !== null && this._matchesEdgeFilters(edge, options)) {
-        result.push(deepClone(edge));
-      }
-    }
-
-    return this._applyOrderAndLimit(result, options);
-  }
-
-  // ---------------------------------------------------------------------------
-  // Index management
-  // ---------------------------------------------------------------------------
-
-  /**
-   * Creates an index on one or more node or edge properties.
-   * Supports both simple indexes (single property) and compound indexes (multiple properties).
-   *
-   * For InMemoryStorageProvider, property indexes are auto-maintained on insert/delete.
-   * This method primarily tracks which properties should be indexed and rebuilds
-   * compound indexes if needed.
-   *
-   * @param name - Unique name for the index
-   * @param target - Either 'node' or 'edge'
-   * @param propertyKeys - Array of property names to index. For compound indexes,
-   *                       the order matters for index structure but queries can use
-   *                       any subset of the indexed properties.
-   * @throws Error if an index with the given name already exists
-   */
-  async createIndex(name: string, target: 'node' | 'edge', propertyKeys: string[]): Promise<void> {
-    if (propertyKeys.length === 0) return;
-
-    // Check if an index with the same name already exists
-    if (this._namedIndexes.has(name)) {
-      throw new Error(`Index with name '${name}' already exists`);
-    }
-
-    // Sort keys for consistent compound index key generation
-    const sortedKeys = [...propertyKeys].sort();
-    const compoundKey = sortedKeys.join('|');
-
-    // Check if an index on the same property keys already exists (for same target)
-    for (const existingIndex of this._namedIndexes.values()) {
-      if (existingIndex.target === target) {
-        const existingSortedKeys = [...existingIndex.propertyKeys].sort().join('|');
-        if (existingSortedKeys === compoundKey) {
-          throw new Error(`Index on ${target} property [${sortedKeys.join(', ')}] already exists`);
-        }
-      }
-    }
-
-    // Store the named index
-    this._namedIndexes.set(name, { target, propertyKeys: sortedKeys });
 
     if (target === 'node') {
-      // Track single-property indexes
-      for (const key of propertyKeys) {
-        this._nodeIndexedKeys.add(key);
-        if (!this._nodesByProperty.has(key)) {
-          this._nodesByProperty.set(key, new Map());
-        }
+      const slot = this.arena.resolveNodeSlot(id);
+      if (slot < 0) throw new NodeNotFoundError(id);
 
-        const valueMap = this._nodesByProperty.get(key)!;
-        for (const node of this._nodes.values()) {
-          if (key in node.properties) {
-            const serialized = this._propKey(node.properties[key]);
-            if (!valueMap.has(serialized)) {
-              valueMap.set(serialized, new Set());
-            }
-            valueMap.get(serialized)!.add(node.id);
-          }
-        }
+      const needOldProps =
+        this.propertyIndexes.hasAnyNodeIndexes ||
+        this._undoStack !== null ||
+        this._txnManager.hasActiveTransactions;
+      const oldProps = needOldProps ? this.arena.nodeColumns.materializeRecord(slot) : {};
+      if (this._undoStack !== null) {
+        this._undoStack.push({ kind: 'restoreNodeProps', id, props: oldProps });
       }
 
-      // Track compound index
-      this._compoundIndexes.set(compoundKey, 'node');
+      this.arena.invalidateNodeEntity(slot);
+      if (patch.replace) {
+        this.arena.nodeColumns.clearSlot(slot);
+      } else if (patch.unset) {
+        for (let i = 0; i < patch.unset.length; i++) {
+          const keyId = this.arena.nodePropDict.lookup(patch.unset[i]);
+          if (keyId >= 0) this.arena.nodeColumns.deleteValueByKeyId(keyId, slot);
+        }
+      }
+      if (patch.set) {
+        this.arena.nodeColumns.setRecord(slot, patch.set);
+      }
+      this.arena.nodeUpdatedOn[slot] = Date.now();
+      this.arena.nodeVersion[slot] = (this.arena.nodeVersion[slot] + 1) >>> 0;
+
+      if (this.propertyIndexes.hasAnyNodeIndexes) {
+        const newProps = this.arena.nodeColumns.materializeRecord(slot);
+        const changedKeys = patch.replace
+          ? undefined
+          : [
+              ...(patch.unset ?? []),
+              ...(patch.set ? Object.keys(patch.set) : []),
+            ];
+        this.propertyIndexes.onNodePropertiesUpdated(
+          slot,
+          this.arena.nodeLabelIds[slot],
+          oldProps,
+          newProps,
+          changedKeys,
+        );
+      }
+      const touched = patch.replace
+        ? Object.keys(oldProps).concat(patch.set ? Object.keys(patch.set) : [])
+        : [...(patch.unset ?? []), ...(patch.set ? Object.keys(patch.set) : [])];
+      this._txnManager.recordLiveNodeWrite(id, touched, false, !!patch.replace);
     } else {
-      // For edges
-      for (const key of propertyKeys) {
-        this._edgeIndexedKeys.add(key);
-        if (!this._edgesByProperty.has(key)) {
-          this._edgesByProperty.set(key, new Map());
-        }
+      const slot = this.arena.resolveEdgeSlot(id);
+      if (slot < 0) throw new EdgeNotFoundError(id);
 
-        const valueMap = this._edgesByProperty.get(key)!;
-        for (const edge of this._edges.values()) {
-          if (key in edge.properties) {
-            const serialized = this._propKey(edge.properties[key]);
-            if (!valueMap.has(serialized)) {
-              valueMap.set(serialized, new Set());
-            }
-            valueMap.get(serialized)!.add(edge.id);
-          }
-        }
+      const needOldProps =
+        this.propertyIndexes.hasAnyEdgeIndexes ||
+        this._undoStack !== null ||
+        this._txnManager.hasActiveTransactions;
+      const oldProps = needOldProps ? this.arena.edgeColumns.materializeRecord(slot) : {};
+      if (this._undoStack !== null) {
+        this._undoStack.push({ kind: 'restoreEdgeProps', id, props: oldProps });
       }
 
-      // Track compound index
-      this._compoundIndexes.set(compoundKey, 'edge');
+      this.arena.invalidateEdgeEntity(slot);
+      if (patch.replace) {
+        this.arena.edgeColumns.clearSlot(slot);
+      } else if (patch.unset) {
+        for (let i = 0; i < patch.unset.length; i++) {
+          const keyId = this.arena.edgePropDict.lookup(patch.unset[i]);
+          if (keyId >= 0) this.arena.edgeColumns.deleteValueByKeyId(keyId, slot);
+        }
+      }
+      if (patch.set) {
+        this.arena.edgeColumns.setRecord(slot, patch.set);
+      }
+      this.arena.edgeUpdatedOn[slot] = Date.now();
+      this.arena.edgeVersion[slot] = (this.arena.edgeVersion[slot] + 1) >>> 0;
+
+      if (this.propertyIndexes.hasAnyEdgeIndexes) {
+        const newProps = this.arena.edgeColumns.materializeRecord(slot);
+        const changedKeys = patch.replace
+          ? undefined
+          : [
+              ...(patch.unset ?? []),
+              ...(patch.set ? Object.keys(patch.set) : []),
+            ];
+        this.propertyIndexes.onEdgePropertiesUpdated(
+          slot,
+          this.arena.edgeTypeId[slot],
+          oldProps,
+          newProps,
+          changedKeys,
+        );
+      }
+      const touched = patch.replace
+        ? Object.keys(oldProps).concat(patch.set ? Object.keys(patch.set) : [])
+        : [...(patch.unset ?? []), ...(patch.set ? Object.keys(patch.set) : [])];
+      this._txnManager.recordLiveEdgeWrite(id, touched, false, !!patch.replace);
     }
   }
 
-  /**
-   * Checks if an index exists that covers the given property keys.
-   *
-   * For compound indexes, returns true if ALL provided propertyKeys are covered
-   * by the same index (the index may have additional properties).
-   *
-   * @param target - Either 'node' or 'edge'
-   * @param propertyKeys - Array of property names to check
-   * @returns true if an index exists that covers all given properties, false otherwise
-   */
-  async hasIndex(target: 'node' | 'edge', propertyKeys: string[]): Promise<boolean> {
-    if (propertyKeys.length === 0) return false;
-
-    // First, check if there's a compound index that covers all these properties
-    const sortedQueryKeys = [...propertyKeys].sort();
-    const queryKey = sortedQueryKeys.join('|');
-
-    // Check all compound indexes for target type
-    for (const [indexKey, indexTarget] of this._compoundIndexes.entries()) {
-      if (indexTarget !== target) continue;
-
-      // A compound index covers the query if all query keys are present in the index key
-      const indexKeys = indexKey.split('|');
-      const allCovered = sortedQueryKeys.every(qKey => indexKeys.includes(qKey));
-
-      if (allCovered) return true;
-    }
-
-    // Fallback: check single-property indexes (backwards compatibility)
-    if (propertyKeys.length === 1) {
-      const key = propertyKeys[0];
-      if (target === 'node') {
-        return this._nodesByProperty.has(key);
-      } else {
-        return this._edgesByProperty.has(key);
-      }
-    }
-
-    // For multi-property queries without compound index match, check if ALL keys have single indexes
-    if (target === 'node') {
-      return propertyKeys.every(key => this._nodesByProperty.has(key));
-    } else {
-      return propertyKeys.every(key => this._edgesByProperty.has(key));
-    }
+  async removeNodeLabels(
+    nodeId: string,
+    labels: string[],
+    transaction?: ITransactionHandle,
+  ): Promise<void> {
+    this.removeNodeLabelsSync(nodeId, labels, transaction);
   }
 
-  /**
-   * Retrieves an index by its name.
-   *
-   * @param name - The name of the index to retrieve
-   * @returns The index metadata if found, undefined otherwise
-   */
-  async getIndex(name: string): Promise<{ name: string; target: 'node' | 'edge'; propertyKeys: string[] } | undefined> {
-    const index = this._namedIndexes.get(name);
-    if (!index) {
-      return undefined;
+  removeNodeLabelsSync(
+    nodeId: string,
+    labels: readonly string[],
+    transaction?: ITransactionHandle,
+  ): number {
+    const ctx = this._txnManager.getContext(transaction);
+    if (ctx) {
+      return this._txnManager.stageRemoveNodeLabels(ctx, nodeId, labels, this.arena);
     }
-    return {
+
+    const slot = this.arena.resolveNodeSlot(nodeId);
+    if (slot < 0) throw new NodeNotFoundError(nodeId);
+
+    const oldLabels = this._undoStack !== null ? this.arena.nodeLabelStrings[slot] : undefined;
+    const removed = this.arena.removeNodeLabelsBySlot(slot, labels);
+    if (removed.length > 0) {
+      if (this._undoStack !== null && oldLabels) {
+        this._undoStack.push({ kind: 'restoreNodeLabels', id: nodeId, labels: oldLabels });
+      }
+      if (this.propertyIndexes.hasAnyNodeIndexes) {
+        const removedIds = removed.map((l) => this.arena.labelDict.lookup(l)).filter((id) => id >= 0);
+        const props = this.arena.nodeColumns.materializeRecord(slot);
+        this.propertyIndexes.onNodeLabelsRemoved(slot, removedIds, props);
+      }
+      this._txnManager.recordLiveNodeLabelWrite(nodeId);
+    }
+    return removed.length;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Index Management
+  // ---------------------------------------------------------------------------
+
+  async createIndex(
+    name: string,
+    target: 'node' | 'edge',
+    propertyKeys: string[],
+    options?: CreateIndexOptions,
+  ): Promise<void> {
+    this.createIndexSync(name, target, propertyKeys, options);
+  }
+
+  createIndexSync(
+    name: string,
+    target: 'node' | 'edge',
+    propertyKeys: string[],
+    options?: CreateIndexOptions,
+  ): void {
+    this.propertyIndexes.createIndex(
       name,
-      target: index.target,
-      propertyKeys: index.propertyKeys,
-    };
+      target,
+      propertyKeys,
+      this.arena,
+      options?.labelOrType,
+    );
   }
 
-  /**
-   * Deletes an index by its name.
-   *
-   * @param name - The name of the index to delete
-   * @throws Error if the index does not exist
-   */
+  async hasIndex(
+    target: 'node' | 'edge',
+    propertyKeys: string[],
+    labelOrType?: string,
+  ): Promise<boolean> {
+    return this.hasIndexSync(target, propertyKeys, labelOrType);
+  }
+
+  hasIndexSync(
+    target: 'node' | 'edge',
+    propertyKeys: string[],
+    labelOrType?: string,
+  ): boolean {
+    return this.propertyIndexes.hasIndex(target, propertyKeys, labelOrType);
+  }
+
+  async getIndex(name: string): Promise<IndexMetadata | undefined> {
+    return this.propertyIndexes.getIndex(name);
+  }
+
   async deleteIndex(name: string): Promise<void> {
-    if (!this._namedIndexes.has(name)) {
-      throw new Error(`Index with name '${name}' does not exist`);
-    }
-    this._namedIndexes.delete(name);
+    this.deleteIndexSync(name);
   }
 
-  /**
-   * Retrieves all indexes.
-   *
-   * @returns Array of all index metadata
-   */
-  async getIndexes(): Promise<{ name: string; target: 'node' | 'edge'; propertyKeys: string[] }[]> {
-    const indexes: { name: string; target: 'node' | 'edge'; propertyKeys: string[] }[] = [];
-    for (const [name, index] of this._namedIndexes.entries()) {
-      indexes.push({
-        name,
-        target: index.target,
-        propertyKeys: index.propertyKeys,
+  deleteIndexSync(name: string): void {
+    this.propertyIndexes.deleteIndex(name);
+  }
+
+  async getIndexes(): Promise<IndexMetadata[]> {
+    return this.getIndexesSync();
+  }
+
+  getIndexesSync(): IndexMetadata[] {
+    return this.propertyIndexes.getIndexes();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Data Portability
+  // ---------------------------------------------------------------------------
+
+  async exportJSON(): Promise<GraphData> {
+    const highN = this.arena.nodeHighWater;
+    const nodes: NodeData[] = [];
+    for (let s = 0; s < highN; s++) {
+      if (this.arena.nodeAlive[s] === 0) continue;
+      const props = this.arena.nodeColumns.materializeRecord(s);
+      nodes.push({
+        id: this.arena.nodeIds[s],
+        labels: [...this.arena.nodeLabelStrings[s]],
+        createdOn: this.arena.nodeCreatedOn[s],
+        updatedOn: this.arena.nodeUpdatedOn[s],
+        properties: { ...props },
       });
     }
-    return indexes;
-  }
 
-  // ---------------------------------------------------------------------------
-  // Property mutations
-  // ---------------------------------------------------------------------------
-
-  /**
-   * Adds a property to a node or edge. Fails if the property key already exists.
-   * @throws NodeNotFoundError/EdgeNotFoundError if the target doesn't exist
-   * @throws PropertyAlreadyExistsError if the property key already exists
-   * @throws InvalidPropertyError if the value is not a primitive
-   */
-  async addProperty(target: 'node' | 'edge', id: string, key: string, value: unknown, transaction?: ITransactionHandle): Promise<void> {
-    if (!isPrimitive(value)) {
-      throw new InvalidPropertyError(key, value);
+    const highE = this.arena.edgeHighWater;
+    const edges: EdgeData[] = [];
+    for (let s = 0; s < highE; s++) {
+      if (this.arena.edgeAlive[s] === 0) continue;
+      const props = this.arena.edgeColumns.materializeRecord(s);
+      edges.push({
+        id: this.arena.edgeIds[s],
+        sourceId: this.arena.getEdgeSourceId(s),
+        targetId: this.arena.getEdgeTargetId(s),
+        type: this.arena.edgeTypeDict.getString(this.arena.edgeTypeId[s]),
+        createdOn: this.arena.edgeCreatedOn[s],
+        updatedOn: this.arena.edgeUpdatedOn[s],
+        properties: { ...props },
+      });
     }
 
-    const overlay = this._getOverlay(transaction?.id);
-    let record: NodeData | EdgeData | null = null;
-    let isOverlay = false;
-
-    if (overlay) {
-      const map = target === 'node' ? overlay.nodes : overlay.edges;
-      const overlayRecord = map.get(id);
-      if (overlayRecord !== undefined) {
-        if (overlayRecord === null) {
-          // Tombstone: deleted in this transaction — do not fall back to live store
-          if (target === 'node') {
-            throw new NodeNotFoundError(id);
-          } else {
-            throw new EdgeNotFoundError(id);
-          }
-        }
-        record = overlayRecord;
-        isOverlay = true;
-      }
-    }
-
-    if (record === null) {
-      record = target === 'node' ? this._nodes.get(id) ?? null : this._edges.get(id) ?? null;
-    }
-
-    if (record === null) {
-      if (target === 'node') {
-        throw new NodeNotFoundError(id);
-      } else {
-        throw new EdgeNotFoundError(id);
-      }
-    }
-
-    if (key in record.properties) {
-      throw new PropertyAlreadyExistsError(target, id, key);
-    }
-
-    // Clone before mutating to avoid affecting original storage
-    if (overlay) {
-      record = deepClone(record);
-      isOverlay = true; // After cloning, treat as overlay for index updates
-    }
-
-    record.properties = { ...record.properties, [key]: value };
-    record.updatedOn = Date.now();
-
-    if (isOverlay && overlay) {
-      if (target === 'node') {
-        overlay.nodes.set(id, record as NodeData);
-      } else {
-        overlay.edges.set(id, record as EdgeData);
-      }
-      const serialized = this._propKey(value);
-      const propIndex = target === 'node' ? overlay.nodesByProperty : overlay.edgesByProperty;
-      let keyMap = propIndex.get(key);
-      if (!keyMap) {
-        keyMap = new Map();
-        propIndex.set(key, keyMap);
-      }
-      let idSet = keyMap.get(serialized);
-      if (!idSet) {
-        idSet = new Set();
-        keyMap.set(serialized, idSet);
-      }
-      idSet.add(id);
-    } else if (target === 'node') {
-      this._indexNodeProperty(id, key, value);
-    } else {
-      this._indexEdgeProperty(id, key, value);
-    }
-  }
-
-  /**
-   * Updates an existing property on a node or edge. Fails if the property doesn't exist.
-   * @throws NodeNotFoundError/EdgeNotFoundError if the target doesn't exist
-   * @throws PropertyNotFoundError if the property key doesn't exist
-   * @throws InvalidPropertyError if the value is not a primitive
-   */
-  async updateProperty(target: 'node' | 'edge', id: string, key: string, value: unknown, transaction?: ITransactionHandle): Promise<void> {
-    if (!isPrimitive(value)) {
-      throw new InvalidPropertyError(key, value);
-    }
-
-    const overlay = this._getOverlay(transaction?.id);
-    let record: NodeData | EdgeData | null = null;
-    let isOverlay = false;
-
-    if (overlay) {
-      const map = target === 'node' ? overlay.nodes : overlay.edges;
-      const overlayRecord = map.get(id);
-      if (overlayRecord !== undefined) {
-        if (overlayRecord === null) {
-          // Tombstone: deleted in this transaction — do not fall back to live store
-          if (target === 'node') {
-            throw new NodeNotFoundError(id);
-          } else {
-            throw new EdgeNotFoundError(id);
-          }
-        }
-        record = overlayRecord;
-        isOverlay = true;
-      }
-    }
-
-    if (record === null) {
-      record = target === 'node' ? this._nodes.get(id) ?? null : this._edges.get(id) ?? null;
-    }
-
-    if (record === null) {
-      if (target === 'node') {
-        throw new NodeNotFoundError(id);
-      } else {
-        throw new EdgeNotFoundError(id);
-      }
-    }
-
-    if (!(key in record.properties)) {
-      throw new PropertyNotFoundError(target, id, key);
-    }
-
-    const oldValue = record.properties[key];
-
-    // Clone before mutating to avoid affecting original storage
-    if (overlay) {
-      record = deepClone(record);
-      isOverlay = true; // After cloning, treat as overlay for index updates
-    }
-
-    record.properties = { ...record.properties, [key]: value };
-    record.updatedOn = Date.now();
-
-    if (isOverlay && overlay) {
-      if (target === 'node') {
-        overlay.nodes.set(id, record as NodeData);
-      } else {
-        overlay.edges.set(id, record as EdgeData);
-      }
-      // Update overlay property index: remove from old, add to new
-      const propIndex = target === 'node' ? overlay.nodesByProperty : overlay.edgesByProperty;
-      const serialized = this._propKey(oldValue);
-      const oldKeyMap = propIndex.get(key);
-      if (oldKeyMap) {
-        const oldIdSet = oldKeyMap.get(serialized);
-        if (oldIdSet) {
-          oldIdSet.delete(id);
-        }
-      }
-      const newSerialized = this._propKey(value);
-      let keyMap = propIndex.get(key);
-      if (!keyMap) {
-        keyMap = new Map();
-        propIndex.set(key, keyMap);
-      }
-      let idSet = keyMap.get(newSerialized);
-      if (!idSet) {
-        idSet = new Set();
-        keyMap.set(newSerialized, idSet);
-      }
-      idSet.add(id);
-    } else {
-      if (target === 'node') {
-        this._unindexNodeProperty(id, key, oldValue);
-        this._indexNodeProperty(id, key, value);
-      } else {
-        this._unindexEdgeProperty(id, key, oldValue);
-        this._indexEdgeProperty(id, key, value);
-      }
-    }
-  }
-
-  /**
-   * Deletes a property from a node or edge.
-   * @throws NodeNotFoundError/EdgeNotFoundError if the target doesn't exist
-   */
-  async deleteProperty(target: 'node' | 'edge', id: string, key: string, transaction?: ITransactionHandle): Promise<void> {
-    const overlay = this._getOverlay(transaction?.id);
-    let record: NodeData | EdgeData | null = null;
-    let isOverlay = false;
-
-    if (overlay) {
-      const map = target === 'node' ? overlay.nodes : overlay.edges;
-      const overlayRecord = map.get(id);
-      if (overlayRecord !== undefined) {
-        if (overlayRecord === null) {
-          // Tombstone: deleted in this transaction — do not fall back to live store
-          if (target === 'node') {
-            throw new NodeNotFoundError(id);
-          } else {
-            throw new EdgeNotFoundError(id);
-          }
-        }
-        record = overlayRecord;
-        isOverlay = true;
-      }
-    }
-
-    if (record === null) {
-      record = target === 'node' ? this._nodes.get(id) ?? null : this._edges.get(id) ?? null;
-    }
-
-    if (record === null) {
-      if (target === 'node') {
-        throw new NodeNotFoundError(id);
-      } else {
-        throw new EdgeNotFoundError(id);
-      }
-    }
-
-    const oldValue = record.properties[key];
-
-    // Clone before mutating to avoid affecting original storage
-    if (overlay) {
-      record = deepClone(record);
-      isOverlay = true; // After cloning, treat as overlay for index updates
-    }
-
-    delete record.properties[key];
-    record.updatedOn = Date.now();
-
-    if (isOverlay && overlay) {
-      if (target === 'node') {
-        overlay.nodes.set(id, record as NodeData);
-      } else {
-        overlay.edges.set(id, record as EdgeData);
-      }
-      const propIndex = target === 'node' ? overlay.nodesByProperty : overlay.edgesByProperty;
-      const serialized = this._propKey(oldValue);
-      const keyMap = propIndex.get(key);
-      if (keyMap) {
-        const idSet = keyMap.get(serialized);
-        if (idSet) {
-          idSet.delete(id);
-        }
-      }
-    } else if (target === 'node') {
-      this._unindexNodeProperty(id, key, oldValue);
-    } else {
-      this._unindexEdgeProperty(id, key, oldValue);
-    }
-  }
-
-  /**
-   * Clears all properties from a node or edge.
-   * @throws NodeNotFoundError/EdgeNotFoundError if the target doesn't exist
-   */
-  async clearProperties(target: 'node' | 'edge', id: string, transaction?: ITransactionHandle): Promise<void> {
-    const overlay = this._getOverlay(transaction?.id);
-    let record: NodeData | EdgeData | null = null;
-    let isOverlay = false;
-
-    if (overlay) {
-      const map = target === 'node' ? overlay.nodes : overlay.edges;
-      const overlayRecord = map.get(id);
-      if (overlayRecord !== undefined) {
-        if (overlayRecord === null) {
-          // Tombstone: deleted in this transaction — do not fall back to live store
-          if (target === 'node') {
-            throw new NodeNotFoundError(id);
-          } else {
-            throw new EdgeNotFoundError(id);
-          }
-        }
-        record = overlayRecord;
-        isOverlay = true;
-      }
-    }
-
-    if (record === null) {
-      record = target === 'node' ? this._nodes.get(id) ?? null : this._edges.get(id) ?? null;
-    }
-
-    if (record === null) {
-      if (target === 'node') {
-        throw new NodeNotFoundError(id);
-      } else {
-        throw new EdgeNotFoundError(id);
-      }
-    }
-
-    // Clone before mutating to avoid affecting original storage
-    if (overlay) {
-      record = deepClone(record);
-      isOverlay = true; // After cloning, treat as overlay for index updates
-    }
-
-    const oldProperties = { ...record.properties };
-
-    for (const [key, value] of Object.entries(oldProperties)) {
-      if (isOverlay && overlay) {
-        const propIndex = target === 'node' ? overlay.nodesByProperty : overlay.edgesByProperty;
-        const serialized = this._propKey(value);
-        const keyMap = propIndex.get(key);
-        if (keyMap) {
-          const idSet = keyMap.get(serialized);
-          if (idSet) {
-            idSet.delete(id);
-          }
-        }
-      } else if (target === 'node') {
-        this._unindexNodeProperty(id, key, value);
-      } else {
-        this._unindexEdgeProperty(id, key, value);
-      }
-    }
-
-    record.properties = {};
-
-    if (isOverlay && overlay) {
-      if (target === 'node') {
-        overlay.nodes.set(id, record as NodeData);
-      } else {
-        overlay.edges.set(id, record as EdgeData);
-      }
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // Label mutations
-  // ---------------------------------------------------------------------------
-
-  async removeNodeLabels(nodeId: string, labelsToRemove: string[], transaction?: ITransactionHandle): Promise<void> {
-    const overlay = this._getOverlay(transaction?.id);
-    let record: NodeData | null = null;
-    let isOverlay = false;
-
-    if (overlay) {
-      const overlayRecord = overlay.nodes.get(nodeId);
-      if (overlayRecord !== undefined) {
-        if (overlayRecord === null) {
-          throw new NodeNotFoundError(nodeId);
-        }
-        record = overlayRecord;
-        isOverlay = true;
-      }
-    }
-
-    if (record === null) {
-      record = this._nodes.get(nodeId) ?? null;
-    }
-
-    if (record === null) {
-      throw new NodeNotFoundError(nodeId);
-    }
-
-    // Clone before mutating to avoid affecting original storage
-    if (overlay) {
-      record = deepClone(record);
-      isOverlay = true; // After cloning, treat as overlay for index updates
-    }
-
-    const labelsSet = new Set(record.labels);
-    for (const label of labelsToRemove) {
-      if (labelsSet.has(label)) {
-        labelsSet.delete(label);
-        // Unindex
-        if (isOverlay && overlay) {
-          const typeSet = overlay.nodesByType.get(label);
-          if (typeSet) {
-            typeSet.delete(nodeId);
-          }
-        } else {
-          const typeSet = this._nodesByType.get(label);
-          if (typeSet) {
-            typeSet.delete(nodeId);
-            if (typeSet.size === 0) {
-              this._nodesByType.delete(label);
-            }
-          }
-        }
-      }
-    }
-
-    record.labels = Array.from(labelsSet);
-    record.updatedOn = Date.now();
-
-    if (isOverlay && overlay) {
-      overlay.nodes.set(nodeId, record);
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // Data portability
-  // ---------------------------------------------------------------------------
-
-  /**
-   * Exports all nodes and edges as a portable GraphData snapshot.
-   * InMemory strategy: single full iteration — O(n) nodes + O(e) edges.
-   */
-  async exportJSON(): Promise<GraphData> {
     return {
       graphId: this.graphId,
-      nodes: Array.from(this._nodes.values()).map(deepClone),
-      edges: Array.from(this._edges.values()).map(deepClone),
+      nodes,
+      edges,
     };
   }
 
-  /**
-   * Imports nodes and edges from a portable GraphData object.
-   * InMemory strategy: single-pass insert for nodes then edges.
-   *
-   * @throws NodeAlreadyExistsError if a node id is already present
-   * @throws EdgeAlreadyExistsError if an edge id is already present
-   * @throws NodeNotFoundError if an edge references a non-existent node
-   */
   async importJSON(data: GraphData): Promise<void> {
-    for (const nodeData of data.nodes) {
-      if (this._nodes.has(nodeData.id)) {
-        throw new NodeAlreadyExistsError(nodeData.id);
+    const seenNodeIds = new Set<string>();
+    for (let i = 0; i < data.nodes.length; i++) {
+      const nid = data.nodes[i].id;
+      if (seenNodeIds.has(nid) || this.arena.resolveNodeSlot(nid) >= 0) {
+        throw new NodeAlreadyExistsError(nid);
       }
-      this._insertNodeLive(nodeData, true);
+      seenNodeIds.add(nid);
     }
 
-    for (const edgeData of data.edges) {
-      if (this._edges.has(edgeData.id)) {
-        throw new EdgeAlreadyExistsError(edgeData.id);
+    const seenEdgeIds = new Set<string>();
+    for (let i = 0; i < data.edges.length; i++) {
+      const eid = data.edges[i].id;
+      if (seenEdgeIds.has(eid) || this.arena.resolveEdgeSlot(eid) >= 0) {
+        throw new EdgeAlreadyExistsError(eid);
       }
-      this._insertEdgeLive(edgeData, true);
+      seenEdgeIds.add(eid);
+    }
+
+    const wasEmpty = this.arena.liveEdgeCount === 0;
+    const hasPreExistingDangling = !wasEmpty && this.arena.hasDanglingEdges;
+    this.arena.ensureNodeCapacity(this.arena.nodeHighWater + data.nodes.length);
+    for (let i = 0; i < data.nodes.length; i++) {
+      const n = data.nodes[i];
+      const slot = this.arena.allocateNode(
+        n.labels,
+        n.properties,
+        n.id,
+        n.createdOn,
+        n.updatedOn,
+      );
+      if (hasPreExistingDangling) {
+        this.arena.bindDanglingEdgesForNode(n.id, slot, this.adjacency);
+      }
+      this.propertyIndexes.onNodeInserted(slot, this.arena.nodeLabelIds[slot], n.properties);
+    }
+
+    this.arena.ensureEdgeCapacity(this.arena.edgeHighWater + data.edges.length);
+    for (let i = 0; i < data.edges.length; i++) {
+      const e = data.edges[i];
+      const rawSrc = this.arena.resolveNodeSlot(e.sourceId);
+      const rawTgt = this.arena.resolveNodeSlot(e.targetId);
+      const srcSlot = rawSrc < 0 ? NONE_SLOT : rawSrc;
+      const tgtSlot = rawTgt < 0 ? NONE_SLOT : rawTgt;
+
+      const { slot, typeId } = this.arena.allocateEdge(
+        srcSlot,
+        tgtSlot,
+        e.type,
+        e.properties,
+        e.id,
+        e.createdOn,
+        e.updatedOn,
+        e.sourceId,
+        e.targetId,
+      );
+      if (!wasEmpty && srcSlot !== NONE_SLOT && tgtSlot !== NONE_SLOT) {
+        this.adjacency.addEdge(slot, srcSlot, tgtSlot, typeId);
+      }
+      this.propertyIndexes.onEdgeInserted(slot, typeId, e.properties);
+    }
+
+    if (wasEmpty && data.edges.length > 0) {
+      this.compact();
     }
   }
 
   // ---------------------------------------------------------------------------
-  // Transaction support
+  // Transactions
   // ---------------------------------------------------------------------------
-
-  /**
-   * In-memory transactions use copy-on-write overlays for isolation.
-   * Each transaction has its own overlay that intercepts reads/writes.
-   * On commit, overlay changes are applied to live state.
-   * On rollback, the overlay is simply discarded.
-   */
-  private _transactionOverlays = new Map<string, TransactionOverlay>();
-  private _activeTransaction: string | null = null;
 
   supportsTransactions(): boolean {
     return true;
   }
 
   async beginTransaction(): Promise<ITransactionHandle> {
-    const txnId = `txn-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-
-    const overlay: TransactionOverlay = {
-      nodes: new Map(),
-      edges: new Map(),
-      nodesByType: new Map(),
-      edgesByType: new Map(),
-      edgesBySource: new Map(),
-      edgesByTarget: new Map(),
-      nodesByProperty: new Map(),
-      edgesByProperty: new Map(),
-    };
-
-    this._transactionOverlays.set(txnId, overlay);
-    this._activeTransaction = txnId;
-
-    return { id: txnId, context: undefined };
+    return this._txnManager.begin();
   }
 
   async commitTransaction(handle: ITransactionHandle): Promise<void> {
-    const overlay = this._transactionOverlays.get(handle.id);
-    if (!overlay) {
-      throw new Error('No active transaction to commit');
-    }
-
-    // Apply all overlay changes to live state
-    this._applyOverlayToLive(overlay);
-
-    this._transactionOverlays.delete(handle.id);
-    if (this._activeTransaction === handle.id) {
-      this._activeTransaction = null;
-    }
+    this._txnManager.commit(handle, this.arena, this.adjacency, this.propertyIndexes);
   }
 
   async rollbackTransaction(handle: ITransactionHandle): Promise<void> {
-    if (!this._transactionOverlays.has(handle.id)) {
-      return;
-    }
-
-    this._transactionOverlays.delete(handle.id);
-    if (this._activeTransaction === handle.id) {
-      this._activeTransaction = null;
-    }
+    this._txnManager.rollback(handle);
   }
 
-  private _getOverlay(txnId?: string): TransactionOverlay | null {
-    const id = txnId ?? this._activeTransaction;
-    if (!id) return null;
-    return this._transactionOverlays.get(id) ?? null;
+  // ---------------------------------------------------------------------------
+  // Internal Query Selection & Evaluation Helpers (Live Path)
+  // ---------------------------------------------------------------------------
+
+  private _nodeDataBySlot(slot: number): ReadonlyNodeData {
+    return {
+      id: this.arena.nodeIds[slot],
+      labels: this.arena.nodeLabelStrings[slot],
+      createdOn: this.arena.nodeCreatedOn[slot],
+      updatedOn: this.arena.nodeUpdatedOn[slot],
+      properties: this.arena.nodeColumns.materializeRecord(slot),
+    };
   }
 
-  /**
-   * Checks if properties match a filter specification with operator AND/OR chaining support.
-   * Recursively evaluates AND (all must match) and OR (any must match) sub-filters.
-   */
-  private _matchesPropertyFilter(properties: Record<string, unknown>, filter: QueryOptionsFilterProperty): boolean {
-    // Handle AND - ALL conditions must be true
-    if (filter.AND && filter.AND.length > 0) {
-      for (const subFilter of filter.AND) {
-        if (!this._matchesPropertyFilter(properties, subFilter)) {
-          return false;
+  private _edgeDataBySlot(slot: number): ReadonlyEdgeData {
+    return {
+      id: this.arena.edgeIds[slot],
+      sourceId: this.arena.getEdgeSourceId(slot),
+      targetId: this.arena.getEdgeTargetId(slot),
+      type: this.arena.edgeTypeDict.getString(this.arena.edgeTypeId[slot]),
+      createdOn: this.arena.edgeCreatedOn[slot],
+      updatedOn: this.arena.edgeUpdatedOn[slot],
+      properties: this.arena.edgeColumns.materializeRecord(slot),
+    };
+  }
+
+  private _collectIncidentEdgeSlots(nodeSlot: number, out: number[]): void {
+    const seen = new Set<number>();
+    const csrOutEntries = this.adjacency.getCsrOutEntries();
+    for (
+      let i = this.adjacency.getCsrOutStart(nodeSlot), end = this.adjacency.getCsrOutEnd(nodeSlot);
+      i < end;
+      i += 3
+    ) {
+      const eSlot = csrOutEntries[i];
+      if (
+        this.arena.edgeAlive[eSlot] === 1 &&
+        this.arena.edgeSrcSlot[eSlot] === nodeSlot &&
+        !seen.has(eSlot)
+      ) {
+        seen.add(eSlot);
+        out.push(eSlot);
+      }
+    }
+    const dOut = this.adjacency.getDeltaOutBuf(nodeSlot);
+    const dOutLen = this.adjacency.getDeltaOutWordLen(nodeSlot);
+    if (dOut) {
+      for (let i = 0; i < dOutLen; i += 3) {
+        const eSlot = dOut[i];
+        if (this.arena.edgeAlive[eSlot] === 1 && !seen.has(eSlot)) {
+          seen.add(eSlot);
+          out.push(eSlot);
         }
       }
     }
 
-    // Handle OR - ANY condition must be true
+    const csrInEntries = this.adjacency.getCsrInEntries();
+    for (
+      let i = this.adjacency.getCsrInStart(nodeSlot), end = this.adjacency.getCsrInEnd(nodeSlot);
+      i < end;
+      i += 3
+    ) {
+      const eSlot = csrInEntries[i];
+      if (
+        this.arena.edgeAlive[eSlot] === 1 &&
+        this.arena.edgeTgtSlot[eSlot] === nodeSlot &&
+        !seen.has(eSlot)
+      ) {
+        seen.add(eSlot);
+        out.push(eSlot);
+      }
+    }
+    const dIn = this.adjacency.getDeltaInBuf(nodeSlot);
+    const dInLen = this.adjacency.getDeltaInWordLen(nodeSlot);
+    if (dIn) {
+      for (let i = 0; i < dInLen; i += 3) {
+        const eSlot = dIn[i];
+        if (this.arena.edgeAlive[eSlot] === 1 && !seen.has(eSlot)) {
+          seen.add(eSlot);
+          out.push(eSlot);
+        }
+      }
+    }
+
+    if (this.arena.hasDanglingEdges) {
+      const nodeId = this.arena.nodeIds[nodeSlot];
+      const dout = this.arena.danglingOutEdges.get(nodeId);
+      if (dout) {
+        for (const eSlot of dout) {
+          if (this.arena.edgeAlive[eSlot] === 1 && !seen.has(eSlot)) {
+            seen.add(eSlot);
+            out.push(eSlot);
+          }
+        }
+      }
+      const din = this.arena.danglingInEdges.get(nodeId);
+      if (din) {
+        for (const eSlot of din) {
+          if (this.arena.edgeAlive[eSlot] === 1 && !seen.has(eSlot)) {
+            seen.add(eSlot);
+            out.push(eSlot);
+          }
+        }
+      }
+    }
+  }
+
+  private _collectMatchingNodeSlotsLive(
+    options?: StorageQueryOptions,
+    applyOrderLimit = true,
+  ): Uint32Array | number[] {
+    const filter = options?.filter;
+    const types = filter?.types;
+    const props = filter?.properties;
+    const limit = applyOrderLimit ? options?.limit : undefined;
+    const orderBy = applyOrderLimit ? options?.orderBy : undefined;
+
+    const labelQuery = types && types.length > 0
+      ? this.arena.labelDict.buildQueryMask(types)
+      : undefined;
+    if (labelQuery === null) return new Uint32Array(0);
+
+    // 1. Check index-accelerated candidate sets
+    const candidateSets: Uint32SlotSet[] = [];
+    let rangeSlice: Uint32Array | null = null;
+
+    if (types && types.length === 1) {
+      const lid = this.arena.labelDict.lookup(types[0]);
+      if (lid < 0) return new Uint32Array(0);
+      const labelSet = this.arena.getNodesByLabelId(lid);
+      if (!labelSet || labelSet.size === 0) return new Uint32Array(0);
+      candidateSets.push(labelSet);
+    }
+
+    if (props && props.length > 0 && this.propertyIndexes.hasAnyNodeIndexes) {
+      // Try compound index first
+      const eqMap: Record<string, unknown> = {};
+      const eqKeys: string[] = [];
+      for (let i = 0; i < props.length; i++) {
+        const pf = props[i];
+        if (pf.key !== undefined && (pf.op === undefined || pf.op === '=')) {
+          eqKeys.push(pf.key);
+          eqMap[pf.key] = pf.value;
+        }
+      }
+      if (eqKeys.length >= 2) {
+        const compIdx = this.propertyIndexes.findCompoundIndex('node', eqKeys, types);
+        if (compIdx) {
+          const set = compIdx.lookupCompound(eqMap);
+          if (!set || set.size === 0) return new Uint32Array(0);
+          candidateSets.push(set);
+        }
+      }
+
+      // Single-property equality / IN / range index checks
+      for (let i = 0; i < props.length; i++) {
+        const pf = props[i];
+        if (pf.key === undefined) continue;
+        const idx = this.propertyIndexes.findSingleIndex('node', pf.key, types);
+        if (!idx) continue;
+
+        const op = pf.op ?? '=';
+        if (op === '=') {
+          const set = idx.lookupExact(pf.value);
+          if (!set || set.size === 0) return new Uint32Array(0);
+          candidateSets.push(set);
+        } else if (op === 'IN' && Array.isArray(pf.value)) {
+          const seenSlots = new Set<number>();
+          const seenVals = new Set<unknown>();
+          const unionArr: number[] = [];
+          for (let v = 0; v < pf.value.length; v++) {
+            const pv = pf.value[v];
+            if (seenVals.has(pv)) continue;
+            seenVals.add(pv);
+            const set = idx.lookupExact(pv);
+            if (set) {
+              const s = set.rawSlice();
+              for (let j = 0; j < s.length; j++) {
+                const slot = s[j];
+                if (!seenSlots.has(slot)) {
+                  seenSlots.add(slot);
+                  unionArr.push(slot);
+                }
+              }
+            }
+          }
+          if (unionArr.length === 0) return new Uint32Array(0);
+          if (!rangeSlice || unionArr.length < rangeSlice.length) {
+            rangeSlice = Uint32Array.from(unionArr);
+          }
+        } else if (
+          op === '>' ||
+          op === '>=' ||
+          op === '<' ||
+          op === '<=' ||
+          op === 'STARTS_WITH'
+        ) {
+          const canOrderShortcut =
+            orderBy !== undefined &&
+            orderBy.field === pf.key &&
+            props.length === 1 &&
+            (!types || types.length <= 1) &&
+            (!types || types.length === 0 || idx.labelOrType === types[0]) &&
+            (op !== 'STARTS_WITH' || orderBy.direction === 'asc');
+          const matchedRange = idx.lookupRange(
+            op as RangeOperator,
+            pf.value,
+            canOrderShortcut ? limit : undefined,
+            orderBy?.direction === 'desc',
+          );
+          if (matchedRange.length === 0) return new Uint32Array(0);
+          if (canOrderShortcut) {
+            return matchedRange;
+          }
+          if (!rangeSlice || matchedRange.length < rangeSlice.length) {
+            rangeSlice = matchedRange;
+          }
+        }
+      }
+    }
+
+    // 2. Choose tightest iteration source
+    let sourceSlots: Uint32Array | null = null;
+    if (candidateSets.length > 0) {
+      let smallest = candidateSets[0];
+      for (let i = 1; i < candidateSets.length; i++) {
+        if (candidateSets[i].size < smallest.size) smallest = candidateSets[i];
+      }
+      sourceSlots = rangeSlice && rangeSlice.length < smallest.size
+        ? rangeSlice
+        : smallest.rawSlice();
+    } else if (rangeSlice !== null) {
+      sourceSlots = rangeSlice;
+    }
+
+    const hasProps = props !== undefined && props.length > 0;
+    const earlyStop = limit !== undefined && !orderBy;
+    const out: number[] = [];
+
+    if (sourceSlots !== null) {
+      // Fast path: single label with no property filters and no orderBy -> slice directly
+      if (
+        !hasProps &&
+        candidateSets.length === 1 &&
+        types?.length === 1 &&
+        !orderBy
+      ) {
+        if (limit !== undefined && sourceSlots.length > limit) {
+          return sourceSlots.subarray(0, limit);
+        }
+        return sourceSlots;
+      }
+
+      for (let i = 0; i < sourceSlots.length; i++) {
+        const s = sourceSlots[i];
+        if (this.arena.nodeAlive[s] === 0) continue;
+        if (labelQuery && !this.arena.matchesNodeLabelMask(s, labelQuery)) continue;
+        if (hasProps && !this._matchesNodePropsOnSlot(s, props!)) continue;
+        out.push(s);
+        if (earlyStop && out.length >= limit!) break;
+      }
+    } else {
+      const high = this.arena.nodeHighWater;
+      const alive = this.arena.nodeAlive;
+      for (let s = 0; s < high; s++) {
+        if (alive[s] === 0) continue;
+        if (labelQuery && !this.arena.matchesNodeLabelMask(s, labelQuery)) continue;
+        if (hasProps && !this._matchesNodePropsOnSlot(s, props!)) continue;
+        out.push(s);
+        if (earlyStop && out.length >= limit!) break;
+      }
+    }
+
+    if (orderBy && out.length > 1) {
+      this._sortSlots(
+        out,
+        orderBy.field,
+        orderBy.direction,
+        this.arena.nodeCreatedOn,
+        this.arena.nodeUpdatedOn,
+        this.arena.nodeColumns,
+      );
+    }
+
+    if (limit !== undefined && out.length > limit) {
+      out.length = limit;
+    }
+    return out;
+  }
+
+  private _collectMatchingEdgeSlotsLive(
+    options?: StorageQueryOptions,
+    applyOrderLimit = true,
+  ): Uint32Array | number[] {
+    const filter = options?.filter;
+    const types = filter?.types;
+    const props = filter?.properties;
+    const limit = applyOrderLimit ? options?.limit : undefined;
+    const orderBy = applyOrderLimit ? options?.orderBy : undefined;
+
+    let typeMaskQuery = null as ReturnType<typeof this.arena.edgeTypeDict.buildQueryMask>;
+    const hasTypes = types !== undefined && types.length > 0;
+    if (hasTypes) {
+      typeMaskQuery = this.arena.edgeTypeDict.buildQueryMask(types!);
+      if (typeMaskQuery === null) return new Uint32Array(0);
+    }
+
+    const candidateSets: Uint32SlotSet[] = [];
+    if (types && types.length === 1) {
+      const tid = this.arena.edgeTypeDict.lookup(types[0]);
+      if (tid < 0) return new Uint32Array(0);
+      const tset = this.arena.getEdgesByTypeId(tid);
+      if (!tset || tset.size === 0) return new Uint32Array(0);
+      candidateSets.push(tset);
+    }
+
+    let rangeSlice: Uint32Array | null = null;
+    if (props && props.length > 0 && this.propertyIndexes.hasAnyEdgeIndexes) {
+      for (let i = 0; i < props.length; i++) {
+        const pf = props[i];
+        if (pf.key === undefined) continue;
+        const idx = this.propertyIndexes.findSingleIndex('edge', pf.key, types);
+        if (!idx) continue;
+        const op = pf.op ?? '=';
+        if (op === '=') {
+          const set = idx.lookupExact(pf.value);
+          if (!set || set.size === 0) return new Uint32Array(0);
+          candidateSets.push(set);
+        } else if (op === '>' || op === '>=' || op === '<' || op === '<=' || op === 'STARTS_WITH') {
+          const matched = idx.lookupRange(op as RangeOperator, pf.value);
+          if (matched.length === 0) return new Uint32Array(0);
+          if (!rangeSlice || matched.length < rangeSlice.length) rangeSlice = matched;
+        }
+      }
+    }
+
+    let sourceSlots: Uint32Array | null = null;
+    if (candidateSets.length > 0) {
+      let smallest = candidateSets[0];
+      for (let i = 1; i < candidateSets.length; i++) {
+        if (candidateSets[i].size < smallest.size) smallest = candidateSets[i];
+      }
+      sourceSlots = rangeSlice && rangeSlice.length < smallest.size
+        ? rangeSlice
+        : smallest.rawSlice();
+    } else if (rangeSlice !== null) {
+      sourceSlots = rangeSlice;
+    }
+
+    const hasProps = props !== undefined && props.length > 0;
+    const earlyStop = limit !== undefined && !orderBy;
+    const out: number[] = [];
+
+    if (sourceSlots !== null) {
+      if (!hasProps && candidateSets.length === 1 && types?.length === 1 && !orderBy) {
+        if (limit !== undefined && sourceSlots.length > limit) {
+          return sourceSlots.subarray(0, limit);
+        }
+        return sourceSlots;
+      }
+
+      for (let i = 0; i < sourceSlots.length; i++) {
+        const s = sourceSlots[i];
+        if (this.arena.edgeAlive[s] === 0) continue;
+        if (typeMaskQuery && !this._matchesEdgeTypeMask(s, typeMaskQuery)) continue;
+        if (hasProps && !this._matchesEdgePropsOnSlot(s, props!)) continue;
+        out.push(s);
+        if (earlyStop && out.length >= limit!) break;
+      }
+    } else {
+      const high = this.arena.edgeHighWater;
+      const alive = this.arena.edgeAlive;
+      for (let s = 0; s < high; s++) {
+        if (alive[s] === 0) continue;
+        if (typeMaskQuery && !this._matchesEdgeTypeMask(s, typeMaskQuery)) continue;
+        if (hasProps && !this._matchesEdgePropsOnSlot(s, props!)) continue;
+        out.push(s);
+        if (earlyStop && out.length >= limit!) break;
+      }
+    }
+
+    if (orderBy && out.length > 1) {
+      this._sortSlots(
+        out,
+        orderBy.field,
+        orderBy.direction,
+        this.arena.edgeCreatedOn,
+        this.arena.edgeUpdatedOn,
+        this.arena.edgeColumns,
+      );
+    }
+
+    if (limit !== undefined && out.length > limit) {
+      out.length = limit;
+    }
+    return out;
+  }
+
+  private _filterAdjacentEdgeSlotsLive(
+    nodeSlot: number,
+    dir: 'out' | 'in',
+    options?: StorageQueryOptions,
+    nodeId?: string,
+  ): number[] {
+    const types = options?.filter?.types;
+    const props = options?.filter?.properties;
+    const hasTypes = types !== undefined && types.length > 0;
+    const typeQuery = hasTypes ? this.arena.edgeTypeDict.buildQueryMask(types!) : undefined;
+    if (typeQuery === null) return [];
+
+    const hasProps = props !== undefined && props.length > 0;
+    const out: number[] = [];
+    const alive = this.arena.edgeAlive;
+
+    if (nodeSlot >= 0) {
+      const csrEntries = dir === 'out'
+        ? this.adjacency.getCsrOutEntries()
+        : this.adjacency.getCsrInEntries();
+      const csrStart = dir === 'out'
+        ? this.adjacency.getCsrOutStart(nodeSlot)
+        : this.adjacency.getCsrInStart(nodeSlot);
+      const csrEnd = dir === 'out'
+        ? this.adjacency.getCsrOutEnd(nodeSlot)
+        : this.adjacency.getCsrInEnd(nodeSlot);
+
+      const edgeSrcSlot = this.arena.edgeSrcSlot;
+      const edgeTgtSlot = this.arena.edgeTgtSlot;
+      for (let i = csrStart; i < csrEnd; i += 3) {
+        const eSlot = csrEntries[i];
+        if (alive[eSlot] === 0) continue;
+        if (
+          dir === 'out'
+            ? edgeSrcSlot[eSlot] !== nodeSlot || edgeTgtSlot[eSlot] !== csrEntries[i + 1]
+            : edgeTgtSlot[eSlot] !== nodeSlot || edgeSrcSlot[eSlot] !== csrEntries[i + 1]
+        ) {
+          continue;
+        }
+        if (typeQuery && !this._matchesEdgeTypeId(csrEntries[i + 2], typeQuery)) continue;
+        if (hasProps && !this._matchesEdgePropsOnSlot(eSlot, props!)) continue;
+        out.push(eSlot);
+      }
+
+      const deltaBuf = dir === 'out'
+        ? this.adjacency.getDeltaOutBuf(nodeSlot)
+        : this.adjacency.getDeltaInBuf(nodeSlot);
+      const deltaLen = dir === 'out'
+        ? this.adjacency.getDeltaOutWordLen(nodeSlot)
+        : this.adjacency.getDeltaInWordLen(nodeSlot);
+      if (deltaBuf && deltaLen > 0) {
+        for (let i = 0; i < deltaLen; i += 3) {
+          const eSlot = deltaBuf[i];
+          if (alive[eSlot] === 0) continue;
+          if (typeQuery && !this._matchesEdgeTypeId(deltaBuf[i + 2], typeQuery)) continue;
+          if (hasProps && !this._matchesEdgePropsOnSlot(eSlot, props!)) continue;
+          out.push(eSlot);
+        }
+      }
+    }
+
+    if (this.arena.hasDanglingEdges && nodeId !== undefined) {
+      const dSet = dir === 'out'
+        ? this.arena.danglingOutEdges.get(nodeId)
+        : this.arena.danglingInEdges.get(nodeId);
+      if (dSet) {
+        for (const eSlot of dSet) {
+          if (alive[eSlot] === 0) continue;
+          if (typeQuery && !this._matchesEdgeTypeMask(eSlot, typeQuery)) continue;
+          if (hasProps && !this._matchesEdgePropsOnSlot(eSlot, props!)) continue;
+          out.push(eSlot);
+        }
+      }
+    }
+
+    if (options?.orderBy && out.length > 1) {
+      this._sortSlots(
+        out,
+        options.orderBy.field,
+        options.orderBy.direction,
+        this.arena.edgeCreatedOn,
+        this.arena.edgeUpdatedOn,
+        this.arena.edgeColumns,
+      );
+    }
+    if (options?.limit !== undefined && out.length > options.limit) {
+      out.length = options.limit;
+    }
+    return out;
+  }
+
+  private _matchesEdgeTypeMask(
+    edgeSlot: number,
+    query: NonNullable<ReturnType<typeof this.arena.edgeTypeDict.buildQueryMask>>,
+  ): boolean {
+    return this._matchesEdgeTypeId(this.arena.edgeTypeId[edgeSlot], query);
+  }
+
+  private _matchesEdgeTypeId(
+    typeId: number,
+    query: NonNullable<ReturnType<typeof this.arena.edgeTypeDict.buildQueryMask>>,
+  ): boolean {
+    if (typeId < 32) return ((query.lo & (1 << typeId)) >>> 0) !== 0;
+    if (typeId < 64) return ((query.hi & (1 << (typeId - 32))) >>> 0) !== 0;
+    return query.overflowIds ? query.overflowIds.includes(typeId) : false;
+  }
+
+  private _matchesNodePropsOnSlot(
+    slot: number,
+    filters: readonly QueryOptionsFilterProperty[],
+  ): boolean {
+    const cols = this.arena.nodeColumns;
+    for (let i = 0; i < filters.length; i++) {
+      if (!this._evalPropFilterOnSlot(cols, slot, filters[i])) return false;
+    }
+    return true;
+  }
+
+  private _matchesEdgePropsOnSlot(
+    slot: number,
+    filters: readonly QueryOptionsFilterProperty[],
+  ): boolean {
+    const cols = this.arena.edgeColumns;
+    for (let i = 0; i < filters.length; i++) {
+      if (!this._evalPropFilterOnSlot(cols, slot, filters[i])) return false;
+    }
+    return true;
+  }
+
+  private _evalPropFilterOnSlot(
+    cols: ColumnStore,
+    slot: number,
+    filter: QueryOptionsFilterProperty,
+  ): boolean {
+    if (filter.AND && filter.AND.length > 0) {
+      for (let i = 0; i < filter.AND.length; i++) {
+        if (!this._evalPropFilterOnSlot(cols, slot, filter.AND[i])) return false;
+      }
+    }
     if (filter.OR && filter.OR.length > 0) {
-      let orMatched = false;
-      for (const subFilter of filter.OR) {
-        if (this._matchesPropertyFilter(properties, subFilter)) {
-          orMatched = true;
+      let any = false;
+      for (let i = 0; i < filter.OR.length; i++) {
+        if (this._evalPropFilterOnSlot(cols, slot, filter.OR[i])) {
+          any = true;
           break;
         }
       }
-      if (!orMatched) {
-        return false;
-      }
+      if (!any) return false;
     }
+    if (filter.key === undefined) return true;
 
-    // Handle base case - single property filter with operator
-    // If key is not provided, this is a structural filter (AND/OR only) - always matches for base comparison
-    if (filter.key === undefined) {
-      return true;
-    }
-    const actualValue = properties[filter.key];
-    const filterValue = filter.value;
-    const op = filter.op ?? '=';
-
-    switch (op) {
-      case '=':
-        return actualValue === filterValue;
-      case '<>':
-        return actualValue !== filterValue;
-      case '>':
-        return typeof actualValue === 'number' && typeof filterValue === 'number' && actualValue > filterValue;
-      case '<':
-        return typeof actualValue === 'number' && typeof filterValue === 'number' && actualValue < filterValue;
-      case '>=':
-        return typeof actualValue === 'number' && typeof filterValue === 'number' && actualValue >= filterValue;
-      case '<=':
-        return typeof actualValue === 'number' && typeof filterValue === 'number' && actualValue <= filterValue;
-      case 'CONTAINS':
-        return typeof actualValue === 'string' && typeof filterValue === 'string' && actualValue.includes(filterValue);
-      case 'STARTS_WITH':
-        return typeof actualValue === 'string' && typeof filterValue === 'string' && actualValue.startsWith(filterValue);
-      case 'ENDS_WITH':
-        return typeof actualValue === 'string' && typeof filterValue === 'string' && actualValue.endsWith(filterValue);
-      case 'IN':
-        return Array.isArray(filterValue) && filterValue.includes(actualValue);
-      case 'NOT_IN':
-        return Array.isArray(filterValue) && !filterValue.includes(actualValue);
-      case 'IS_NULL':
-        return actualValue === null || actualValue === undefined;
-      case 'IS_NOT_NULL':
-        return actualValue !== null && actualValue !== undefined;
-      default:
-        return actualValue === filterValue;
-    }
+    const keyId = cols.keyDict.lookup(filter.key);
+    const col = keyId >= 0 ? cols.getColumnByKeyId(keyId) : undefined;
+    const actualValue = col ? col.get(slot) : undefined;
+    return matchPropOp(actualValue, filter.value, filter.op ?? '=');
   }
 
-  private _matchesNodeFilters(node: NodeData, options?: StorageQueryOptions): boolean {
-    if (!options?.filter) return true;
+  private _sortSlots(
+    slots: number[],
+    field: string,
+    direction: 'asc' | 'desc',
+    createdOn: Float64Array,
+    updatedOn: Float64Array,
+    cols: ColumnStore,
+  ): void {
+    const keyId = field !== 'createdOn' && field !== 'updatedOn' ? cols.keyDict.lookup(field) : -1;
+    const col = keyId >= 0 ? cols.getColumnByKeyId(keyId) : undefined;
+    const isCreated = field === 'createdOn';
+    const isUpdated = field === 'updatedOn';
 
-    const { filter } = options;
+    slots.sort((a, b) => {
+      const va = isCreated ? createdOn[a] : isUpdated ? updatedOn[a] : col?.get(a);
+      const vb = isCreated ? createdOn[b] : isUpdated ? updatedOn[b] : col?.get(b);
+      return compareSortValues(va, vb, direction);
+    });
+  }
 
-    // Check type filter (OR within types — node matches if ANY of its labels is in filter.types)
-    if (filter.types && filter.types.length > 0) {
-      const hasMatchingLabel = node.labels.some((label) => filter.types!.includes(label));
-      if (!hasMatchingLabel) {
-        return false;
+  // ---------------------------------------------------------------------------
+  // Internal Transaction Context Helpers
+  // ---------------------------------------------------------------------------
+
+  private _hasNodeInCtx(id: string, ctx: TransactionContext): boolean {
+    if (ctx.createdNodes.has(id)) return true;
+    if (ctx.deletedNodes.has(id)) return false;
+    return this.arena.resolveNodeSlot(id) >= 0;
+  }
+
+  private _hasEdgeInCtx(id: string, ctx: TransactionContext): boolean {
+    if (ctx.createdEdges.has(id)) return true;
+    if (ctx.deletedEdges.has(id)) return false;
+    return this.arena.resolveEdgeSlot(id) >= 0;
+  }
+
+  private _getNodeDataInCtx(id: string, ctx: TransactionContext): ReadonlyNodeData | undefined {
+    const created = ctx.createdNodes.get(id);
+    if (created) return created;
+    if (ctx.deletedNodes.has(id)) return undefined;
+
+    const slot = this.arena.resolveNodeSlot(id);
+    if (slot < 0) return undefined;
+
+    const base = this._nodeDataBySlot(slot);
+    const delta = ctx.nodeDeltas.get(id);
+    if (!delta) return base;
+
+    const labels = delta.removedLabels.size > 0
+      ? Object.freeze(base.labels.filter((l) => !delta.removedLabels.has(l)))
+      : base.labels;
+    const properties = this._txnManager.applyNodeDeltaToProps(base.properties, delta);
+    return {
+      ...base,
+      labels,
+      properties,
+    };
+  }
+
+  private _getEdgeDataInCtx(id: string, ctx: TransactionContext): ReadonlyEdgeData | undefined {
+    const created = ctx.createdEdges.get(id);
+    if (created) return created;
+    if (ctx.deletedEdges.has(id)) return undefined;
+
+    const slot = this.arena.resolveEdgeSlot(id);
+    if (slot < 0) return undefined;
+
+    const base = this._edgeDataBySlot(slot);
+    const delta = ctx.edgeDeltas.get(id);
+    if (!delta) return base;
+
+    return {
+      ...base,
+      properties: this._txnManager.applyEdgeDeltaToProps(base.properties, delta),
+    };
+  }
+
+  private _queryNodeDataInCtx(
+    ctx: TransactionContext,
+    options?: StorageQueryOptions,
+  ): ReadonlyNodeData[] {
+    const out: ReadonlyNodeData[] = [];
+
+    for (const created of ctx.createdNodes.values()) {
+      if (this._matchesNodeDataFilter(created, options)) {
+        out.push(created);
       }
     }
 
-    // Check property filters (AND - all must match)
-    if (filter.properties && filter.properties.length > 0) {
-      for (const propFilter of filter.properties) {
-        if (!this._matchesPropertyFilter(node.properties, propFilter)) {
-          return false;
+    const high = this.arena.nodeHighWater;
+    for (let s = 0; s < high; s++) {
+      if (this.arena.nodeAlive[s] === 0) continue;
+      const id = this.arena.nodeIds[s];
+      if (ctx.deletedNodes.has(id) || ctx.createdNodes.has(id)) continue;
+      const node = this._getNodeDataInCtx(id, ctx);
+      if (node && this._matchesNodeDataFilter(node, options)) {
+        out.push(node);
+      }
+    }
+
+    return this._applyOrderAndLimitData(out, options);
+  }
+
+  private _queryEdgeDataInCtx(
+    ctx: TransactionContext,
+    options?: StorageQueryOptions,
+  ): ReadonlyEdgeData[] {
+    const out: ReadonlyEdgeData[] = [];
+
+    for (const created of ctx.createdEdges.values()) {
+      if (this._matchesEdgeDataFilter(created, options)) {
+        out.push(created);
+      }
+    }
+
+    const high = this.arena.edgeHighWater;
+    for (let s = 0; s < high; s++) {
+      if (this.arena.edgeAlive[s] === 0) continue;
+      const id = this.arena.edgeIds[s];
+      if (ctx.deletedEdges.has(id) || ctx.createdEdges.has(id)) continue;
+      const edge = this._getEdgeDataInCtx(id, ctx);
+      if (edge && this._matchesEdgeDataFilter(edge, options)) {
+        out.push(edge);
+      }
+    }
+
+    return this._applyOrderAndLimitData(out, options);
+  }
+
+  private _getEdgesBySourceInCtx(nodeId: string, ctx: TransactionContext): ReadonlyEdgeData[] {
+    const out: ReadonlyEdgeData[] = [];
+    const seen = new Set<string>();
+
+    const addedIds = ctx.outEdgesAdded.get(nodeId);
+    if (addedIds) {
+      for (const eid of addedIds) {
+        const e = ctx.createdEdges.get(eid);
+        if (e) {
+          out.push(e);
+          seen.add(eid);
         }
       }
     }
 
-    return true;
-  }
-
-  private _matchesEdgeFilters(edge: EdgeData, options?: StorageQueryOptions): boolean {
-    if (!options?.filter) return true;
-
-    const { filter } = options;
-
-    // Check type filter (OR within types)
-    if (filter.types && filter.types.length > 0) {
-      if (!filter.types.includes(edge.type)) {
-        return false;
+    const srcSlot = this.arena.resolveNodeSlot(nodeId);
+    if (srcSlot >= 0 || (this.arena.hasDanglingEdges && this.arena.danglingOutEdges.has(nodeId))) {
+      const liveSlots = this._filterAdjacentEdgeSlotsLive(srcSlot, 'out', undefined, nodeId);
+      for (let i = 0; i < liveSlots.length; i++) {
+        const eid = this.arena.edgeIds[liveSlots[i]];
+        if (seen.has(eid) || ctx.deletedEdges.has(eid)) continue;
+        const edge = this._getEdgeDataInCtx(eid, ctx);
+        if (edge) out.push(edge);
       }
     }
+    return out;
+  }
 
-    // Check property filters (AND - all must match)
-    if (filter.properties && filter.properties.length > 0) {
-      for (const propFilter of filter.properties) {
-        if (!this._matchesPropertyFilter(edge.properties, propFilter)) {
-          return false;
+  private _getEdgesByTargetInCtx(nodeId: string, ctx: TransactionContext): ReadonlyEdgeData[] {
+    const out: ReadonlyEdgeData[] = [];
+    const seen = new Set<string>();
+
+    const addedIds = ctx.inEdgesAdded.get(nodeId);
+    if (addedIds) {
+      for (const eid of addedIds) {
+        const e = ctx.createdEdges.get(eid);
+        if (e) {
+          out.push(e);
+          seen.add(eid);
         }
       }
     }
 
+    const tgtSlot = this.arena.resolveNodeSlot(nodeId);
+    if (tgtSlot >= 0 || (this.arena.hasDanglingEdges && this.arena.danglingInEdges.has(nodeId))) {
+      const liveSlots = this._filterAdjacentEdgeSlotsLive(tgtSlot, 'in', undefined, nodeId);
+      for (let i = 0; i < liveSlots.length; i++) {
+        const eid = this.arena.edgeIds[liveSlots[i]];
+        if (seen.has(eid) || ctx.deletedEdges.has(eid)) continue;
+        const edge = this._getEdgeDataInCtx(eid, ctx);
+        if (edge) out.push(edge);
+      }
+    }
+    return out;
+  }
+
+  private _filterAndOrderEdgeData(
+    edges: ReadonlyEdgeData[],
+    options?: StorageQueryOptions,
+  ): ReadonlyEdgeData[] {
+    if (!options?.filter && !options?.orderBy && options?.limit === undefined) {
+      return edges;
+    }
+    const filtered = options?.filter
+      ? edges.filter((e) => this._matchesEdgeDataFilter(e, options))
+      : edges;
+    return this._applyOrderAndLimitData(filtered, options);
+  }
+
+  private _matchesNodeDataFilter(
+    node: ReadonlyNodeData,
+    options?: StorageQueryOptions,
+  ): boolean {
+    const f = options?.filter;
+    if (!f) return true;
+    if (f.types && f.types.length > 0) {
+      if (!node.labels.some((l) => f.types!.includes(l))) return false;
+    }
+    if (f.properties && f.properties.length > 0) {
+      for (let i = 0; i < f.properties.length; i++) {
+        if (!evalPropFilterOnRecord(node.properties, f.properties[i])) return false;
+      }
+    }
     return true;
   }
 
-  private _applyOrderAndLimit<T extends NodeData | EdgeData>(result: T[], options?: StorageQueryOptions): T[] {
-    let output = result;
+  private _matchesEdgeDataFilter(
+    edge: ReadonlyEdgeData,
+    options?: StorageQueryOptions,
+  ): boolean {
+    const f = options?.filter;
+    if (!f) return true;
+    if (f.types && f.types.length > 0) {
+      if (!f.types.includes(edge.type)) return false;
+    }
+    if (f.properties && f.properties.length > 0) {
+      for (let i = 0; i < f.properties.length; i++) {
+        if (!evalPropFilterOnRecord(edge.properties, f.properties[i])) return false;
+      }
+    }
+    return true;
+  }
 
-    // Apply ordering if specified
-    if (options?.orderBy) {
+  private _applyOrderAndLimitData<T extends ReadonlyNodeData | ReadonlyEdgeData>(
+    items: T[],
+    options?: StorageQueryOptions,
+  ): T[] {
+    let out = items;
+    if (options?.orderBy && out.length > 1) {
       const { field, direction } = options.orderBy;
-      output.sort((a, b) => {
-        // Direct fields (createdOn, updatedOn) are on the object itself
-        // Other properties are in the properties object
-        const aVal = (field === 'createdOn' || field === 'updatedOn' ? a[field] : a.properties?.[field]) as number | undefined;
-        const bVal = (field === 'createdOn' || field === 'updatedOn' ? b[field] : b.properties?.[field]) as number | undefined;
-        if (aVal === undefined && bVal === undefined) return 0;
-        if (aVal === undefined) return direction === 'asc' ? 1 : -1;
-        if (bVal === undefined) return direction === 'asc' ? -1 : 1;
-        if (aVal === bVal) return 0;
-        return direction === 'asc' ? (aVal < bVal ? -1 : 1) : (aVal > bVal ? -1 : 1);
+      out = [...out].sort((a, b) => {
+        const va = field === 'createdOn' ? a.createdOn : field === 'updatedOn' ? a.updatedOn : a.properties?.[field];
+        const vb = field === 'createdOn' ? b.createdOn : field === 'updatedOn' ? b.updatedOn : b.properties?.[field];
+        return compareSortValues(va, vb, direction);
       });
     }
-
-    // Apply limit
-    if (options?.limit !== undefined) {
-      output = output.slice(0, options.limit);
+    if (options?.limit !== undefined && out.length > options.limit) {
+      out = out.slice(0, options.limit);
     }
-
-    return output;
+    return out;
   }
 
-  private _applyOverlayToLive(overlay: TransactionOverlay): void {
-    // Apply node changes
-    for (const [id, node] of overlay.nodes) {
-      if (node === null) {
-        this._nodes.delete(id);
-        // Remove from indexes
-        const existing = this._nodes.get(id);
-        if (existing) {
-          this._unindexNodeProperties(existing);
-        }
-      } else {
-        this._nodes.set(id, node);
-        this._indexNodeProperties(node);
+  private _aggregatePropertyOverRecords(
+    records: ReadonlyArray<ReadonlyNodeData | ReadonlyEdgeData>,
+    key: string,
+    distinct?: boolean,
+  ): AggregateResult {
+    const seen = distinct ? new Set<number>() : null;
+    let count = 0;
+    let sum = 0;
+    let min = Infinity;
+    let max = -Infinity;
+
+    for (let i = 0; i < records.length; i++) {
+      const val = records[i].properties?.[key];
+      if (typeof val !== 'number' || Number.isNaN(val)) continue;
+      if (seen) {
+        if (seen.has(val)) continue;
+        seen.add(val);
       }
+      count++;
+      sum += val;
+      if (val < min) min = val;
+      if (val > max) max = val;
     }
 
-    // Apply edge changes
-    for (const [id, edge] of overlay.edges) {
-      if (edge === null) {
-        this._edges.delete(id);
-        const existing = this._edges.get(id);
-        if (existing) {
-          this._unindexEdgeProperties(existing);
-        }
-      } else {
-        this._edges.set(id, edge);
-        this._indexEdgeProperties(edge);
-      }
-    }
-
-    // Apply index changes
-    this._mergeOverlayIndexes(this._nodesByType, overlay.nodesByType);
-    this._mergeOverlayIndexes(this._edgesByType, overlay.edgesByType);
-    this._mergeOverlayIndexes(this._edgesBySource, overlay.edgesBySource);
-    this._mergeOverlayIndexes(this._edgesByTarget, overlay.edgesByTarget);
-    this._mergePropertyOverlayIndexes(this._nodesByProperty, overlay.nodesByProperty);
-    this._mergePropertyOverlayIndexes(this._edgesByProperty, overlay.edgesByProperty);
-  }
-
-  private _mergeOverlayIndexes(
-    live: Map<string, Set<string>>,
-    overlay: Map<string, Set<string>>
-  ): void {
-    for (const [key, idSet] of overlay) {
-      const liveSet = live.get(key);
-      if (liveSet) {
-        for (const id of idSet) {
-          liveSet.add(id);
-        }
-      } else {
-        live.set(key, new Set(idSet));
-      }
-    }
-  }
-
-  private _mergePropertyOverlayIndexes(
-    live: Map<string, Map<string, Set<string>>>,
-    overlay: Map<string, Map<string, Set<string>>>
-  ): void {
-    for (const [key, valueMap] of overlay) {
-      let liveMap = live.get(key);
-      if (!liveMap) {
-        liveMap = new Map();
-        live.set(key, liveMap);
-      }
-      for (const [serialized, idSet] of valueMap) {
-        let liveSet = liveMap.get(serialized);
-        if (!liveSet) {
-          liveSet = new Set();
-          liveMap.set(serialized, liveSet);
-        }
-        for (const id of idSet) {
-          liveSet.add(id);
-        }
-      }
-    }
-  }
-
-  private _indexEdgeProperties(edge: EdgeData): void {
-    for (const [key, value] of Object.entries(edge.properties)) {
-      this._indexEdgeProperty(edge.id, key, value);
-    }
-  }
-
-  private _unindexEdgeProperties(edge: EdgeData): void {
-    for (const [key, value] of Object.entries(edge.properties)) {
-      this._unindexEdgeProperty(edge.id, key, value);
-    }
+    if (count === 0) return { count: 0 };
+    return { count, sum, avg: sum / count, min, max };
   }
 }
 
-interface TransactionOverlay {
-  nodes: Map<string, NodeData | null>;
-  edges: Map<string, EdgeData | null>;
-  nodesByType: Map<string, Set<string>>;
-  edgesByType: Map<string, Set<string>>;
-  edgesBySource: Map<string, Set<string>>;
-  edgesByTarget: Map<string, Set<string>>;
-  nodesByProperty: Map<string, Map<string, Set<string>>>;
-  edgesByProperty: Map<string, Map<string, Set<string>>>;
+function matchPropOp(
+  actualValue: unknown,
+  filterValue: unknown,
+  op: NonNullable<QueryOptionsFilterProperty['op']>,
+): boolean {
+  switch (op) {
+    case '=': return actualValue === filterValue;
+    case '<>': return actualValue !== filterValue;
+    case '>':
+      return (typeof actualValue === 'number' && typeof filterValue === 'number' && actualValue > filterValue) ||
+        (typeof actualValue === 'string' && typeof filterValue === 'string' && actualValue > filterValue);
+    case '<':
+      return (typeof actualValue === 'number' && typeof filterValue === 'number' && actualValue < filterValue) ||
+        (typeof actualValue === 'string' && typeof filterValue === 'string' && actualValue < filterValue);
+    case '>=':
+      return (typeof actualValue === 'number' && typeof filterValue === 'number' && actualValue >= filterValue) ||
+        (typeof actualValue === 'string' && typeof filterValue === 'string' && actualValue >= filterValue);
+    case '<=':
+      return (typeof actualValue === 'number' && typeof filterValue === 'number' && actualValue <= filterValue) ||
+        (typeof actualValue === 'string' && typeof filterValue === 'string' && actualValue <= filterValue);
+    case 'CONTAINS': return typeof actualValue === 'string' && typeof filterValue === 'string' && actualValue.includes(filterValue);
+    case 'STARTS_WITH': return typeof actualValue === 'string' && typeof filterValue === 'string' && actualValue.startsWith(filterValue);
+    case 'ENDS_WITH': return typeof actualValue === 'string' && typeof filterValue === 'string' && actualValue.endsWith(filterValue);
+    case 'IN': return Array.isArray(filterValue) && filterValue.includes(actualValue);
+    case 'NOT_IN': return Array.isArray(filterValue) && !filterValue.includes(actualValue);
+    case 'IS_NULL': return actualValue === null || actualValue === undefined;
+    case 'IS_NOT_NULL': return actualValue !== null && actualValue !== undefined;
+    default: return actualValue === filterValue;
+  }
+}
+
+function evalPropFilterOnRecord(
+  properties: Readonly<Record<string, unknown>>,
+  filter: QueryOptionsFilterProperty,
+): boolean {
+  if (filter.AND && filter.AND.length > 0) {
+    for (let i = 0; i < filter.AND.length; i++) {
+      if (!evalPropFilterOnRecord(properties, filter.AND[i])) return false;
+    }
+  }
+  if (filter.OR && filter.OR.length > 0) {
+    let any = false;
+    for (let i = 0; i < filter.OR.length; i++) {
+      if (evalPropFilterOnRecord(properties, filter.OR[i])) {
+        any = true;
+        break;
+      }
+    }
+    if (!any) return false;
+  }
+  if (filter.key === undefined) return true;
+  return matchPropOp(properties[filter.key], filter.value, filter.op ?? '=');
+}
+
+function compareSortValues(
+  aVal: unknown,
+  bVal: unknown,
+  direction: 'asc' | 'desc',
+): number {
+  if (aVal === undefined && bVal === undefined) return 0;
+  if (aVal === undefined) return direction === 'asc' ? 1 : -1;
+  if (bVal === undefined) return direction === 'asc' ? -1 : 1;
+  if (aVal === bVal) return 0;
+  const lt = (aVal as number | string) < (bVal as number | string);
+  return direction === 'asc' ? (lt ? -1 : 1) : (lt ? 1 : -1);
 }

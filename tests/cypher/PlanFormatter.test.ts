@@ -4,6 +4,7 @@
  * @module tests/cypher/PlanFormatter.test
  */
 import { describe, expect, it, beforeEach } from '@jest/globals';
+import { Graph } from '../../src/Graph';
 import { PlanFormatter, PlanFormat } from '../../src/cypher/plan/PlanFormatter';
 import { QueryPlan } from '../../src/cypher/plan/QueryPlan';
 
@@ -567,6 +568,25 @@ describe('PlanFormatter', () => {
       expect(result).toContain('PatternComprehensionStep');
       expect(result).toContain('PatternExprStep');
       expect(result).toContain('UnionStep');
+    });
+
+    it('formats write, OPTIONAL MATCH, MERGE, and index DDL plans via Graph.getQueryPlan in text and mermaid formats', async () => {
+      const graph = new Graph();
+      const planQueries = [
+        'MATCH (a:Item) OPTIONAL MATCH (a)-[r:REL]->(b:Item) CREATE (c:Item { x: 1 })-[e:REL { w: 2 }]->(a) SET a.x = 2, a += { y: 3 } DETACH DELETE b REMOVE a:Item, e.w RETURN a',
+        'MERGE (m:Item { x: 1 }) ON CREATE SET m.y = 2 ON MATCH SET m.y = 3 RETURN m',
+        'CREATE INDEX idx_pf FOR (n:Item) ON (n.x)',
+        'DROP INDEX idx_pf',
+        'SHOW INDEXES',
+      ];
+      for (const fmt of ['text', 'mermaid'] as const) {
+        const formatted = await Promise.all(
+          planQueries.map((q) => graph.getQueryPlan(q, {}, fmt)),
+        );
+        for (const planStr of formatted) {
+          expect(planStr.length).toBeGreaterThan(0);
+        }
+      }
     });
   });
 });

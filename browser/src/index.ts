@@ -1,9 +1,6 @@
 /**
  * Browser-optimized entry point for Grafio.
  *
- * Excludes: RedisCache, CachedStorageProvider, GraphManager,
- * InMemoryGraphFactory, CacheManager, and all cache infrastructure.
- *
  * Includes: Graph core, InMemoryStorageProvider, CypherEngine + full pipeline,
  * PlanFormatter, GraphToMermaid, errors, and type definitions.
  *
@@ -21,7 +18,7 @@ export { GraphAdminOps } from '../../src/Graph/GraphAdminOps';
 export { GraphTransaction } from '../../src/Graph/GraphTransaction';
 
 // ── Type definitions ────────────────────────────────────────────
-export type { NodeData, EdgeData, GraphData, ITransactionHandle } from '../../src/types';
+export type { NodeData, EdgeData, GraphData, ITransactionHandle, PrimitiveProperty, PropertyPatch } from '../../src/types';
 export type { GraphQueryOptions, IOrderBy } from '../../src/Graph/GraphQueryOptions';
 export type { TraversalOptions } from '../../src/Graph/TraversalOptions';
 export type { MermaidOptions } from '../../src/Graph/GraphToMermaid';
@@ -29,8 +26,12 @@ export type { MermaidOptions } from '../../src/Graph/GraphToMermaid';
 // ── Storage ─────────────────────────────────────────────────────
 export {
   isCacheWarmableStorageProvider,
+  isSyncGraphKernel,
   type IStorageProvider,
+  type ISyncGraphKernel,
   type CacheWarmableStorageProvider,
+  type IndexMetadata,
+  type CreateIndexOptions,
 } from '../../src/storage/IStorageProvider';
 export { InMemoryStorageProvider } from '../../src/storage/InMemoryStorageProvider';
 export type { InMemoryStorageProviderOptions } from '../../src/storage/InMemoryStorageProvider';
@@ -46,10 +47,9 @@ export {
   NodeNotFoundError,
   EdgeNotFoundError,
   InvalidPropertyError,
-  PropertyAlreadyExistsError,
-  PropertyNotFoundError,
   NodeHasEdgesError,
   InvalidGraphDataError,
+  TransactionConflictError,
 } from '../../src/errors';
 
 // ── Cypher engine ───────────────────────────────────────────────

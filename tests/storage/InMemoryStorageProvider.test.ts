@@ -92,233 +92,170 @@ describe('InMemoryStorageProvider', () => {
     });
   });
 
-  describe('updateProperty with transaction overlay', () => {
-    it('should enter the overlayRecord branch when updating within transaction', async () => {
+  describe('patchProperties with transaction delta', () => {
+    it('should update and commit property delta within transaction', async () => {
       await provider.insertNode({ id: 'node-1', labels: ['Test'], properties: { name: 'Original' } });
 
       const txn = await provider.beginTransaction();
 
-      // First, add a NEW property - this puts the node into the overlay
-      await provider.addProperty('node', 'node-1', 'city', 'NYC', txn);
+      // First, add a NEW property - creates node delta in transaction
+      await provider.patchProperties('node', 'node-1', { set: { city: 'NYC' } }, txn);
 
-      // Now update the existing 'name' property - overlayRecord should exist for node-1
-      await provider.updateProperty('node', 'node-1', 'name', 'Updated', txn);
+      // Now update the existing 'name' property in the same transaction
+      await provider.patchProperties('node', 'node-1', { set: { name: 'Updated' } }, txn);
 
       // Verify the update happened within the transaction
       const nodeInTxn = await provider.getNode('node-1', txn);
       expect(nodeInTxn?.properties.name).toBe('Updated');
+      expect(nodeInTxn?.properties.city).toBe('NYC');
 
       await provider.commitTransaction(txn);
 
       // Verify committed value
       const committedNode = await provider.getNode('node-1');
       expect(committedNode?.properties.name).toBe('Updated');
+      expect(committedNode?.properties.city).toBe('NYC');
     });
 
-    it('should rollback updateProperty changes on rollback', async () => {
+    it('should rollback patchProperties changes on rollback', async () => {
       await provider.insertNode({ id: 'node-1', labels: ['Test'], properties: { name: 'Original' } });
 
       const txn = await provider.beginTransaction();
 
-      // First add a NEW property to populate overlay, then update existing property
-      await provider.addProperty('node', 'node-1', 'city', 'NYC', txn);
-      await provider.updateProperty('node', 'node-1', 'name', 'Modified', txn);
+      await provider.patchProperties('node', 'node-1', { set: { city: 'NYC' } }, txn);
+      await provider.patchProperties('node', 'node-1', { set: { name: 'Modified' } }, txn);
 
       await provider.rollbackTransaction(txn);
 
       // Verify original value is restored
       const node = await provider.getNode('node-1');
       expect(node?.properties.name).toBe('Original');
+      expect(node?.properties.city).toBeUndefined();
     });
   });
 
-  describe('deleteProperty with transaction overlay', () => {
-    it('should enter the overlayRecord branch when deleting within transaction', async () => {
+  describe('unset and replace properties with transaction delta', () => {
+    it('should unset property within transaction and commit', async () => {
       await provider.insertNode({ id: 'node-1', labels: ['Test'], properties: { name: 'Alice', age: '30' } });
 
       const txn = await provider.beginTransaction();
 
-      // First add a property to get the node into the overlay
-      await provider.addProperty('node', 'node-1', 'city', 'NYC', txn);
+      await provider.patchProperties('node', 'node-1', { set: { city: 'NYC' } }, txn);
+      await provider.patchProperties('node', 'node-1', { unset: ['name'] }, txn);
 
-      // Now delete a property - overlayRecord should exist
-      await provider.deleteProperty('node', 'node-1', 'name', txn);
-
-      // Verify property is deleted within transaction
       const nodeInTxn = await provider.getNode('node-1', txn);
       expect(nodeInTxn?.properties.name).toBeUndefined();
       expect(nodeInTxn?.properties.age).toBe('30');
+      expect(nodeInTxn?.properties.city).toBe('NYC');
 
       await provider.commitTransaction(txn);
 
-      // Verify committed deletion
       const committedNode = await provider.getNode('node-1');
       expect(committedNode?.properties.name).toBeUndefined();
       expect(committedNode?.properties.age).toBe('30');
     });
-  });
 
-  describe('clearProperties with transaction overlay', () => {
-    it('should enter the overlayRecord branch when clearing within transaction', async () => {
+    it('should replace/clear properties within transaction and commit', async () => {
       await provider.insertNode({ id: 'node-1', labels: ['Test'], properties: { name: 'Alice', age: '30' } });
 
       const txn = await provider.beginTransaction();
 
-      // First add a property to get the node into the overlay
-      await provider.addProperty('node', 'node-1', 'city', 'NYC', txn);
+      await provider.patchProperties('node', 'node-1', { set: { city: 'NYC' } }, txn);
+      await provider.patchProperties('node', 'node-1', { set: {}, replace: true }, txn);
 
-      // Now clear properties - overlayRecord should exist
-      await provider.clearProperties('node', 'node-1', txn);
-
-      // Verify properties are cleared within transaction
       const nodeInTxn = await provider.getNode('node-1', txn);
       expect(nodeInTxn?.properties.name).toBeUndefined();
       expect(nodeInTxn?.properties.age).toBeUndefined();
+      expect(nodeInTxn?.properties.city).toBeUndefined();
 
       await provider.commitTransaction(txn);
 
-      // Verify committed clear
       const committedNode = await provider.getNode('node-1');
       expect(committedNode?.properties.name).toBeUndefined();
       expect(committedNode?.properties.age).toBeUndefined();
     });
   });
 
-  describe('tombstone handling (overlayRecord === null)', () => {
-    // When a node/edge is deleted within a transaction, a tombstone (null) is stored in the overlay
-    // Trying to modify properties on a tombstoned entity should throw NodeNotFoundError/EdgeNotFoundError
-
-    it('should throw NodeNotFoundError when addProperty targets a tombstoned node', async () => {
+  describe('tombstone handling on deleted entity in transaction', () => {
+    it('should throw NodeNotFoundError when setting property on a deleted node in txn', async () => {
       await provider.insertNode({ id: 'node-1', labels: ['Test'], properties: { name: 'Alice' } });
 
       const txn = await provider.beginTransaction();
-
-      // Delete the node within transaction - this creates a tombstone (null) in overlay
       await provider.deleteNode('node-1', txn);
 
-      // Now try to add a property to the deleted node - should throw
       await expect(
-        provider.addProperty('node', 'node-1', 'city', 'NYC', txn)
+        provider.patchProperties('node', 'node-1', { set: { city: 'NYC' } }, txn)
       ).rejects.toThrow(NodeNotFoundError);
 
       await provider.rollbackTransaction(txn);
     });
 
-    it('should throw NodeNotFoundError when updateProperty targets a tombstoned node', async () => {
+    it('should throw NodeNotFoundError when unsetting property on a deleted node in txn', async () => {
       await provider.insertNode({ id: 'node-1', labels: ['Test'], properties: { name: 'Alice' } });
 
       const txn = await provider.beginTransaction();
-
-      // Delete the node within transaction - this creates a tombstone
       await provider.deleteNode('node-1', txn);
 
-      // Now try to update a property on the deleted node - should throw
       await expect(
-        provider.updateProperty('node', 'node-1', 'name', 'Bob', txn)
+        provider.patchProperties('node', 'node-1', { unset: ['name'] }, txn)
       ).rejects.toThrow(NodeNotFoundError);
 
       await provider.rollbackTransaction(txn);
     });
 
-    it('should throw NodeNotFoundError when deleteProperty targets a tombstoned node', async () => {
-      await provider.insertNode({ id: 'node-1', labels: ['Test'], properties: { name: 'Alice' } });
-
-      const txn = await provider.beginTransaction();
-
-      // Delete the node within transaction - this creates a tombstone
-      await provider.deleteNode('node-1', txn);
-
-      // Now try to delete a property on the deleted node - should throw
-      await expect(
-        provider.deleteProperty('node', 'node-1', 'name', txn)
-      ).rejects.toThrow(NodeNotFoundError);
-
-      await provider.rollbackTransaction(txn);
-    });
-
-    it('should throw NodeNotFoundError when clearProperties targets a tombstoned node', async () => {
+    it('should throw NodeNotFoundError when replacing properties on a deleted node in txn', async () => {
       await provider.insertNode({ id: 'node-1', labels: ['Test'], properties: { name: 'Alice', age: '30' } });
 
       const txn = await provider.beginTransaction();
-
-      // Delete the node within transaction - this creates a tombstone
       await provider.deleteNode('node-1', txn);
 
-      // Now try to clear properties on the deleted node - should throw
       await expect(
-        provider.clearProperties('node', 'node-1', txn)
+        provider.patchProperties('node', 'node-1', { set: {}, replace: true }, txn)
       ).rejects.toThrow(NodeNotFoundError);
 
       await provider.rollbackTransaction(txn);
     });
 
-    it('should throw EdgeNotFoundError when addProperty targets a tombstoned edge', async () => {
+    it('should throw EdgeNotFoundError when setting property on a deleted edge in txn', async () => {
       await provider.insertNode({ id: 'n1', labels: ['Test'], properties: {} });
       await provider.insertNode({ id: 'n2', labels: ['Test'], properties: {} });
       await provider.insertEdge({ id: 'edge-1', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: { weight: 1 } });
 
       const txn = await provider.beginTransaction();
-
-      // Delete the edge within transaction - this creates a tombstone
       await provider.deleteEdge('edge-1', txn);
 
-      // Now try to add a property to the deleted edge - should throw
       await expect(
-        provider.addProperty('edge', 'edge-1', 'cost', 100, txn)
+        provider.patchProperties('edge', 'edge-1', { set: { cost: 100 } }, txn)
       ).rejects.toThrow(EdgeNotFoundError);
 
       await provider.rollbackTransaction(txn);
     });
 
-    it('should throw EdgeNotFoundError when updateProperty targets a tombstoned edge', async () => {
+    it('should throw EdgeNotFoundError when unsetting property on a deleted edge in txn', async () => {
       await provider.insertNode({ id: 'n1', labels: ['Test'], properties: {} });
       await provider.insertNode({ id: 'n2', labels: ['Test'], properties: {} });
       await provider.insertEdge({ id: 'edge-1', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: { weight: 1 } });
 
       const txn = await provider.beginTransaction();
-
-      // Delete the edge within transaction - this creates a tombstone
       await provider.deleteEdge('edge-1', txn);
 
-      // Now try to update a property on the deleted edge - should throw
       await expect(
-        provider.updateProperty('edge', 'edge-1', 'weight', 99, txn)
+        provider.patchProperties('edge', 'edge-1', { unset: ['weight'] }, txn)
       ).rejects.toThrow(EdgeNotFoundError);
 
       await provider.rollbackTransaction(txn);
     });
 
-    it('should throw EdgeNotFoundError when deleteProperty targets a tombstoned edge', async () => {
+    it('should throw EdgeNotFoundError when replacing properties on a deleted edge in txn', async () => {
       await provider.insertNode({ id: 'n1', labels: ['Test'], properties: {} });
       await provider.insertNode({ id: 'n2', labels: ['Test'], properties: {} });
       await provider.insertEdge({ id: 'edge-1', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: { weight: 1 } });
 
       const txn = await provider.beginTransaction();
-
-      // Delete the edge within transaction - this creates a tombstone
       await provider.deleteEdge('edge-1', txn);
 
-      // Now try to delete a property on the deleted edge - should throw
       await expect(
-        provider.deleteProperty('edge', 'edge-1', 'weight', txn)
-      ).rejects.toThrow(EdgeNotFoundError);
-
-      await provider.rollbackTransaction(txn);
-    });
-
-    it('should throw EdgeNotFoundError when clearProperties targets a tombstoned edge', async () => {
-      await provider.insertNode({ id: 'n1', labels: ['Test'], properties: {} });
-      await provider.insertNode({ id: 'n2', labels: ['Test'], properties: {} });
-      await provider.insertEdge({ id: 'edge-1', type: 'Link', sourceId: 'n1', targetId: 'n2', properties: { weight: 1 } });
-
-      const txn = await provider.beginTransaction();
-
-      // Delete the edge within transaction - this creates a tombstone
-      await provider.deleteEdge('edge-1', txn);
-
-      // Now try to clear properties on the deleted edge - should throw
-      await expect(
-        provider.clearProperties('edge', 'edge-1', txn)
+        provider.patchProperties('edge', 'edge-1', { set: {}, replace: true }, txn)
       ).rejects.toThrow(EdgeNotFoundError);
 
       await provider.rollbackTransaction(txn);

@@ -1,14 +1,14 @@
 ---
 sidebar_position: 1
 title: "@grafio/browser"
-description: Pure client-side ESM bundle of Grafio
+description: Pure client-side ESM and UMD bundle of Grafio
 ---
 
 # @grafio/browser
 
-`@grafio/browser` is the official client-side bundle of the Grafio database. It packages the entire Cypher execution engine, query planner, and core graph data structures into a lightweight, ESM-ready package that requires absolutely zero Node.js or backend dependencies.
+`@grafio/browser` is the official client-side bundle of the Grafio database. It packages the entire Cypher execution engine, query planner, and Structure-of-Arrays (SoA) / Hybrid CSR graph engine into a lightweight browser package with zero Node.js or backend dependencies.
 
-This is perfect for building offline-first web applications, client-side sandboxes (like the Grafio Playground), or anywhere you want powerful graph database features natively in the browser.
+This is ideal for building offline-first web applications, client-side sandboxes (like the Grafio Playground), or anywhere you want powerful graph database features natively in the browser.
 
 ## Installation
 
@@ -21,7 +21,7 @@ npm install @grafio/browser
 Or using an ESM CDN in your browser:
 ```html
 <script type="module">
-  import { CypherEngine } from 'https://esm.sh/@grafio/browser';
+  import { Graph, CypherEngine } from 'https://esm.sh/@grafio/browser';
 </script>
 ```
 
@@ -33,36 +33,34 @@ Because this package is optimized for the browser, it purposely excludes filesys
 - **Engine**: `CypherEngine`, `PlanFormatter`
 - **Storage**: `InMemoryStorageProvider`
 - **Utilities**: `GraphToMermaid`, `GraphTransaction`
-- **Errors & Types**: All standard Cypher and Graph execution errors.
+- **Errors & Types**: All standard Cypher and Graph execution errors (including `TransactionConflictError`)
 
 ## Complete Usage Example
 
-When running Grafio in the browser, you will always use the `InMemoryStorageProvider`. The brilliant part about this is that the `InMemoryStorageProvider` natively supports full ACID transactions, meaning `COMMIT` and `ROLLBACK` work perfectly on the client side!
-
-Here is a complete, standalone example of initializing the engine and executing Cypher directly in the browser:
+When running Grafio in the browser, `new Graph()` uses `InMemoryStorageProvider` with compact SoA slot IDs (`@n0:1`, `@e0:1`) and full ACID delta transactions (`commit()`, `rollback()`, and concurrent conflict detection) natively on the client side:
 
 ```typescript
-import { CypherEngine, InMemoryStorageProvider, PlanFormatter } from '@grafio/browser';
+import { Graph, InMemoryStorageProvider } from '@grafio/browser';
 
 async function runBrowserGraph() {
-  // 1. Initialize the purely client-side storage
+  // 1. Initialize purely client-side storage & graph (or simply `new Graph()`)
   const storage = new InMemoryStorageProvider();
-  
-  // 2. Attach the storage to a new Cypher Engine instance
-  const engine = new CypherEngine({ storage });
+  const graph = new Graph(storage);
 
   console.log("Graph initialized in the browser!");
 
-  // 3. Create some data
-  await engine.execute(`
-    CREATE (a:User {name: 'Alice', age: 28})-[:KNOWS {since: 2021}]->(b:User {name: 'Bob'})
+  // 2. Create some data synchronously (or `await graph.query(...)`)
+  graph.querySync(`
+    CREATE (a:User { name: 'Alice', age: 28 })-[:KNOWS { since: 2021 }]->(b:User { name: 'Bob' })
   `);
 
-  // 4. Query the data
-  const result = await engine.execute(`
-    MATCH (u:User)-[r:KNOWS]->(friend)
-    RETURN u.name AS userName, r.since AS knownSince, friend.name AS friendName
-  `);
+  // 3. Query the data and include the formatted execution plan
+  const result = await graph.query(
+    `MATCH (u:User)-[r:KNOWS]->(friend)
+     RETURN u.name AS userName, r.since AS knownSince, friend.name AS friendName`,
+    undefined,
+    { executionPlan: { format: 'text' } }
+  );
 
   console.log("Query Results:", result.rows);
   /* Output:
@@ -71,9 +69,8 @@ async function runBrowserGraph() {
    * ]
    */
 
-  // 5. View the execution plan (great for debugging!)
-  const formattedPlan = PlanFormatter.format(result.summary.plan);
-  console.log("Execution Plan:\n", formattedPlan);
+  // 4. Inspect the execution plan
+  console.log("Execution Plan:\n", result.executionPlan);
 }
 
 runBrowserGraph();
@@ -81,18 +78,16 @@ runBrowserGraph();
 
 ## Exporting and Persisting Data
 
-Even though `InMemoryStorageProvider` is volatile (data is lost on page refresh), it comes with a handy `.exportJSON()` method. You can use this to take a snapshot of the graph and persist it to `localStorage` or `IndexedDB`, then reload it later using `.importJSON()`!
+Even though `InMemoryStorageProvider` is in-memory (data is lost on page refresh), you can export a JSON snapshot via `graph.exportJSON()` to persist in `localStorage` or `IndexedDB`, and reload it later with `Graph.importJSON()`:
 
 ```typescript
 // Export the entire graph as a JSON object
-const snapshot = await storage.exportJSON();
+const snapshot = await graph.exportJSON();
 
 // Save it to browser Local Storage
 localStorage.setItem('myGrafioSnapshot', JSON.stringify(snapshot));
 
 // ... Later, to restore it:
-const savedData = JSON.parse(localStorage.getItem('myGrafioSnapshot'));
-const restoredStorage = new InMemoryStorageProvider();
-await restoredStorage.importJSON(savedData);
-const newEngine = new CypherEngine({ storage: restoredStorage });
+const savedData = JSON.parse(localStorage.getItem('myGrafioSnapshot')!);
+const restoredGraph = await Graph.importJSON(savedData);
 ```

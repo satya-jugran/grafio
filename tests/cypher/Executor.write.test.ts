@@ -7,6 +7,10 @@ import { Semantic } from '../../src/cypher/Semantic';
 import { Planner } from '../../src/cypher/Planner';
 import { Executor } from '../../src/cypher/executor/Executor';
 import { CypherRuntimeError } from '../../src/cypher/errors';
+import { InMemoryStorageProvider } from '../../src/storage/InMemoryStorageProvider';
+import { CachedStorageProvider } from '../../src/storage/CachedStorageProvider';
+import { CacheManager } from '../../src/storage/cache/CacheManager';
+import type { CacheConfig } from '../../src/storage/cache/CacheConfig';
 import { Edge } from '../../src';
 
 /** Helper: create a graph, run a query, return result. */
@@ -329,6 +333,65 @@ describe('Executor – Write Operations', () => {
 
       const updated = await graph.getNode(node.id);
       expect(updated!.labels).toEqual(['Person']);
+    });
+
+    it('refreshes aliased variables and bound path elements across SET and REMOVE in live and transactional queries', async () => {
+      const g = new Graph();
+      const alice = await g.addNode(['Person', 'Temp'], { name: 'Alice', age: 20 });
+      const carol = await g.addNode(['Person'], { name: 'Carol', age: 30 });
+      await g.addEdge(alice.id, carol.id, 'KNOWS');
+
+      const res = g.querySync(`
+        MATCH p = (x:Person)-[:KNOWS]->(y:Person), (alias:Person)
+        WHERE id(x) = $aid AND id(alias) = $aid
+        SET x.age = 99
+        REMOVE x:Temp
+        RETURN alias, alias.age AS aliasAge, labels(alias) AS aliasLabels, p
+      `, { aid: alice.id });
+      expect(res.rows).toHaveLength(1);
+      expect(res.rows[0].aliasAge).toBe(99);
+      expect(res.rows[0].aliasLabels).toEqual(['Person']);
+      const aliasNode = res.rows[0].alias as { properties: Record<string, unknown>; labels: string[] };
+      expect(aliasNode.properties.age).toBe(99);
+      expect(aliasNode.labels).toEqual(['Person']);
+      const pathArr = res.rows[0].p as Array<{ properties: Record<string, unknown>; labels?: string[] }>;
+      expect(pathArr[0].properties.age).toBe(99);
+      expect(pathArr[0].labels).toEqual(['Person']);
+
+      const tx = g.createTransaction();
+      await tx.begin();
+      const txRes = g.querySync(
+        `
+          MATCH (a:Person { name: 'Alice' }), (b:Person { name: 'Alice' })
+          SET a.age = 123
+          RETURN b.age AS bAge
+        `,
+        { transaction: tx },
+      );
+      await tx.rollback();
+      expect(txRes.rows).toEqual([{ bAge: 123 }]);
+    });
+
+    it('counts only labels actually removed in summary.labelsRemoved across sync and async providers', async () => {
+      const syncGraph = new Graph();
+      await syncGraph.addNode(['Admin', 'User'], { name: 'A' });
+      const syncRem = syncGraph.querySync("MATCH (n:Admin) REMOVE n:Admin:Missing RETURN n");
+      expect(syncRem.summary.labelsRemoved).toBe(1);
+
+      const cfg: CacheConfig = {
+        maxNodesCount: 200,
+        maxEdgesCount: 400,
+        cacheStore: 'in-memory',
+        evictionStrategy: 'LRU',
+        preloadStrategy: 'none',
+      };
+      const cm = new CacheManager(cfg);
+      const cached = new CachedStorageProvider(new InMemoryStorageProvider(), 'remove-label-async', cm, cfg);
+      const asyncGraph = new Graph(cached);
+      await asyncGraph.addNode(['Admin', 'User'], { name: 'A' });
+      const asyncRem = await asyncGraph.query("MATCH (n:Admin) REMOVE n:Admin:Missing RETURN n");
+      expect(asyncRem.summary.labelsRemoved).toBe(1);
+      await cm.invalidateAll();
     });
   });
 

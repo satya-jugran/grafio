@@ -1,12 +1,9 @@
 /**
- * Expression evaluator for the Cypher execution layer.
+ * Shared parameter-resolution, comparison, and evaluation helpers for
+ * the Cypher execution layer.
  *
- * Evaluates AST {@link Expression} nodes against a row (variable bindings)
- * and a parameter map.  Also provides shared parameter-resolution helpers
- * used by step executors before calling the storage layer.
- *
- * This class is stateless — it only holds evaluation logic and can be
- * shared freely across sub-executor instances.
+ * Delegates AST expression evaluation to {@link compileExpression} in
+ * {@link ClosureCompiler} while preserving Map-row compatibility for tests.
  *
  * @module cypher/executor/ExpressionEvaluator
  */
@@ -14,13 +11,97 @@
 import { Expression } from '../ast/AstNode';
 import { Node } from '../../Node';
 import { Edge } from '../../Edge';
-import { CypherRuntimeError, UnboundParameterError, TypeMismatchError } from '../errors';
+import { UnboundParameterError } from '../errors';
+import { UNBOUND, VarSlotTable, type SlotRow } from '../plan/CompiledPlanMeta';
+import type { ISyncGraphKernel } from '../../storage/IStorageProvider';
+import { compileExpression, cypherEq } from './ClosureCompiler';
 
 /**
- * Internal row representation: variable name → bound value.
+ * Internal row representation: slot-indexed tuple (`unknown[]`).
  * Shared across all executor modules.
  */
-export type Row = Map<string, unknown>;
+export type Row = SlotRow;
+export type EvalRow = SlotRow | Map<string, unknown>;
+
+/**
+ * Prefix-free, type-tagged key serialization for Cypher values.
+ * Distinguishes `1` vs `'1'`, `true` vs `'true'`, `Node('a')` vs `'a'`,
+ * arrays, plain map objects, `null`, `undefined`, and `UNBOUND`.
+ */
+export function serializeCypherKey(value: unknown): string {
+  if (value === UNBOUND) return 'u:';
+  if (value === null) return '0:null';
+  if (value === undefined) return '0:undef';
+  const t = typeof value;
+  if (t === 'number') {
+    const n = value as number;
+    if (Number.isNaN(n)) return 'n:NaN';
+    return `n:${Object.is(n, -0) ? 0 : n}`;
+  }
+  if (t === 'string') {
+    const s = value as string;
+    return `s:${s.length}:${s}`;
+  }
+  if (t === 'boolean') return (value as boolean) ? 'b:1' : 'b:0';
+  if (value instanceof Node) return `node:${value.id.length}:${value.id}`;
+  if (value instanceof Edge) return `edge:${value.id.length}:${value.id}`;
+  if (Array.isArray(value)) {
+    const parts = new Array<string>(value.length);
+    for (let i = 0; i < value.length; i++) {
+      parts[i] = serializeCypherKey(value[i]);
+    }
+    return `a:${value.length}:[${parts.join(',')}]`;
+  }
+  if (t === 'object') {
+    const rec = value as Record<string, unknown>;
+    const keys = Object.keys(rec).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    const entries = new Array<string>(keys.length);
+    for (let i = 0; i < keys.length; i++) {
+      const k = keys[i];
+      entries[i] = `${k.length}:${k}=${serializeCypherKey(rec[k])}`;
+    }
+    return `m:${keys.length}:{${entries.join(',')}}`;
+  }
+  const str = String(value);
+  return `${t}:${str.length}:${str}`;
+}
+
+/**
+ * Serialize all bound slots of a {@link Row} into a collision-free key string
+ * preserving slot indices so `{ a: 1, b: UNBOUND }` never collides with `{ a: UNBOUND, b: 1 }`.
+ */
+export function serializeSlotRowKey(row: Row, orderedSlots?: readonly number[]): string {
+  const parts: string[] = [];
+  if (orderedSlots) {
+    for (let i = 0; i < orderedSlots.length; i++) {
+      const s = orderedSlots[i];
+      const v = row[s];
+      if (v !== UNBOUND) {
+        const sk = serializeCypherKey(v);
+        parts.push(`${s}:${sk.length}:${sk}`);
+      }
+    }
+  } else {
+    for (let s = 0; s < row.length; s++) {
+      const v = row[s];
+      if (v !== UNBOUND) {
+        const sk = serializeCypherKey(v);
+        parts.push(`${s}:${sk.length}:${sk}`);
+      }
+    }
+  }
+  return parts.join('\x00');
+}
+
+function typeRank(v: unknown): number {
+  switch (typeof v) {
+    case 'boolean': return 1;
+    case 'number': return 2;
+    case 'string': return 3;
+    case 'object': return Array.isArray(v) ? 4 : 5;
+    default: return 6;
+  }
+}
 
 /** Result returned by write step executors including mutation counts. */
 export interface StepResult {
@@ -35,17 +116,15 @@ export interface StepResult {
   indexesDeleted?: number;
 }
 
+const EMPTY_SLOT_TABLE = new VarSlotTable();
+const EMPTY_SLOT_ROW: SlotRow = [];
+
 /**
  * Stateless expression evaluator and parameter resolver.
  */
 export class ExpressionEvaluator {
-  // ── Parameter resolution ────────────────────────────────────────
-
   /**
-   * Resolve a value that may be a `{ kind: 'Parameter', name: 'x' }`
-   * AST node stored by the Planner.  If the value is a Parameter object,
-   * look it up in `params` (throwing {@link UnboundParameterError}
-   * if missing).  Otherwise return the value as-is.
+   * Resolve a value that may be a `{ kind: 'Parameter', name: 'x' }` AST node.
    */
   resolveParam(value: unknown, params: Record<string, unknown>): unknown {
     if (
@@ -64,8 +143,7 @@ export class ExpressionEvaluator {
 
   /**
    * Resolve any `ParameterRef` values in a property map against the
-   * runtime parameter map, returning a plain record of primitive values
-   * suitable for the storage layer.
+   * runtime parameter map, returning a plain record of primitive values.
    */
   resolvePropertyMap(
     properties: Record<string, unknown>,
@@ -78,429 +156,77 @@ export class ExpressionEvaluator {
     return resolved;
   }
 
-  // ── Expression evaluator ─────────────────────────────────────────
-
   /**
-   * Evaluate an AST {@link Expression} against a row and parameter map.
+   * Evaluate an AST {@link Expression} against a row (`SlotRow` or `Map`) and params.
    */
   evaluate(
     expr: Expression,
-    row: Row,
+    row: EvalRow,
     params: Record<string, unknown>,
+    slotTable?: VarSlotTable,
+    kernel?: ISyncGraphKernel,
   ): unknown {
-    switch (expr.kind) {
-      case 'Literal':
-        return expr.value;
-
-      case 'Parameter': {
-        if (!(expr.name in params)) {
-          throw new UnboundParameterError(expr.name);
-        }
-        return params[expr.name];
+    if (row instanceof Map) {
+      const tempTable = new VarSlotTable();
+      for (const k of row.keys()) {
+        tempTable.getOrAdd(k);
       }
-
-      case 'Identifier': {
-        if (!row.has(expr.name)) {
-          throw new CypherRuntimeError(
-            `Variable '${expr.name}' is not bound in the current row`,
-          );
-        }
-        return row.get(expr.name);
+      const fn = compileExpression(expr, tempTable);
+      const tempRow = tempTable.createEmptyRow();
+      for (const [k, v] of row) {
+        tempRow[tempTable.lookup(k)] = v;
       }
-
-      case 'PropertyAccess': {
-        const obj = this.evaluate(expr.object, row, params);
-        if (obj === null || obj === undefined) return null;
-        if (
-          typeof obj === 'object' &&
-          'properties' in (obj as Record<string, unknown>)
-        ) {
-          const props = (obj as { properties: Record<string, unknown> })
-            .properties;
-          if (expr.property in props) {
-            return props[expr.property];
-          }
-          // Property not in user-defined properties — fall through to
-          // top-level access for built-in fields like `labels` and `id`.
-        }
-        if (typeof obj === 'object' && obj !== null) {
-          return (obj as Record<string, unknown>)[expr.property];
-        }
-        throw new TypeMismatchError(
-          `Cannot access property '${expr.property}' on ${typeof obj}`,
-        );
-      }
-
-      case 'Binary': {
-        const left = this.evaluate(expr.left, row, params);
-        const right = this.evaluate(expr.right, row, params);
-        return this.applyBinaryOp(expr.op, left, right);
-      }
-
-      case 'Unary': {
-        const operand = this.evaluate(expr.operand, row, params);
-        return this.applyUnaryOp(expr.op, operand);
-      }
-
-      case 'In': {
-        const value = this.evaluate(expr.expression, row, params);
-        const list = this.evaluate(expr.list, row, params);
-        const inResult = this.checkIn(value, list);
-        return expr.not ? !inResult : inResult;
-      }
-
-      case 'IsNull': {
-        const value = this.evaluate(expr.expression, row, params);
-        const isNull = value === null || value === undefined;
-        return expr.not ? !isNull : isNull;
-      }
-
-      case 'List': {
-        return expr.elements.map((e) => this.evaluate(e, row, params));
-      }
-
-      case 'Case': {
-        const caseExpr = expr as import('../ast/AstNode').CaseExpr;
-        const hasBase = caseExpr.expression !== undefined;
-        let baseValue: unknown = undefined;
-        if (hasBase) {
-          baseValue = this.evaluate(caseExpr.expression!, row, params);
-        }
-
-        for (const branch of caseExpr.branches) {
-          const whenVal = this.evaluate(branch.when, row, params);
-          const isMatch = hasBase ? this.eq(baseValue, whenVal) : Boolean(whenVal);
-          if (isMatch) {
-            return this.evaluate(branch.then, row, params);
-          }
-        }
-
-        if (caseExpr.else) {
-          return this.evaluate(caseExpr.else, row, params);
-        }
-        return null;
-      }
-
-      case 'ListPredicate': {
-        const predExpr = expr as import('../ast/AstNode').ListPredicateExpr;
-        const listValue = this.evaluate(predExpr.list, row, params);
-        if (listValue === null || listValue === undefined) return null;
-        if (!Array.isArray(listValue)) {
-          throw new TypeMismatchError(`List predicate requires a list, got ${typeof listValue}`);
-        }
-
-        let matchCount = 0;
-        for (const item of listValue) {
-          const newRow = new Map(row);
-          newRow.set(predExpr.variable, item);
-          const condition = this.evaluate(predExpr.where, newRow, params);
-          if (condition) matchCount++;
-        }
-
-        switch (predExpr.predicate) {
-          case 'ALL': return matchCount === listValue.length;
-          case 'ANY': return matchCount > 0;
-          case 'NONE': return matchCount === 0;
-          case 'SINGLE': return matchCount === 1;
-        }
-      }
-
-      case 'Map': {
-        const result: Record<string, unknown> = {};
-        for (const [k, v] of Object.entries(expr.props)) {
-          result[k] = this.evaluate(v, row, params);
-        }
-        return result;
-      }
-
-      case 'ListComprehension': {
-        const listValue = this.evaluate(expr.list, row, params);
-        if (listValue === null || listValue === undefined) {
-          return null;
-        }
-        if (!Array.isArray(listValue)) {
-          throw new TypeMismatchError(`List comprehension requires a list, got ${typeof listValue}`);
-        }
-
-        const result: unknown[] = [];
-        for (const item of listValue) {
-          // Create a new row binding the variable to the current item
-          const newRow = new Map(row);
-          newRow.set(expr.variable, item);
-
-          // Evaluate WHERE if present
-          if (expr.where) {
-            const whereResult = this.evaluate(expr.where, newRow, params);
-            if (!whereResult) continue; // Skip if where condition is falsy
-          }
-
-          // Evaluate projection if present, otherwise use the item
-          if (expr.projection) {
-            result.push(this.evaluate(expr.projection, newRow, params));
-          } else {
-            result.push(item);
-          }
-        }
-        return result;
-      }
-
-      case 'FunctionCall': {
-        switch (expr.name.toUpperCase()) {
-          // ── id(node|relationship) → internal UUID ─────────────
-          case 'ID': {
-            if (expr.args.length !== 1) {
-              throw new CypherRuntimeError(
-                `id() expects exactly 1 argument, got ${expr.args.length}`,
-              );
-            }
-            const arg = this.evaluate(expr.args[0], row, params);
-            if (arg && typeof arg === 'object' && 'id' in (arg as object)) {
-              return (arg as { id: string }).id;
-            }
-            // null argument → null per openCypher semantics
-            if (arg === null || arg === undefined) return null;
-            throw new CypherRuntimeError(
-              `id() requires a node or relationship argument, got ${typeof arg}`,
-            );
-          }
-
-          // ── nodes(path) → list of nodes ──────────────────────
-          case 'NODES': {
-            if (expr.args.length !== 1) {
-              throw new CypherRuntimeError(
-                `nodes() expects exactly 1 argument, got ${expr.args.length}`,
-              );
-            }
-            const arg = this.evaluate(expr.args[0], row, params);
-            if (arg === null || arg === undefined) return null;
-            if (!Array.isArray(arg)) {
-              throw new CypherRuntimeError(
-                `nodes() requires a path argument, got ${typeof arg}`,
-              );
-            }
-            // Path is [node₀, edge₀, node₁, edge₁, ..., nodeₙ].
-            // Return elements at even indices (the nodes).
-            return (arg as unknown[]).filter((_, i) => i % 2 === 0);
-          }
-
-          // ── relationships(path) → list of edges ──────────────
-          case 'RELATIONSHIPS': {
-            if (expr.args.length !== 1) {
-              throw new CypherRuntimeError(
-                `relationships() expects exactly 1 argument, got ${expr.args.length}`,
-              );
-            }
-            const arg = this.evaluate(expr.args[0], row, params);
-            if (arg === null || arg === undefined) return null;
-            if (!Array.isArray(arg)) {
-              throw new CypherRuntimeError(
-                `relationships() requires a path argument, got ${typeof arg}`,
-              );
-            }
-            // Path is [node₀, edge₀, node₁, edge₁, ..., nodeₙ].
-            // Return elements at odd indices (the edges).
-            return (arg as unknown[]).filter((_, i) => i % 2 === 1);
-          }
-
-          // ── labels(node) → list of node labels ─────────────
-          case 'LABELS': {
-            if (expr.args.length !== 1) {
-              throw new CypherRuntimeError(
-                `labels() expects exactly 1 argument, got ${expr.args.length}`,
-              );
-            }
-            const arg = this.evaluate(expr.args[0], row, params);
-            if (arg === null || arg === undefined) return null;
-            if (arg instanceof Node) {
-              return arg.labels;
-            }
-            throw new CypherRuntimeError(
-              `labels() requires a node argument, got ${typeof arg}`,
-            );
-          }
-
-          // ── type(relationship) → relationship type string ──
-          case 'TYPE': {
-            if (expr.args.length !== 1) {
-              throw new CypherRuntimeError(
-                `type() expects exactly 1 argument, got ${expr.args.length}`,
-              );
-            }
-            const arg = this.evaluate(expr.args[0], row, params);
-            if (arg === null || arg === undefined) return null;
-            if (arg instanceof Edge) {
-              return arg.type;
-            }
-            throw new CypherRuntimeError(
-              `type() requires a relationship argument, got ${typeof arg}`,
-            );
-          }
-
-          // ── size(list) → length of list ──
-          case 'SIZE': {
-            if (expr.args.length !== 1) {
-              throw new CypherRuntimeError(
-                `size() expects exactly 1 argument, got ${expr.args.length}`,
-              );
-            }
-            const arg = this.evaluate(expr.args[0], row, params);
-            if (arg === null || arg === undefined) return null;
-            if (Array.isArray(arg)) {
-              return arg.length;
-            }
-            throw new CypherRuntimeError(
-              `size() requires a list argument, got ${typeof arg}`,
-            );
-          }
-
-          default:
-            throw new CypherRuntimeError(
-              `Function '${expr.name}' is not yet supported`,
-            );
-        }
-      }
-
-      case 'ExistsSubquery': {
-        throw new CypherRuntimeError(
-          `ExistsSubquery must be extracted by Planner into ExistsSubqueryStep before evaluation`,
-        );
-      }
-
-      case 'PatternComprehension': {
-        throw new CypherRuntimeError(
-          `PatternComprehension must be extracted by Planner into PatternComprehensionStep before evaluation`,
-        );
-      }
-
-      case 'PatternExpr': {
-        throw new CypherRuntimeError(
-          `PatternExpr must be extracted by Planner into PatternExprStep before evaluation`,
-        );
-      }
-
-      default:
-        throw new CypherRuntimeError(
-          `Unsupported expression kind: '${(expr as Expression).kind}'`,
-        );
+      return fn(tempRow, params, kernel);
     }
+    return compileExpression(expr, slotTable ?? EMPTY_SLOT_TABLE)(row, params, kernel);
   }
 
-  // ── Operator helpers ─────────────────────────────────────────────
-
+  /**
+   * Evaluate a single binary operator via the compiled expression path.
+   */
   applyBinaryOp(op: string, left: unknown, right: unknown): unknown {
-    switch (op) {
-      case 'AND':
-        return Boolean(left) && Boolean(right);
-      case 'OR':
-        return Boolean(left) || Boolean(right);
-      case 'XOR':
-        return Boolean(left) !== Boolean(right);
-      case '=':
-        return this.eq(left, right);
-      case '<>':
-        return !this.eq(left, right);
-      case '=~':
-        if (left == null || right == null) {
-          return null;
-        }
-        if (typeof left !== 'string' || typeof right !== 'string') {
-          return false;
-        }
-        try {
-          // OpenCypher requires regex to match the entire string.
-          // Add ^ and $ if not present, unless we assume user regex already has them or we want to do strict full match
-          let pattern = right;
-          if (!pattern.startsWith('^')) pattern = '^' + pattern;
-          if (!pattern.endsWith('$')) pattern = pattern + '$';
-          return new RegExp(pattern).test(left);
-        } catch (e) {
-          throw new CypherRuntimeError(`Invalid regular expression: ${right}`);
-        }
-      case '<':
-        return (left as number) < (right as number);
-      case '<=':
-        return (left as number) <= (right as number);
-      case '>':
-        return (left as number) > (right as number);
-      case '>=':
-        return (left as number) >= (right as number);
-      case '+':
-        return (left as number) + (right as number);
-      case '-':
-        return (left as number) - (right as number);
-      case '*':
-        return (left as number) * (right as number);
-      case '/':
-        if ((right as number) === 0)
-          throw new CypherRuntimeError('Division by zero');
-        return (left as number) / (right as number);
-      case '%':
-        if ((right as number) === 0)
-          throw new CypherRuntimeError('Modulo by zero');
-        return (left as number) % (right as number);
-      case '^':
-        return Math.pow(left as number, right as number);
-      case 'STARTS WITH':
-        if (left == null || right == null) return null;
-        if (typeof left !== 'string' || typeof right !== 'string') return false;
-        return left.startsWith(right);
-      case 'ENDS WITH':
-        if (left == null || right == null) return null;
-        if (typeof left !== 'string' || typeof right !== 'string') return false;
-        return left.endsWith(right);
-      case 'CONTAINS':
-        if (left == null || right == null) return null;
-        if (typeof left !== 'string' || typeof right !== 'string') return false;
-        return left.includes(right);
-      default:
-        throw new CypherRuntimeError(`Unknown operator: ${op}`);
-    }
+    const expr = {
+      kind: 'Binary',
+      op,
+      left: { kind: 'Literal', value: left },
+      right: { kind: 'Literal', value: right },
+    } as unknown as Expression;
+    return compileExpression(expr, EMPTY_SLOT_TABLE)(EMPTY_SLOT_ROW, {});
   }
 
-  applyUnaryOp(op: string, operand: unknown): unknown {
-    switch (op) {
-      case 'NOT':
-        return !Boolean(operand);
-      case '-':
-        return -(operand as number);
-      default:
-        throw new CypherRuntimeError(`Unknown unary operator: ${op}`);
-    }
-  }
-
+  /**
+   * openCypher equality semantics (delegates to {@link cypherEq}).
+   */
   eq(a: unknown, b: unknown): boolean {
-    if (a === null && b === null) return true;
-    if (a === undefined && b === undefined) return true;
-    if (a === null || b === null) return false;
-    if (a === undefined || b === undefined) return false;
-    if (
-      typeof a === 'object' &&
-      typeof b === 'object' &&
-      'id' in (a as object) &&
-      'id' in (b as object)
-    ) {
-      return (a as { id: string }).id === (b as { id: string }).id;
-    }
-    return a === b;
+    return cypherEq(a, b);
   }
 
-  checkIn(value: unknown, list: unknown): boolean {
-    if (!Array.isArray(list)) {
-      throw new TypeMismatchError(
-        `Right-hand side of IN must be a list, got ${typeof list}`,
-      );
-    }
-    return list.some((item) => this.eq(value, item));
-  }
-
+  /**
+   * Deterministic UTF-16 total ordering comparator for ORDER BY / MIN / MAX.
+   */
   compare(a: unknown, b: unknown): number {
     if (a === b) return 0;
     if (a === null || a === undefined) return -1;
     if (b === null || b === undefined) return 1;
-    if (typeof a === 'string' && typeof b === 'string') return a.localeCompare(b);
-    if (typeof a === 'number' && typeof b === 'number') return a - b;
-    if (typeof a === 'boolean' && typeof b === 'boolean')
-      return a === b ? 0 : a ? 1 : -1;
-    return String(a).localeCompare(String(b));
+    if (typeof a === 'number' && typeof b === 'number') {
+      const aNaN = Number.isNaN(a);
+      const bNaN = Number.isNaN(b);
+      if (aNaN && bNaN) return 0;
+      if (aNaN) return 1;
+      if (bNaN) return -1;
+      return a < b ? -1 : a > b ? 1 : 0;
+    }
+    if (typeof a === 'string' && typeof b === 'string') {
+      return a < b ? -1 : a > b ? 1 : 0;
+    }
+    if (typeof a === 'boolean' && typeof b === 'boolean') {
+      return a ? 1 : -1;
+    }
+    const rankA = typeRank(a);
+    const rankB = typeRank(b);
+    if (rankA !== rankB) return rankA - rankB;
+    const ka = serializeCypherKey(a);
+    const kb = serializeCypherKey(b);
+    return ka < kb ? -1 : ka > kb ? 1 : 0;
   }
 }

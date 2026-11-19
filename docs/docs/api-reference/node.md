@@ -16,7 +16,7 @@ import { Node } from 'grafio';
 readonly id: string
 ```
 
-Unique identifier (auto-generated UUID).
+Unique identifier (defaults to compact `@n<slot>:<gen>` on `InMemoryStorageProvider`, or RFC-4122 UUID with `idStrategy: 'uuid'`, or an explicit custom string ID).
 
 ### labels
 
@@ -93,7 +93,8 @@ const node = await graph.addNode('Person', { name: 'Alice' });
 node.properties.name = 'Bob'; // TypeError: Cannot assign to read only property
 ```
 
-To modify, use Graph's property update methods:
+To modify, use `Graph`'s property patch methods:
 
 ```typescript
-await graph.updateNodeProperty(node.id, 'name', 'Bob');
+await graph.setNodeProperties(node.id, { name: 'Bob' });
+```

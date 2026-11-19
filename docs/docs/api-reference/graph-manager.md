@@ -26,8 +26,15 @@ interface GraphManagerConfig {
 
 ### Example
 
+`GraphManager` provides application-scoped cache configuration for remote/async storage providers (such as `grafio-mongo` or `CachedStorageProvider` wrappers). `InMemoryGraphFactory` binds directly to `InMemoryStorageProvider` without redundant cache wrapping.
+
 ```typescript
-import { GraphManager, InMemoryStorageProvider } from 'grafio';
+import {
+  Graph,
+  GraphManager,
+  CachedStorageProvider,
+  InMemoryStorageProvider,
+} from 'grafio';
 
 GraphManager.init({
   cache: {
@@ -36,26 +43,36 @@ GraphManager.init({
     cacheStore: 'in-memory',
     evictionStrategy: 'LRU',
     preloadStrategy: 'none',
-  }
+  },
 });
 
-// Graph instances created via factory use caching automatically when enabled
-const factory = new InMemoryGraphFactory();
-const graph = factory.forGraph();
+const manager = GraphManager.getInstance();
+const cacheManager = manager.getCacheManager()!;
+const cacheConfig = manager.getConfig().cache!;
+const backingProvider = new InMemoryStorageProvider({ graphId: 'remote-demo' });
+const cachedProvider = new CachedStorageProvider(
+  backingProvider,
+  'remote-demo',
+  cacheManager,
+  cacheConfig,
+);
+const graph = new Graph(cachedProvider);
 ```
 
-## getCacheManager()
+## getInstance() & getCacheManager()
 
 ```typescript
-static getCacheManager(): CacheManager | undefined
+static getInstance(): GraphManager
+getCacheManager(): CacheManager | null
 ```
 
-Returns the CacheManager instance if initialized with cache config.
+Returns the active `CacheManager` instance if initialized with a `cache` config:
 
 ```typescript
-const cacheManager = GraphManager.getCacheManager();
+const cacheManager = GraphManager.getInstance().getCacheManager();
 if (cacheManager) {
-  const stats = cacheManager.getStats('default');
+  const stats = cacheManager.getStats();
+  console.log(stats.hitCount, stats.missCount, stats.hitRate);
 }
 ```
 

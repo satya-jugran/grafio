@@ -19,19 +19,40 @@
  */
 
 import {
+  Statement,
   QueryAst,
   Expression,
+  MatchClause,
+  MatchPattern,
   NodePattern,
   EdgePattern,
   IdentifierExpr,
   getPatternSegments,
 } from './ast/AstNode';
-import { QueryPlan, PlanStep } from './plan/QueryPlan';
+import {
+  QueryPlan,
+  PlanStep,
+  AggregateStep,
+  ExistsSubqueryStep,
+  PatternComprehensionStep,
+  PatternExprStep,
+  RemoveLabelStep,
+  PropertyFilter,
+} from './plan/QueryPlan';
 import { WhereDecomposer, VarInfo } from './plan/WhereDecomposer';
 import { JoinReorderer } from './plan/JoinReorderer';
 import { PatternPlanner } from './plan/PatternPlanner';
 import { ProjectionPlanner } from './plan/ProjectionPlanner';
+import { getOrBuildCompiledPlanMeta } from './plan/CompiledPlanMeta';
 import type { Graph } from '../Graph';
+
+interface PreparedMatchClause {
+  varRegistry: Map<string, VarInfo>;
+  perVar: Map<string, PropertyFilter[]>;
+  crossVar: Expression[];
+  idLookups: Map<string, unknown>;
+  orderedPatterns: MatchPattern[];
+}
 
 // ── Planner ────────────────────────────────────────────────────────
 
@@ -40,10 +61,11 @@ import type { Graph } from '../Graph';
  *
  * Usage:
  * ```typescript
- * const plan = new Planner().plan(typedAst);
+ * const plan = new Planner().planSync(typedAst);
  * ```
  */
 export class Planner {
+  private readonly _graph?: Graph;
   private readonly _whereDecomposer: WhereDecomposer;
   private readonly _reorderer: JoinReorderer;
   private readonly _patternPlanner = new PatternPlanner();
@@ -54,26 +76,208 @@ export class Planner {
    *   When absent, indexed properties score the same as non-indexed (10).
    */
   constructor(graph?: Graph) {
+    this._graph = graph;
     this._whereDecomposer = new WhereDecomposer();
     this._reorderer = new JoinReorderer(graph);
   }
 
   /**
-   * Translate a typed AST into a {@link QueryPlan}.
+   * Translate a typed AST into a {@link QueryPlan} asynchronously.
+   * Delegates immediately to {@link planSync} when no Graph is attached or
+   * when backed by an in-memory synchronous kernel.
    */
-  public async plan(originalAst: import('./ast/AstNode').Statement): Promise<QueryPlan> {
-    const ast = JSON.parse(JSON.stringify(originalAst)) as import('./ast/AstNode').Statement;
+  public async plan(originalAst: Statement): Promise<QueryPlan> {
+    if (!this._graph || this._graph._getSyncKernel()) {
+      return this.planSync(originalAst);
+    }
+
+    const preparedMatches = new WeakMap<MatchClause, PreparedMatchClause>();
+    await this._collectPreparedMatchesAsync(originalAst, preparedMatches);
+    return this._planInternalSync(originalAst, preparedMatches);
+  }
+
+  /**
+   * Translate a typed AST into a {@link QueryPlan} synchronously without
+   * mutating or JSON-cloning the input AST.
+   */
+  public planSync(originalAst: Statement): QueryPlan {
+    return this._planInternalSync(originalAst, undefined);
+  }
+
+  // ── Async pre-preparation for non-kernel storage providers ─────
+
+  private async _collectPreparedMatchesAsync(
+    stmt: Statement,
+    out: WeakMap<MatchClause, PreparedMatchClause>,
+  ): Promise<void> {
+    if (stmt.kind === 'Union') {
+      for (const q of stmt.queries) {
+        await this._collectPreparedMatchesAsync(q, out);
+      }
+      return;
+    }
+
+    if (stmt.segments) {
+      for (const seg of stmt.segments) {
+        for (const rc of seg.readingClauses) {
+          if (rc.kind === 'Match') {
+            await this._prepareMatchClauseAsync(rc, out);
+          } else if (rc.kind === 'Unwind') {
+            await this._collectExprMatchesAsync(rc.expression, out);
+          }
+        }
+        if (seg.merge) {
+          for (const m of seg.merge) {
+            for (const a of m.actions) {
+              for (const it of a.items) {
+                await this._collectExprMatchesAsync(it.value, out);
+              }
+            }
+          }
+        }
+        if (seg.set) {
+          for (const it of seg.set.items) {
+            await this._collectExprMatchesAsync(it.value, out);
+          }
+        }
+        for (const it of seg.with.items) {
+          await this._collectExprMatchesAsync(it.expression, out);
+        }
+        if (seg.with.where) {
+          await this._collectExprMatchesAsync(seg.with.where.expression, out);
+        }
+      }
+    }
+
+    for (const rc of stmt.readingClauses) {
+      if (rc.kind === 'Match') {
+        await this._prepareMatchClauseAsync(rc, out);
+      } else if (rc.kind === 'Unwind') {
+        await this._collectExprMatchesAsync(rc.expression, out);
+      }
+    }
+    if (stmt.merge) {
+      for (const m of stmt.merge) {
+        for (const a of m.actions) {
+          for (const it of a.items) {
+            await this._collectExprMatchesAsync(it.value, out);
+          }
+        }
+      }
+    }
+    if (stmt.set) {
+      for (const it of stmt.set.items) {
+        await this._collectExprMatchesAsync(it.value, out);
+      }
+    }
+    if (stmt.orderBy) {
+      for (const it of stmt.orderBy.items) {
+        await this._collectExprMatchesAsync(it.expression, out);
+      }
+    }
+    for (const it of stmt.return.items) {
+      await this._collectExprMatchesAsync(it.expression, out);
+    }
+  }
+
+  private async _prepareMatchClauseAsync(
+    matchClause: MatchClause,
+    out: WeakMap<MatchClause, PreparedMatchClause>,
+  ): Promise<void> {
+    if (!out.has(matchClause)) {
+      const varRegistry = this._whereDecomposer.collectVariables(matchClause.patterns);
+      const { perVar, crossVar } = matchClause.where
+        ? this._whereDecomposer.decompose(matchClause.where.expression, varRegistry)
+        : { perVar: new Map(), crossVar: [] as Expression[] };
+      const idLookups = this._reorderer.detectIdLookups(crossVar, varRegistry);
+      const orderedPatterns = await this._reorderer.reorder(
+        matchClause.patterns,
+        varRegistry,
+        perVar,
+        idLookups,
+      );
+      out.set(matchClause, {
+        varRegistry,
+        perVar,
+        crossVar,
+        idLookups,
+        orderedPatterns,
+      });
+    }
+    if (matchClause.where) {
+      await this._collectExprMatchesAsync(matchClause.where.expression, out);
+    }
+  }
+
+  private async _collectExprMatchesAsync(
+    expr: Expression,
+    out: WeakMap<MatchClause, PreparedMatchClause>,
+  ): Promise<void> {
+    switch (expr.kind) {
+      case 'ExistsSubquery':
+        await this._prepareMatchClauseAsync(expr.match, out);
+        return;
+      case 'PropertyAccess':
+        await this._collectExprMatchesAsync(expr.object, out);
+        return;
+      case 'Binary':
+        await this._collectExprMatchesAsync(expr.left, out);
+        await this._collectExprMatchesAsync(expr.right, out);
+        return;
+      case 'Unary':
+        await this._collectExprMatchesAsync(expr.operand, out);
+        return;
+      case 'In':
+        await this._collectExprMatchesAsync(expr.expression, out);
+        await this._collectExprMatchesAsync(expr.list, out);
+        return;
+      case 'IsNull':
+        await this._collectExprMatchesAsync(expr.expression, out);
+        return;
+      case 'List':
+        for (const e of expr.elements) await this._collectExprMatchesAsync(e, out);
+        return;
+      case 'ListComprehension':
+        await this._collectExprMatchesAsync(expr.list, out);
+        if (expr.where) await this._collectExprMatchesAsync(expr.where, out);
+        if (expr.projection) await this._collectExprMatchesAsync(expr.projection, out);
+        return;
+      case 'PatternComprehension':
+        if (expr.where) await this._collectExprMatchesAsync(expr.where, out);
+        await this._collectExprMatchesAsync(expr.projection, out);
+        return;
+      case 'Map':
+        for (const v of Object.values(expr.props)) {
+          await this._collectExprMatchesAsync(v, out);
+        }
+        return;
+      case 'FunctionCall':
+        for (const a of expr.args) await this._collectExprMatchesAsync(a, out);
+        return;
+      default:
+        return;
+    }
+  }
+
+  // ── Shared synchronous core planner ─────────────────────────────
+
+  private _planInternalSync(
+    ast: Statement,
+    preparedMatches?: WeakMap<MatchClause, PreparedMatchClause>,
+  ): QueryPlan {
     if (ast.kind === 'Union') {
       const plans: QueryPlan[] = [];
       for (const query of ast.queries) {
-        plans.push(await this.plan(query));
+        plans.push(this._planInternalSync(query, preparedMatches));
       }
-      const steps: PlanStep[] = [{
-        kind: 'UnionStep',
-        plans,
-        all: ast.all,
-      }];
-      
+      const steps: PlanStep[] = [
+        {
+          kind: 'UnionStep',
+          plans,
+          all: ast.all,
+        },
+      ];
+
       const projectionAst: QueryAst = {
         kind: 'Query',
         segments: [],
@@ -87,7 +291,9 @@ export class Planner {
       if (ast.skip || ast.limit) {
         steps.push(this._projPlanner.planLimit({ ...projectionAst, skip: ast.skip, limit: ast.limit }));
       }
-      return { steps };
+      const unionPlan: QueryPlan = { steps };
+      getOrBuildCompiledPlanMeta(unionPlan);
+      return unionPlan;
     }
 
     const steps: PlanStep[] = [];
@@ -103,14 +309,24 @@ export class Planner {
           set: segment.set,
           delete: segment.delete,
           remove: segment.remove,
-          return: { kind: 'Return', distinct: segment.with.distinct, items: segment.with.items },
+          return: {
+            kind: 'Return',
+            distinct: segment.with.distinct,
+            items: segment.with.items,
+          },
           segments: [],
         };
-        await this._planSegment(fakeAst, steps, knownVars, segment.with.star);
+        this._planSegmentSync(fakeAst, steps, knownVars, segment.with.star, preparedMatches);
 
         if (segment.with.where) {
           const patternExprVars = new Set<string>();
-          const rewritten = await this._extractSubqueries(segment.with.where.expression, steps, knownVars, patternExprVars);
+          const rewritten = this._extractSubqueriesSync(
+            segment.with.where.expression,
+            steps,
+            knownVars,
+            patternExprVars,
+            preparedMatches,
+          );
           steps.push({
             kind: 'FilterStep',
             predicate: this._rewritePatternExprsAsPredicate(rewritten, patternExprVars),
@@ -120,153 +336,286 @@ export class Planner {
           steps.push(this._projPlanner.planSort({ ...fakeAst, orderBy: segment.with.orderBy }));
         }
         if (segment.with.skip || segment.with.limit) {
-          steps.push(this._projPlanner.planLimit({ ...fakeAst, skip: segment.with.skip, limit: segment.with.limit }));
+          steps.push(
+            this._projPlanner.planLimit({ ...fakeAst, skip: segment.with.skip, limit: segment.with.limit }),
+          );
         }
       }
     }
 
-    // Now plan the final segment
-    await this._planSegment(ast, steps, knownVars, false);
+    // Plan the final segment without mutating originalAst
+    this._planSegmentSync(ast, steps, knownVars, false, preparedMatches);
 
-    return { steps };
+    const plan: QueryPlan = { steps };
+    getOrBuildCompiledPlanMeta(plan);
+    return plan;
   }
 
-  private async _extractSubqueries(expr: Expression, steps: PlanStep[], knownVars: Set<string>, patternExprVars?: Set<string>): Promise<Expression> {
+  private _cloneMatchPattern(pattern: MatchPattern): MatchPattern {
+    if (pattern.kind === 'NamedPath') {
+      return {
+        ...pattern,
+        pattern: {
+          ...pattern.pattern,
+          segments: pattern.pattern.segments.map((s) => ({ ...s })),
+        },
+      };
+    }
+    return {
+      ...pattern,
+      segments: pattern.segments.map((s) => ({ ...s })),
+    };
+  }
+
+  private _extractSubqueriesSync(
+    expr: Expression,
+    steps: PlanStep[],
+    knownVars: Set<string>,
+    patternExprVars?: Set<string>,
+    preparedMatches?: WeakMap<MatchClause, PreparedMatchClause>,
+  ): Expression {
     switch (expr.kind) {
       case 'ExistsSubquery': {
         const varName = this._patternPlanner._syntheticVar('exists', steps.length);
         const subPlanSteps: PlanStep[] = [];
-        
+
         const fakeAst: QueryAst = {
           kind: 'Query',
           readingClauses: [expr.match],
           return: { kind: 'Return', distinct: false, items: [] },
           segments: [],
         };
-        
-        await this._planSegment(fakeAst, subPlanSteps, new Set(knownVars), false);
-        
-        if (subPlanSteps.length > 0 && subPlanSteps[subPlanSteps.length - 1].kind === 'ProjectStep') {
+
+        this._planSegmentSync(fakeAst, subPlanSteps, new Set(knownVars), false, preparedMatches);
+
+        if (
+          subPlanSteps.length > 0 &&
+          subPlanSteps[subPlanSteps.length - 1].kind === 'ProjectStep'
+        ) {
           subPlanSteps.pop();
         }
-        
+
         subPlanSteps.push({ kind: 'LimitStep', limitExpr: { kind: 'Literal', value: 1 } });
-        
+
         steps.push({
           kind: 'ExistsSubqueryStep',
           subPlan: subPlanSteps,
           resultVariable: varName,
-        } as import('./plan/QueryPlan').ExistsSubqueryStep);
-        
-        knownVars.add(varName);
+        } as ExistsSubqueryStep);
 
+        knownVars.add(varName);
         return { kind: 'Identifier', name: varName };
       }
-      
+
       case 'PropertyAccess': {
-        const obj = await this._extractSubqueries(expr.object, steps, knownVars, patternExprVars);
+        const obj = this._extractSubqueriesSync(
+          expr.object,
+          steps,
+          knownVars,
+          patternExprVars,
+          preparedMatches,
+        );
         return { ...expr, object: obj };
       }
       case 'Binary': {
-        const left = await this._extractSubqueries(expr.left, steps, knownVars, patternExprVars);
-        const right = await this._extractSubqueries(expr.right, steps, knownVars, patternExprVars);
+        const left = this._extractSubqueriesSync(
+          expr.left,
+          steps,
+          knownVars,
+          patternExprVars,
+          preparedMatches,
+        );
+        const right = this._extractSubqueriesSync(
+          expr.right,
+          steps,
+          knownVars,
+          patternExprVars,
+          preparedMatches,
+        );
         return { ...expr, left, right };
       }
       case 'Unary': {
-        const operand = await this._extractSubqueries(expr.operand, steps, knownVars, patternExprVars);
+        const operand = this._extractSubqueriesSync(
+          expr.operand,
+          steps,
+          knownVars,
+          patternExprVars,
+          preparedMatches,
+        );
         return { ...expr, operand };
       }
       case 'In': {
-        const e1 = await this._extractSubqueries(expr.expression, steps, knownVars, patternExprVars);
-        const e2 = await this._extractSubqueries(expr.list, steps, knownVars, patternExprVars);
+        const e1 = this._extractSubqueriesSync(
+          expr.expression,
+          steps,
+          knownVars,
+          patternExprVars,
+          preparedMatches,
+        );
+        const e2 = this._extractSubqueriesSync(
+          expr.list,
+          steps,
+          knownVars,
+          patternExprVars,
+          preparedMatches,
+        );
         return { ...expr, expression: e1, list: e2 };
       }
       case 'IsNull': {
-        const e = await this._extractSubqueries(expr.expression, steps, knownVars, patternExprVars);
+        const e = this._extractSubqueriesSync(
+          expr.expression,
+          steps,
+          knownVars,
+          patternExprVars,
+          preparedMatches,
+        );
         return { ...expr, expression: e };
       }
       case 'List': {
-        const elems: import('./ast/AstNode').Expression[] = [];
+        const elems: Expression[] = [];
         for (const e of expr.elements) {
-          elems.push(await this._extractSubqueries(e, steps, knownVars, patternExprVars));
+          elems.push(
+            this._extractSubqueriesSync(e, steps, knownVars, patternExprVars, preparedMatches),
+          );
         }
         return { ...expr, elements: elems };
       }
       case 'ListComprehension': {
-        const list = await this._extractSubqueries(expr.list, steps, knownVars, patternExprVars);
-        const where = expr.where ? await this._extractSubqueries(expr.where, steps, knownVars, patternExprVars) : undefined;
-        const projection = expr.projection ? await this._extractSubqueries(expr.projection, steps, knownVars, patternExprVars) : undefined;
+        const list = this._extractSubqueriesSync(
+          expr.list,
+          steps,
+          knownVars,
+          patternExprVars,
+          preparedMatches,
+        );
+        const where = expr.where
+          ? this._extractSubqueriesSync(expr.where, steps, knownVars, patternExprVars, preparedMatches)
+          : undefined;
+        const projection = expr.projection
+          ? this._extractSubqueriesSync(
+              expr.projection,
+              steps,
+              knownVars,
+              patternExprVars,
+              preparedMatches,
+            )
+          : undefined;
         return { ...expr, list, where, projection };
       }
       case 'PatternComprehension': {
         const varName = this._patternPlanner._syntheticVar('comp', steps.length);
         const subPlanSteps: PlanStep[] = [];
-        const pathVariables = this._patternPlanner.assignAndExtractPathVariables(expr.pattern, subPlanSteps);
+        const clonedPattern = this._cloneMatchPattern(expr.pattern);
+        const pathVariables = this._patternPlanner.assignAndExtractPathVariables(
+          clonedPattern,
+          subPlanSteps,
+        );
         const localKnownVars = new Set([...knownVars, ...pathVariables]);
-        
+
         const fakeAst: QueryAst = {
           kind: 'Query',
           readingClauses: [],
           return: { kind: 'Return', distinct: false, items: [] },
           segments: [],
         };
-        
-        this._patternPlanner.planPath(expr.pattern, subPlanSteps, fakeAst, new Map(), undefined, undefined, knownVars);
-        
-        const where = expr.where ? await this._extractSubqueries(expr.where, subPlanSteps, localKnownVars) : undefined;
+
+        this._patternPlanner.planPath(
+          clonedPattern,
+          subPlanSteps,
+          fakeAst,
+          new Map(),
+          undefined,
+          undefined,
+          knownVars,
+        );
+
+        const where = expr.where
+          ? this._extractSubqueriesSync(
+              expr.where,
+              subPlanSteps,
+              localKnownVars,
+              undefined,
+              preparedMatches,
+            )
+          : undefined;
         if (where) {
           subPlanSteps.push({ kind: 'FilterStep', predicate: where });
         }
-        
-        const projection = await this._extractSubqueries(expr.projection, subPlanSteps, localKnownVars);
-        
+
+        const projection = this._extractSubqueriesSync(
+          expr.projection,
+          subPlanSteps,
+          localKnownVars,
+          undefined,
+          preparedMatches,
+        );
+
         steps.push({
           kind: 'PatternComprehensionStep',
           subPlan: subPlanSteps,
           projection,
           resultVariable: varName,
-        } as import('./plan/QueryPlan').PatternComprehensionStep);
-        
+        } as PatternComprehensionStep);
+
         knownVars.add(varName);
         return { kind: 'Identifier', name: varName };
       }
       case 'PatternExpr': {
         const varName = this._patternPlanner._syntheticVar('pexpr', steps.length);
         const subPlanSteps: PlanStep[] = [];
-        const pathVariables = this._patternPlanner.assignAndExtractPathVariables(expr.pattern, subPlanSteps);
-        
+        const clonedPattern = this._cloneMatchPattern(expr.pattern);
+        const pathVariables = this._patternPlanner.assignAndExtractPathVariables(
+          clonedPattern,
+          subPlanSteps,
+        );
+
         const fakeAst: QueryAst = {
           kind: 'Query',
           readingClauses: [],
           return: { kind: 'Return', distinct: false, items: [] },
           segments: [],
         };
-        
-        this._patternPlanner.planPath(expr.pattern, subPlanSteps, fakeAst, new Map(), undefined, undefined, knownVars);
-        
+
+        this._patternPlanner.planPath(
+          clonedPattern,
+          subPlanSteps,
+          fakeAst,
+          new Map(),
+          undefined,
+          undefined,
+          knownVars,
+        );
+
         steps.push({
           kind: 'PatternExprStep',
           subPlan: subPlanSteps,
           pathVariables,
           resultVariable: varName,
-        } as import('./plan/QueryPlan').PatternExprStep);
-        
+        } as PatternExprStep);
+
         knownVars.add(varName);
-        // Track this variable so predicate call sites can rewrite it to size(x) > 0
         patternExprVars?.add(varName);
         return { kind: 'Identifier', name: varName };
       }
       case 'Map': {
         const props: Record<string, Expression> = {};
         for (const [k, v] of Object.entries(expr.props)) {
-          props[k] = await this._extractSubqueries(v, steps, knownVars, patternExprVars);
+          props[k] = this._extractSubqueriesSync(
+            v,
+            steps,
+            knownVars,
+            patternExprVars,
+            preparedMatches,
+          );
         }
         return { ...expr, props };
       }
       case 'FunctionCall': {
-        const args: import('./ast/AstNode').Expression[] = [];
+        const args: Expression[] = [];
         for (const a of expr.args) {
-          args.push(await this._extractSubqueries(a, steps, knownVars, patternExprVars));
+          args.push(
+            this._extractSubqueriesSync(a, steps, knownVars, patternExprVars, preparedMatches),
+          );
         }
         return { ...expr, args };
       }
@@ -283,18 +632,20 @@ export class Planner {
    * result variable of a {@link PatternExprStep} with `size(x) > 0`.
    *
    * Per openCypher spec a bare pattern expression evaluates to a list of
-   * paths, so `size(paths) > 0` is the correct existence check.  Without
+   * paths, so `size(paths) > 0` is the correct existence check. Without
    * this rewrite, `Boolean([])` in the FilterStep executor returns `true`
    * for an empty list, letting non-matching rows through.
    */
-  private _rewritePatternExprsAsPredicate(expr: Expression, patternExprVars: Set<string>): Expression {
+  private _rewritePatternExprsAsPredicate(
+    expr: Expression,
+    patternExprVars: Set<string>,
+  ): Expression {
     if (patternExprVars.size === 0) return expr;
 
     const rewrite = (e: Expression): Expression => {
       switch (e.kind) {
         case 'Identifier':
           if (patternExprVars.has(e.name)) {
-            // Replace bare pattern-expr variable with size(x) > 0
             return {
               kind: 'Binary',
               op: '>',
@@ -320,14 +671,25 @@ export class Planner {
     return rewrite(expr);
   }
 
-  private async _planSegment(ast: QueryAst, steps: PlanStep[], knownVars: Set<string>, isWithStar: boolean): Promise<void> {
-
-    // ── Process each MATCH / OPTIONAL MATCH / UNWIND clause ─────────────────
+  private _planSegmentSync(
+    ast: QueryAst,
+    steps: PlanStep[],
+    knownVars: Set<string>,
+    isWithStar: boolean,
+    preparedMatches?: WeakMap<MatchClause, PreparedMatchClause>,
+  ): void {
+    // ── Process each MATCH / OPTIONAL MATCH / UNWIND clause ─────────
     for (const clause of ast.readingClauses) {
       if (clause.kind === 'Match') {
-        await this._planMatchClause(clause, steps, knownVars, ast);
+        this._planMatchClauseSync(clause, steps, knownVars, ast, preparedMatches);
       } else if (clause.kind === 'Unwind') {
-        const expr = await this._extractSubqueries(clause.expression, steps, knownVars);
+        const expr = this._extractSubqueriesSync(
+          clause.expression,
+          steps,
+          knownVars,
+          undefined,
+          preparedMatches,
+        );
         steps.push({
           kind: 'UnwindStep',
           expression: expr,
@@ -337,35 +699,61 @@ export class Planner {
       }
     }
 
-    // ── NEW: Emit CREATE steps ─────────────────────────────────────
+    // ── Emit CREATE steps ───────────────────────────────────────────
     if (ast.create) {
       for (const pattern of ast.create.patterns) {
         this._planCreatePath(pattern, steps, knownVars);
       }
     }
 
-    // ── NEW: Emit MERGE steps ──────────────────────────────────────
+    // ── Emit MERGE steps ────────────────────────────────────────────
     if (ast.merge) {
       for (const mergeClause of ast.merge) {
-        const onCreateItems: Array<{ variable: string; property?: string; operator: '=' | '+='; value: Expression; entityKind: 'node' | 'edge' }> = [];
-        const onMatchItems: Array<{ variable: string; property?: string; operator: '=' | '+='; value: Expression; entityKind: 'node' | 'edge' }> = [];
+        const onCreateItems: Array<{
+          variable: string;
+          property?: string;
+          operator: '=' | '+=';
+          value: Expression;
+          entityKind: 'node' | 'edge';
+        }> = [];
+        const onMatchItems: Array<{
+          variable: string;
+          property?: string;
+          operator: '=' | '+=';
+          value: Expression;
+          entityKind: 'node' | 'edge';
+        }> = [];
         for (const action of mergeClause.actions) {
           const arr = action.onMatch ? onMatchItems : onCreateItems;
           for (const item of action.items) {
-            item.value = await this._extractSubqueries(item.value, steps, knownVars);
+            const valExpr = this._extractSubqueriesSync(
+              item.value,
+              steps,
+              knownVars,
+              undefined,
+              preparedMatches,
+            );
             const varName = (item.variable as IdentifierExpr).name;
             const entityKind = this._resolveEntityKind(varName, ast);
             arr.push({
               variable: varName,
               property: item.property,
               operator: item.operator,
-              value: item.value,
-              entityKind
+              value: valExpr,
+              entityKind,
             });
           }
         }
         const readSteps: PlanStep[] = [];
-        this._patternPlanner.planPath(mergeClause.pattern, readSteps, ast, new Map(), undefined, undefined, knownVars);
+        this._patternPlanner.planPath(
+          mergeClause.pattern,
+          readSteps,
+          ast,
+          new Map(),
+          undefined,
+          undefined,
+          knownVars,
+        );
 
         const createSteps: PlanStep[] = [];
         this._planCreatePath(mergeClause.pattern, createSteps, new Set(knownVars));
@@ -376,10 +764,9 @@ export class Planner {
           readSteps,
           createSteps,
           onCreateItems,
-          onMatchItems
+          onMatchItems,
         });
 
-        // Add variables to knownVars so subsequent SET/DELETE steps know they are bound
         const segments = getPatternSegments(mergeClause.pattern);
         if (mergeClause.pattern.kind === 'NamedPath' && mergeClause.pattern.name) {
           knownVars.add(mergeClause.pattern.name);
@@ -390,10 +777,16 @@ export class Planner {
       }
     }
 
-    // ── NEW: Emit SET steps ────────────────────────────────────────
+    // ── Emit SET steps ──────────────────────────────────────────────
     if (ast.set) {
       for (const item of ast.set.items) {
-        item.value = await this._extractSubqueries(item.value, steps, knownVars);
+        const valExpr = this._extractSubqueriesSync(
+          item.value,
+          steps,
+          knownVars,
+          undefined,
+          preparedMatches,
+        );
         const varName =
           item.variable.kind === 'Identifier'
             ? (item.variable as IdentifierExpr).name
@@ -404,12 +797,12 @@ export class Planner {
           kind: 'SetPropertyStep',
           variable: varName,
           entityKind,
-          assignments: [{ key: item.property, operator: item.operator, value: item.value }],
+          assignments: [{ key: item.property, operator: item.operator, value: valExpr }],
         });
       }
     }
 
-    // ── NEW: Emit DELETE steps ─────────────────────────────────────
+    // ── Emit DELETE steps ───────────────────────────────────────────
     if (ast.delete) {
       for (const varName of ast.delete.variables) {
         const entityKind = this._resolveEntityKind(varName, ast);
@@ -422,7 +815,7 @@ export class Planner {
       }
     }
 
-    // ── NEW: Emit REMOVE steps ─────────────────────────────────────
+    // ── Emit REMOVE steps ───────────────────────────────────────────
     if (ast.remove) {
       for (const item of ast.remove.items) {
         const entityKind = this._resolveEntityKind(item.variable.name, ast);
@@ -431,7 +824,7 @@ export class Planner {
             kind: 'RemoveLabelStep',
             variable: item.variable.name,
             labels: item.labels,
-          } as import('./plan/QueryPlan').RemoveLabelStep);
+          } as RemoveLabelStep);
         } else if (item.property) {
           steps.push({
             kind: 'RemovePropertyStep',
@@ -443,17 +836,20 @@ export class Planner {
       }
     }
 
-    // ── NEW: Emit CREATE INDEX step ──────────────────────────────
+    // ── Emit CREATE INDEX step ──────────────────────────────────────
     if (ast.createIndex) {
       steps.push({
         kind: 'CreateIndexStep',
         name: ast.createIndex.name,
         target: ast.createIndex.target,
         propertyKeys: ast.createIndex.propertyKeys,
+        ...(ast.createIndex.labelOrType !== undefined
+          ? { labelOrType: ast.createIndex.labelOrType }
+          : {}),
       });
     }
 
-    // ── NEW: Emit DROP INDEX step ─────────────────────────────────
+    // ── Emit DROP INDEX step ────────────────────────────────────────
     if (ast.dropIndex) {
       steps.push({
         kind: 'DropIndexStep',
@@ -461,7 +857,7 @@ export class Planner {
       });
     }
 
-    // ── NEW: Emit SHOW INDEXES step ───────────────────────────────
+    // ── Emit SHOW INDEXES step ──────────────────────────────────────
     if (ast.showIndexes) {
       steps.push({
         kind: 'ShowIndexesStep',
@@ -473,25 +869,43 @@ export class Planner {
       });
     }
 
-    // ── 6. Post-scan clauses (aggregate path vs plain path) ───────
-    const hasAggregates = this._projPlanner.hasAggregates(ast);
+    // Shallow-copy RETURN & ORDER BY items so subquery rewriting never mutates caller AST
+    const workingOrderBy = ast.orderBy
+      ? { ...ast.orderBy, items: ast.orderBy.items.map((it) => ({ ...it })) }
+      : undefined;
+    const workingReturn = {
+      ...ast.return,
+      items: ast.return.items.map((it) => ({ ...it })),
+    };
+    const workingAst: QueryAst = {
+      ...ast,
+      ...(workingOrderBy ? { orderBy: workingOrderBy } : {}),
+      return: workingReturn,
+    };
+
+    // ── 6. Post-scan clauses (aggregate path vs plain path) ─────────
+    const hasAggregates = this._projPlanner.hasAggregates(workingAst);
 
     if (hasAggregates) {
-      // Pagination before aggregation
-      if (ast.skip || ast.limit) {
-        steps.push(this._projPlanner.planLimit(ast));
+      if (workingAst.skip || workingAst.limit) {
+        steps.push(this._projPlanner.planLimit(workingAst));
       }
 
-      this._projPlanner.planAggregation(ast, steps);
+      this._projPlanner.planAggregation(workingAst, steps);
 
-      // Post-aggregation ORDER BY
-      const aggStep = steps[steps.length - 1] as import('./plan/QueryPlan').AggregateStep;
+      const aggStep = steps[steps.length - 1] as AggregateStep;
 
-      if (ast.orderBy) {
-        for (let i = 0; i < ast.orderBy.items.length; i++) {
-          ast.orderBy.items[i].expression = await this._extractSubqueries(ast.orderBy.items[i].expression, steps, knownVars);
+      if (workingOrderBy) {
+        for (let i = 0; i < workingOrderBy.items.length; i++) {
+          workingOrderBy.items[i].expression = this._extractSubqueriesSync(
+            workingOrderBy.items[i].expression,
+            steps,
+            knownVars,
+            undefined,
+            preparedMatches,
+          );
         }
-        const items = ast.orderBy.items.map((item) => {
+        const items = workingOrderBy.items.map((item) => {
           const { rewritten, extracted } =
             this._projPlanner.extractAndRewriteAggregates(item.expression);
           aggStep.aggregates.push(...extracted);
@@ -500,26 +914,35 @@ export class Planner {
         steps.push({ kind: 'SortStep', items });
       }
     } else {
-      // Plain (non-aggregate) path
-      if (ast.orderBy) {
-        for (let i = 0; i < ast.orderBy.items.length; i++) {
-          ast.orderBy.items[i].expression = await this._extractSubqueries(ast.orderBy.items[i].expression, steps, knownVars);
+      if (workingOrderBy) {
+        for (let i = 0; i < workingOrderBy.items.length; i++) {
+          workingOrderBy.items[i].expression = this._extractSubqueriesSync(
+            workingOrderBy.items[i].expression,
+            steps,
+            knownVars,
+            undefined,
+            preparedMatches,
+          );
         }
-        steps.push(this._projPlanner.planSort(ast));
+        steps.push(this._projPlanner.planSort(workingAst));
       }
 
-
-      if (ast.skip || ast.limit) {
-        steps.push(this._projPlanner.planLimit(ast));
+      if (workingAst.skip || workingAst.limit) {
+        steps.push(this._projPlanner.planLimit(workingAst));
       }
     }
 
-    // ── 7. Projection — always last ───────────────────────────────
-    for (let i = 0; i < ast.return.items.length; i++) {
-      ast.return.items[i].expression = await this._extractSubqueries(ast.return.items[i].expression, steps, knownVars);
+    // ── 7. Projection — always last ─────────────────────────────────
+    for (let i = 0; i < workingReturn.items.length; i++) {
+      workingReturn.items[i].expression = this._extractSubqueriesSync(
+        workingReturn.items[i].expression,
+        steps,
+        knownVars,
+        undefined,
+        preparedMatches,
+      );
     }
-    const projStep = this._projPlanner.planProjection(ast, hasAggregates);
-    // If it's a WITH *, flag it so the Executor knows to preserve all rows
+    const projStep = this._projPlanner.planProjection(workingAst, hasAggregates);
     if (isWithStar) {
       projStep.star = true;
     }
@@ -528,14 +951,14 @@ export class Planner {
     // ── 8. Prune knownVars based on projection ──────────────────────
     if (!isWithStar) {
       const projected = new Set<string>();
-      for (const item of ast.return.items) {
+      for (const item of workingReturn.items) {
         if (item.alias) projected.add(item.alias);
         else if (item.expression.kind === 'Identifier') projected.add(item.expression.name);
       }
       knownVars.clear();
       for (const p of projected) knownVars.add(p);
     } else {
-      for (const item of ast.return.items) {
+      for (const item of workingReturn.items) {
         if (item.alias) knownVars.add(item.alias);
       }
     }
@@ -545,22 +968,9 @@ export class Planner {
 
   /**
    * Convert a CREATE pattern path (or named path) into write plan steps.
-   *
-   * Walks the pattern's path elements:
-   * - For each node pattern → emits a {@link CreateNodeStep} **unless**
-   *   the variable is already bound in {@code knownVars} (i.e. from MATCH
-   *   or from a previous CREATE pattern), in which case it is treated as
-   *   an existing endpoint reference.
-   * - For each edge pattern → emits a {@link CreateEdgeStep} with
-   *   source = previous node variable, target = current node variable.
-   *
-   * @param knownVars - Mutable set of already-bound variable names.
-   *   When this method emits a {@code CreateNodeStep} it adds the
-   *   variable to the set so that downstream callers (subsequent
-   *   CREATE patterns in the same clause) see it as already-created.
    */
   private _planCreatePath(
-    pattern: import('./ast/AstNode').MatchPattern,
+    pattern: MatchPattern,
     steps: PlanStep[],
     knownVars: Set<string>,
   ): void {
@@ -579,9 +989,6 @@ export class Planner {
           node.variable ??
           this._patternPlanner._syntheticVar('create_node', createIdx++);
 
-        // Skip CreateNodeStep when the variable is already bound
-        // (by MATCH or by a previous CREATE pattern) — it refers
-        // to an existing node, not a new one.
         if (!knownVars.has(variable)) {
           steps.push({
             kind: 'CreateNodeStep',
@@ -589,8 +996,6 @@ export class Planner {
             labels: node.labels,
             properties: node.properties,
           });
-          // Register so subsequent patterns see this variable as
-          // already-created.
           if (node.variable) {
             knownVars.add(node.variable);
           }
@@ -598,14 +1003,10 @@ export class Planner {
 
         prevNodeVar = variable;
       } else {
-        // EdgePattern — emit the target node first so it's bound
-        // before the edge step tries to reference it at runtime.
         const edge = seg as EdgePattern;
-        // Peek at the next segment (must be a node)
         const nextSeg = segments[i + 1];
-        const targetNode = nextSeg?.kind === 'NodePattern'
-          ? (nextSeg as NodePattern)
-          : undefined;
+        const targetNode =
+          nextSeg?.kind === 'NodePattern' ? (nextSeg as NodePattern) : undefined;
         const targetVar =
           targetNode?.variable ??
           this._patternPlanner._syntheticVar('create_node', createIdx++);
@@ -615,10 +1016,6 @@ export class Planner {
           edge.variable ??
           this._patternPlanner._syntheticVar('create_edge', createIdx++);
 
-        // Emit the target node CREATE step BEFORE the edge so both
-        // endpoints are bound in the row when the edge is created.
-        // Skip when the target variable is already bound (MATCH or
-        // prior CREATE).
         if (targetNode && !knownVars.has(targetVar)) {
           steps.push({
             kind: 'CreateNodeStep',
@@ -626,19 +1023,14 @@ export class Planner {
             labels: targetNode.labels,
             properties: targetNode.properties,
           });
-          // Register so subsequent patterns see this variable as
-          // already-created.
           if (targetNode.variable) {
             knownVars.add(targetNode.variable);
           }
           prevNodeVar = targetVar;
-          i++; // skip the already-processed target node
+          i++;
         } else if (targetNode) {
-          // Target node already exists; record its variable so the
-          // edge can reference it, but don't skip the segment
-          // (the segment was not "consumed" by CreateNodeStep).
           prevNodeVar = targetVar;
-          i++; // advance past this node segment
+          i++;
         }
 
         steps.push({
@@ -655,25 +1047,10 @@ export class Planner {
 
   // ── Entity-kind resolution ───────────────────────────────────────
 
-  /**
-   * Determine whether a variable refers to a node or an edge.
-   *
-   * Checks:
-   * 1. MATCH patterns — node variables and edge variables
-   * 2. CREATE patterns — node variables and edge variables
-   *
-   * Defaults to `'node'` if the variable cannot be resolved
-   * (e.g., it appears in both roles, or not at all).
-   */
-  private _resolveEntityKind(
-    varName: string,
-    ast: QueryAst,
-  ): 'node' | 'edge' {
+  private _resolveEntityKind(varName: string, ast: QueryAst): 'node' | 'edge' {
     let res: 'node' | 'edge' | undefined;
 
-    const checkPatterns = (
-      patterns: import('./ast/AstNode').MatchPattern[],
-    ): void => {
+    const checkPatterns = (patterns: MatchPattern[]): void => {
       for (const pattern of patterns) {
         const segs = getPatternSegments(pattern);
         for (const seg of segs) {
@@ -692,14 +1069,12 @@ export class Planner {
       }
     };
 
-    // Check MATCH patterns
     for (const clause of ast.readingClauses) {
       if (clause.kind === 'Match') {
         if (!res) checkPatterns(clause.patterns);
       }
     }
 
-    // If still unresolved, check CREATE patterns
     if (!res && ast.create?.patterns) {
       checkPatterns(ast.create.patterns);
     }
@@ -715,58 +1090,51 @@ export class Planner {
 
   // ── MATCH clause planning (regular + optional) ───────────────────
 
-  /**
-   * Plan a single MATCH or OPTIONAL MATCH clause.
-   *
-   * For a regular MATCH: emits NodeScan/EdgeExpand/Filter steps directly.
-   * For an OPTIONAL MATCH: wraps them in an {@link OptionalMatchStep} that
-   * implements left-outer-join semantics.
-   */
-  private async _planMatchClause(
-    matchClause: import('./ast/AstNode').MatchClause,
+  private _planMatchClauseSync(
+    matchClause: MatchClause,
     steps: PlanStep[],
     knownVars: Set<string>,
     ast: QueryAst,
-  ): Promise<void> {
-    // 1. Collect variables from this match clause's patterns
-    const varRegistry = this._whereDecomposer.collectVariables(
-      matchClause.patterns,
-    );
+    preparedMatches?: WeakMap<MatchClause, PreparedMatchClause>,
+  ): void {
+    const pre = preparedMatches?.get(matchClause);
 
-    // 2. Decompose the attached WHERE clause (if any)
-    const { perVar, crossVar } = matchClause.where
-      ? this._whereDecomposer.decompose(matchClause.where.expression, varRegistry)
-      : { perVar: new Map(), crossVar: [] as Expression[] };
+    const varRegistry =
+      pre?.varRegistry ?? this._whereDecomposer.collectVariables(matchClause.patterns);
 
-    // 3. Detect id(n)=value for NodeSeekStep
-    const idLookups = this._reorderer.detectIdLookups(crossVar, varRegistry);
+    const { perVar, crossVar } = pre
+      ? { perVar: pre.perVar, crossVar: [...pre.crossVar] }
+      : matchClause.where
+        ? this._whereDecomposer.decompose(matchClause.where.expression, varRegistry)
+        : { perVar: new Map(), crossVar: [] as Expression[] };
 
-    // 4. Reorder root patterns by selectivity
-    const orderedPatterns = await this._reorderer.reorder(
-      matchClause.patterns,
-      varRegistry,
-      perVar,
-      idLookups,
-    );
+    const idLookups = pre?.idLookups ?? this._reorderer.detectIdLookups(crossVar, varRegistry);
 
-    // Determine the target steps list — for optional matches, use a separate
-    // buffer that will be wrapped in OptionalMatchStep.
+    const orderedPatterns =
+      pre?.orderedPatterns ??
+      this._reorderer.reorderSync(matchClause.patterns, varRegistry, perVar, idLookups);
+
     const targetSteps: PlanStep[] = matchClause.optional ? [] : steps;
 
-    // 5. Emit pattern steps
     const consumed = new Set<string>();
     for (const pattern of orderedPatterns) {
-      this._patternPlanner.planPath(pattern, targetSteps, ast, perVar, idLookups, consumed, knownVars);
+      this._patternPlanner.planPath(
+        pattern,
+        targetSteps,
+        ast,
+        perVar,
+        idLookups,
+        consumed,
+        knownVars,
+      );
     }
 
-    // 6. Remove consumed id-lookups from crossVar
     if (consumed.size > 0) {
       const lookupExprs = new Set<Expression>();
       this._reorderer.collectIdLookupExprs(crossVar, lookupExprs, consumed);
       this._reorderer.removeIdLookups(crossVar, lookupExprs);
     }
 
-    // Compute newVars BEFORE updating knownVars
     const newVars: string[] = [];
     for (const v of varRegistry.keys()) {
       if (!knownVars.has(v)) {
@@ -774,21 +1142,24 @@ export class Planner {
       }
     }
 
-    // Update knownVars with all variables from this match clause before WHERE
     for (const v of newVars) knownVars.add(v);
 
-    // 7. Emit remaining cross-variable filter
     if (crossVar.length > 0) {
       const predicate = this._whereDecomposer.andAll(crossVar);
       const patternExprVars = new Set<string>();
-      const rewritten = await this._extractSubqueries(predicate, targetSteps, knownVars, patternExprVars);
+      const rewritten = this._extractSubqueriesSync(
+        predicate,
+        targetSteps,
+        knownVars,
+        patternExprVars,
+        preparedMatches,
+      );
       targetSteps.push({
         kind: 'FilterStep',
         predicate: this._rewritePatternExprsAsPredicate(rewritten, patternExprVars),
       });
     }
 
-    // 8. For OPTIONAL MATCH, wrap in OptionalMatchStep
     if (matchClause.optional) {
       steps.push({
         kind: 'OptionalMatchStep',
@@ -796,8 +1167,5 @@ export class Planner {
         newVars,
       });
     }
-
-    // (knownVars already updated above)
   }
-
 }

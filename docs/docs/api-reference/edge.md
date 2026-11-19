@@ -16,7 +16,7 @@ import { Edge } from 'grafio';
 readonly id: string
 ```
 
-Unique identifier (auto-generated UUID).
+Unique identifier (defaults to compact `@e<slot>:<gen>` on `InMemoryStorageProvider`, or RFC-4122 UUID with `idStrategy: 'uuid'`, or an explicit custom string ID).
 
 ### sourceId
 
@@ -104,7 +104,8 @@ Like Node properties, Edge properties are **deep-frozen**:
 edge.properties.since = 2021; // TypeError: Cannot assign to read only property
 ```
 
-Use Graph's edge property methods to modify:
+Use `Graph`'s edge property patch methods to modify:
 
 ```typescript
-await graph.updateEdgeProperty(edge.id, 'since', 2021);
+await graph.setEdgeProperties(edge.id, { since: 2021 });
+```

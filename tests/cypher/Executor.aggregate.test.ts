@@ -433,5 +433,176 @@ describe('Executor – Aggregates', () => {
       );
       expect(result.rows).toHaveLength(4);
     });
+
+    it('distinguishes scalar types, map literals, and UNION values during DISTINCT and GROUP BY', () => {
+      const g = new Graph();
+      g.querySync("CREATE (:Item { name: 'a' })");
+
+      const distinctMix = g.querySync("UNWIND [1, '1', true, 'true'] AS v RETURN DISTINCT v");
+      expect(distinctMix.rows.map((r) => r.v)).toEqual([1, '1', true, 'true']);
+
+      const distinctMaps = g.querySync('UNWIND [{ a: 1 }, { a: 2 }, { a: 1 }] AS m RETURN DISTINCT m');
+      expect(distinctMaps.rows.map((r) => r.m)).toEqual([{ a: 1 }, { a: 2 }]);
+
+      const nodeVsStr = g.querySync("UNWIND ['node1'] AS x MATCH (n:Item) WITH DISTINCT x, n RETURN x");
+      expect(nodeVsStr.rows).toHaveLength(1);
+
+      const groupByTypes = g.querySync(
+        "UNWIND [1, '1', { a: 1 }, { a: 2 }] AS k RETURN k, count(*) AS cnt",
+      );
+      expect(groupByTypes.rows).toHaveLength(4);
+
+      const unionRes = g.querySync(
+        "MATCH (n:Item) RETURN '1' AS val UNION RETURN 1 AS val",
+      );
+      expect(unionRes.rows.map((r) => r.val)).toEqual(['1', 1]);
+    });
+
+    it('deduplicates storage-level edge COLLECT(DISTINCT ...) symmetrically on sync kernel', async () => {
+      const g = new Graph();
+      const a = await g.addNode('N', { name: 'A' });
+      const b = await g.addNode('N', { name: 'B' });
+      await g.addEdge(a.id, b.id, 'LINKS', { tag: 1 });
+      await g.addEdge(a.id, b.id, 'LINKS', { tag: '1' });
+      await g.addEdge(a.id, b.id, 'LINKS', { tag: 1 });
+
+      const tagRes = g.querySync('MATCH ()-[r:LINKS]->() RETURN collect(DISTINCT r.tag) AS tags');
+      expect(tagRes.rows[0].tags).toEqual([1, '1']);
+
+      const edgeRes = g.querySync('MATCH ()-[r:LINKS]->() RETURN collect(DISTINCT r) AS edges');
+      expect(edgeRes.rows[0].edges).toHaveLength(3);
+    });
+  });
+
+  describe('Fused columnar and computed-expression aggregations', () => {
+    it('runs fused un-filtered NodeScan/EdgeScan -> Aggregate paths including DISTINCT and empty sets', async () => {
+      const graph = new Graph();
+      const [n1, n2, n3] = await graph.addNodes([
+        { labels: 'Item', properties: { price: 10, tag: 'a' } },
+        { labels: 'Item', properties: { price: 10, tag: 'a' } },
+        { labels: 'Item', properties: { price: 30, tag: 'b' } },
+      ]);
+      await graph.addNode('Item', { tag: 'no-price' });
+      await graph.addEdge(n1.id, n2.id, 'LINK', { w: 5 });
+      await graph.addEdge(n2.id, n3.id, 'LINK', { w: 5 });
+      await graph.addEdge(n1.id, n3.id, 'LINK', { w: 15 });
+
+      const syncRes = graph.querySync(`
+        MATCH (n:Item)
+        RETURN count(n) AS cAll,
+               count(DISTINCT n.price) AS cDist,
+               sum(n.price) AS s,
+               sum(DISTINCT n.price) AS sDist,
+               avg(n.price) AS a,
+               avg(DISTINCT n.price) AS aDist,
+               min(n.price) AS mn,
+               min(DISTINCT n.price) AS mnDist,
+               max(n.price) AS mx,
+               max(DISTINCT n.price) AS mxDist,
+               collect(n.tag) AS tags,
+               collect(DISTINCT n.tag) AS tagsDist
+      `);
+      expect(syncRes.rows[0].cAll).toBe(4);
+      expect(syncRes.rows[0].cDist).toBe(2);
+      expect(syncRes.rows[0].s).toBe(50);
+      expect(syncRes.rows[0].sDist).toBe(40);
+      expect(syncRes.rows[0].aDist).toBe(20);
+      expect(syncRes.rows[0].mn).toBe(10);
+      expect(syncRes.rows[0].mnDist).toBe(10);
+      expect(syncRes.rows[0].mx).toBe(30);
+      expect(syncRes.rows[0].mxDist).toBe(30);
+      expect((syncRes.rows[0].tags as string[]).length).toBe(4);
+      expect((syncRes.rows[0].tagsDist as string[]).sort()).toEqual(['a', 'b', 'no-price']);
+
+      const asyncRes = await graph.query(`
+        MATCH (n:Item)
+        RETURN count(DISTINCT n.price) AS dc, sum(DISTINCT n.price) AS sd, collect(DISTINCT n.tag) AS td
+      `);
+      expect(asyncRes.rows[0].dc).toBe(2);
+      expect(asyncRes.rows[0].sd).toBe(40);
+
+      const emptyRes = graph.querySync(`
+        MATCH (e:NonExistent)
+        RETURN count(e) AS c, sum(e.x) AS s, avg(e.x) AS a, min(e.x) AS mn, max(e.x) AS mx, collect(e.x) AS col
+      `);
+      expect(emptyRes.rows).toEqual([{ c: 0, s: 0, a: 0, mn: null, mx: null, col: [] }]);
+
+      // Profiled fused NodeScan -> FilterStep -> AggregateStep (text) and unfiltered fused (json)
+      const fusedFilterProf = graph.querySync(
+        'MATCH (n:Item) WHERE n.price + 1 > 10 RETURN count(n) AS c, sum(n.price) AS s',
+        {},
+        { executionPlan: { format: 'text' } },
+      );
+      expect(fusedFilterProf.rows).toEqual([{ c: 3, s: 50 }]);
+      expect(fusedFilterProf.executionPlan).toContain('AggregateStep');
+
+      const fusedJsonProf = graph.querySync(
+        'MATCH (n:Item) RETURN count(n) AS c',
+        {},
+        { executionPlan: { format: 'json' } },
+      );
+      expect(fusedJsonProf.rows).toEqual([{ c: 4 }]);
+      expect(fusedJsonProf.executionPlan).toContain('AggregateStep');
+
+      // Sync IndexStepExecutor DDL (CREATE INDEX / SHOW INDEXES / DROP INDEX)
+      const ciRes = graph.querySync('CREATE INDEX idx_sync_item FOR (n:Item) ON (n.tag)');
+      expect(ciRes.summary.indexesCreated).toBe(1);
+      const showIdxRes = graph.querySync('SHOW INDEXES');
+      expect(showIdxRes.rows.length).toBeGreaterThanOrEqual(1);
+      const diRes = graph.querySync('DROP INDEX idx_sync_item');
+      expect(diRes.summary.indexesDeleted).toBe(1);
+
+      const edgeRes = graph.querySync(`
+        MATCH ()-[r:LINK]->()
+        RETURN count(r) AS rc,
+               count(DISTINCT r.w) AS rcd,
+               sum(r.w) AS rs,
+               sum(DISTINCT r.w) AS rsd,
+               avg(r.w) AS ra,
+               min(r.w) AS rmin,
+               max(r.w) AS rmax,
+               collect(DISTINCT r.w) AS rcol
+      `);
+      expect(edgeRes.rows[0].rc).toBe(3);
+      expect(edgeRes.rows[0].rcd).toBe(2);
+      expect(edgeRes.rows[0].rs).toBe(25);
+      expect(edgeRes.rows[0].rsd).toBe(20);
+      expect(edgeRes.rows[0].rmin).toBe(5);
+      expect(edgeRes.rows[0].rmax).toBe(15);
+      expect((edgeRes.rows[0].rcol as number[]).sort((x, y) => x - y)).toEqual([5, 15]);
+    });
+
+    it('evaluates computed-expression and parameterized fused aggregates', async () => {
+      const aggGraph = new Graph();
+      await aggGraph.addNodes([
+        { labels: 'Item', properties: { price: 10 } },
+        { labels: 'Item', properties: { price: 10 } },
+        { labels: 'Item', properties: { price: 30 } },
+      ]);
+      const compAgg = aggGraph.querySync(`
+        MATCH (n:Item)
+        WHERE n.price > 0
+        RETURN count(DISTINCT n.price + 1) AS dc,
+               sum(n.price + 1) AS s,
+               avg(n.price + 1) AS av,
+               min(n.price + 1) AS mn,
+               max(n.price + 1) AS mx,
+               collect(DISTINCT n.price + 1) AS col
+      `);
+      expect(compAgg.rows[0].dc).toBe(2);
+      expect(compAgg.rows[0].s).toBe(53);
+      expect(compAgg.rows[0].mn).toBe(11);
+      expect(compAgg.rows[0].mx).toBe(31);
+      expect((compAgg.rows[0].col as number[]).sort((x, y) => x - y)).toEqual([11, 31]);
+
+      const paramFused = aggGraph.querySync(
+        'MATCH (n:Item) WHERE n.price = $p RETURN count(n) AS c, min(n.price) AS mn, max(n.price) AS mx, avg(n.price) AS av, collect(DISTINCT n.price) AS col',
+        { p: 10 },
+      );
+      expect(paramFused.rows).toEqual([{ c: 2, mn: 10, mx: 10, av: 10, col: [10] }]);
+      expect(() =>
+        aggGraph.querySync('MATCH (n:Item) WHERE n.price = $missing RETURN count(n) AS c'),
+      ).toThrow();
+    });
   });
 });

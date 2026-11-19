@@ -22,7 +22,7 @@ describe('InMemoryGraphFactory integration behavior', () => {
     await expect(graph.warmCache()).resolves.toBeUndefined();
   });
 
-  it('wraps storage and supports cache warming when configured', async () => {
+  it('keeps InMemoryStorageProvider uncached on sync kernel even when GraphManager cache is configured', async () => {
     GraphManager.init({
       cache: {
         cacheStore: 'in-memory',
@@ -34,6 +34,7 @@ describe('InMemoryGraphFactory integration behavior', () => {
     });
     const graph = new InMemoryGraphFactory().forGraph('cached');
 
+    expect(graph._getSyncKernel()).not.toBeNull();
     await graph.addNode('Person', { name: 'Alice' });
     await expect(graph.warmCache()).resolves.toBeUndefined();
     expect(GraphManager.getInstance().isCachingEnabled()).toBe(true);

@@ -1,15 +1,14 @@
-/** @type {import('ts-jest').JestConfigWithTsJest} */
+/** @type {import('jest').Config} */
 module.exports = {
-  preset: 'ts-jest',
   testEnvironment: 'node',
   roots: ['<rootDir>/tests'],
   testMatch: ['**/*.test.ts'],
   moduleFileExtensions: ['ts', 'js', 'json'],
   collectCoverageFrom: ['src/**/*.ts'],
   coveragePathIgnorePatterns: [
-    '/node_modules/', 
-    '/dist/', 
-    '/shared/testing/', 
+    '/node_modules/',
+    '/dist/',
+    '/shared/testing/',
     'src/index.ts',
     'src/storage/cache/index.ts',
     'src/cypher/index.ts'
@@ -29,10 +28,16 @@ module.exports = {
   testTimeout: 60000,
   maxWorkers: 5,
   coverageReporters: [
-    "lcov",
-    "json-summary"
+    'lcov',
+    'json-summary'
   ],
   transform: {
-    '^.+\\.tsx?$': ['ts-jest', { tsconfig: { resolveJsonModule: true } }],
+    '^.+\\.tsx?$': ['@swc/jest', {
+      jsc: {
+        parser: { syntax: 'typescript' },
+        target: 'es2022',
+      },
+      module: { type: 'commonjs' },
+    }],
   },
 };

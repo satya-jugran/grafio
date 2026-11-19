@@ -45,25 +45,6 @@ const COMMON_OPTIONS = {
 };
 
 /**
- * Strips comments and collapses blank lines from a .d.ts file.
- * Keeps type/method/parameter names readable — does not obfuscate.
- *
- * @param {string} filePath - Path to the .d.ts file to process
- */
-function stripDts(filePath) {
-  let content = fs.readFileSync(filePath, 'utf8');
-  // Remove /* ... */ block comments (JSDoc)
-  content = content.replace(/\/\*[\s\S]*?\*\//g, '');
-  // Remove // line comments
-  content = content.replace(/\/\/[^\n]*/g, '');
-  // Collapse 3+ consecutive blank lines into 1
-  content = content.replace(/\n{3,}/g, '\n\n');
-  // Trim leading/trailing whitespace
-  content = content.trim() + '\n';
-  fs.writeFileSync(filePath, content, 'utf8');
-}
-
-/**
  * Strips all comments from a JS file, preserving:
  * - Source map URL comments (//# sourceMappingURL=...)
  *
@@ -119,13 +100,6 @@ async function build() {
   });
   stripComments(esmPath);
   console.log('  ✅ grafio.browser.mjs (ESM, no comments)');
-
-  // 4. Strip comments from type declarations
-  const dtsPath = path.join(BROWSER_DIR, 'types', 'index.d.ts');
-  if (fs.existsSync(dtsPath)) {
-    stripDts(dtsPath);
-    console.log('  ✅ types/index.d.ts (comments stripped)');
-  }
 
   console.log('\n🎉 Browser bundle built successfully!');
   console.log(`   Output: ${DIST_DIR}`);

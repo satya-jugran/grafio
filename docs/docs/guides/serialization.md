@@ -13,14 +13,17 @@ const data = await graph.exportJSON();
 
 ```typescript
 interface GraphData {
+  graphId: string;
   nodes: NodeData[];
   edges: EdgeData[];
 }
 
 interface NodeData {
   id: string;
-  type: string;
-  properties: Record<string, Primitive>;
+  labels: string[];
+  createdOn?: number;
+  updatedOn?: number;
+  properties: Record<string, unknown>;
 }
 
 interface EdgeData {
@@ -28,7 +31,9 @@ interface EdgeData {
   sourceId: string;
   targetId: string;
   type: string;
-  properties: Record<string, Primitive>;
+  createdOn?: number;
+  updatedOn?: number;
+  properties: Record<string, unknown>;
 }
 ```
 
@@ -101,20 +106,21 @@ const json = await graph.exportJSON();
 console.log(JSON.stringify(json, null, 2));
 /*
 {
+  "graphId": "default",
   "nodes": [
-    { "id": "abc123", "type": "Person", "properties": { "name": "Alice" } },
-    { "id": "def456", "type": "Person", "properties": { "name": "Bob" } }
+    { "id": "@n0:1", "labels": ["Person"], "properties": { "name": "Alice" } },
+    { "id": "@n1:1", "labels": ["Person"], "properties": { "name": "Bob" } }
   ],
   "edges": [
-    { "id": "ghi789", "sourceId": "abc123", "targetId": "def456", "type": "KNOWS", "properties": {} }
+    { "id": "@e0:1", "sourceId": "@n0:1", "targetId": "@n1:1", "type": "KNOWS", "properties": {} }
   ]
 }
 */
 
 // Import to new graph
 const newGraph = await Graph.importJSON(json);
-const result = await engine.execute(`MATCH (p:Person) RETURN count(p) AS count`);
-const count = result.records[0].get('count');
+const result = await newGraph.query(`MATCH (p:Person) RETURN count(p) AS count`);
+const count = result.rows[0].count;
 console.log(count); // 2
 ```
 

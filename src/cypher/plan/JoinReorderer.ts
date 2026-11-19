@@ -42,9 +42,12 @@ export class JoinReorderer {
     perVar: Map<string, PropertyFilter[]>,
     idLookups: Map<string, unknown>,
   ): Promise<MatchPattern[]> {
-    const ordered = [...patterns];
+    const kernel = this._graph?._getSyncKernel();
+    if (kernel) {
+      return this.reorderSync(patterns, varRegistry, perVar, idLookups);
+    }
 
-    // Compute selectivities in parallel for all root variables
+    // Compute selectivities for all root variables
     const selectivity = new Map<string, number>();
     for (const [name, info] of varRegistry) {
       if (info.isRoot) {
@@ -55,6 +58,39 @@ export class JoinReorderer {
       }
     }
 
+    return this._sortBySelectivity(patterns, varRegistry, selectivity);
+  }
+
+  /**
+   * Synchronously order root patterns by estimated selectivity using
+   * `ISyncGraphKernel.hasIndexSync` when available (falling back to
+   * non-indexed heuristics otherwise).
+   */
+  reorderSync(
+    patterns: MatchPattern[],
+    varRegistry: Map<string, VarInfo>,
+    perVar: Map<string, PropertyFilter[]>,
+    idLookups: Map<string, unknown>,
+  ): MatchPattern[] {
+    const selectivity = new Map<string, number>();
+    for (const [name, info] of varRegistry) {
+      if (info.isRoot) {
+        selectivity.set(
+          name,
+          this._estimateSelectivitySync(info, perVar.get(name) ?? [], idLookups),
+        );
+      }
+    }
+
+    return this._sortBySelectivity(patterns, varRegistry, selectivity);
+  }
+
+  private _sortBySelectivity(
+    patterns: MatchPattern[],
+    varRegistry: Map<string, VarInfo>,
+    selectivity: Map<string, number>,
+  ): MatchPattern[] {
+    const ordered = [...patterns];
     ordered.sort((a, b) => {
       const rootA = this._getRootVar(a, varRegistry);
       const rootB = this._getRootVar(b, varRegistry);
@@ -62,7 +98,6 @@ export class JoinReorderer {
       const selB = rootB ? (selectivity.get(rootB.name) ?? 10000) : 10000;
       return selA - selB;
     });
-
     return ordered;
   }
 
@@ -150,13 +185,14 @@ export class JoinReorderer {
    *
    * Lower = more selective = fewer result rows = preferred first.
    *
-   * | Predicate type        | Score |
-   * |-----------------------|-------|
-   * | id(n) = val           |     1 |
-   * | indexed property =    |     5 |
-   * | non-indexed property =|    10 |
-   * | type scan only        |   100 |
-   * | full scan             | 10000 |
+   * | Predicate type         | Score |
+   * |------------------------|-------|
+   * | id(n) = val            |     1 |
+   * | indexed property =     |     5 |
+   * | indexed property range |     7 |
+   * | non-indexed property = |    10 |
+   * | type scan only         |   100 |
+   * | full scan              | 10000 |
    */
   private async _estimateSelectivity(
     v: VarInfo,
@@ -165,33 +201,88 @@ export class JoinReorderer {
   ): Promise<number> {
     if (idLookups.has(v.name)) return 1;
 
-    // Collect all equality predicate property keys
-    const predicateKeys = predicates
-      .filter(p => this._isEquality(p) && p.key)
-      .map(p => p.key!);
+    const { eqKeys, rangeKeys } = this._collectPredicateKeys(predicates);
+    const label = v.labels.length === 1 ? v.labels[0] : undefined;
 
-    if (predicateKeys.length > 0 && this._graph) {
-      // First, check if ALL predicate properties are covered by the same index (compound index)
-      const compoundIndex = await this._graph.hasIndex('node', predicateKeys);
-      if (compoundIndex) return 5;
-
-      // Fall back: check if ANY single predicate has an index
-      // This handles the case where only some predicates are indexed
-      for (const key of predicateKeys) {
-        const singleIndex = await this._graph.hasIndex('node', [key]);
-        if (singleIndex) return 5;
+    if (this._graph) {
+      if (eqKeys.length > 0) {
+        if (await this._graph.hasIndex('node', eqKeys, label)) return 5;
+        for (const key of eqKeys) {
+          if (await this._graph.hasIndex('node', [key], label)) return 5;
+        }
+      }
+      for (const key of rangeKeys) {
+        if (await this._graph.hasIndex('node', [key], label)) return 7;
       }
     }
 
-    // Non-indexed equality — score 10
-    if (predicateKeys.length > 0) return 10;
+    return this._nonIndexedSelectivity(v, eqKeys);
+  }
 
+  private _estimateSelectivitySync(
+    v: VarInfo,
+    predicates: PropertyFilter[],
+    idLookups: Map<string, unknown>,
+  ): number {
+    if (idLookups.has(v.name)) return 1;
+
+    const { eqKeys, rangeKeys } = this._collectPredicateKeys(predicates);
+    const label = v.labels.length === 1 ? v.labels[0] : undefined;
+    const kernel = this._graph?._getSyncKernel();
+
+    if (kernel) {
+      if (eqKeys.length > 0) {
+        if (kernel.hasIndexSync('node', eqKeys, label)) return 5;
+        for (const key of eqKeys) {
+          if (kernel.hasIndexSync('node', [key], label)) return 5;
+        }
+      }
+      for (const key of rangeKeys) {
+        if (kernel.hasIndexSync('node', [key], label)) return 7;
+      }
+    }
+
+    return this._nonIndexedSelectivity(v, eqKeys);
+  }
+
+  private _collectPredicateKeys(
+    predicates: PropertyFilter[],
+  ): { eqKeys: string[]; rangeKeys: string[] } {
+    const eqKeys: string[] = [];
+    const rangeKeys: string[] = [];
+    for (let i = 0; i < predicates.length; i++) {
+      const p = predicates[i];
+      if (!p.key) continue;
+      if (this._isEquality(p)) {
+        eqKeys.push(p.key);
+      } else if (this._isRange(p)) {
+        rangeKeys.push(p.key);
+      }
+    }
+    return { eqKeys, rangeKeys };
+  }
+
+  private _nonIndexedSelectivity(v: VarInfo, eqKeys: string[]): number {
+    // Non-indexed equality — score 10
+    if (eqKeys.length > 0) return 10;
     if (v.labels.length > 0) return 100;
     return 10000;
   }
 
   private _isEquality(f: PropertyFilter): boolean {
     return f.op === '=' && f.value !== undefined && f.value !== null;
+  }
+
+  private _isRange(f: PropertyFilter): boolean {
+    return (
+      (f.op === '>' ||
+        f.op === '>=' ||
+        f.op === '<' ||
+        f.op === '<=' ||
+        f.op === 'STARTS_WITH') &&
+      f.value !== undefined &&
+      f.value !== null
+    );
   }
 
   // ── Helpers ─────────────────────────────────────────────────────

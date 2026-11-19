@@ -6,9 +6,32 @@ import { Parser } from '../../src/cypher/Parser';
 import { Semantic } from '../../src/cypher/Semantic';
 import { Planner } from '../../src/cypher/Planner';
 import { Executor } from '../../src/cypher/executor/Executor';
-import { ExpressionEvaluator } from '../../src/cypher/executor/ExpressionEvaluator';
+import {
+  ExpressionEvaluator,
+  serializeCypherKey,
+  serializeSlotRowKey,
+} from '../../src/cypher/executor/ExpressionEvaluator';
+import { UNBOUND } from '../../src/cypher/plan/CompiledPlanMeta';
+import { RingQueue, Uint32RingQueue } from '../../src/cypher/executor/RingQueue';
+import { InMemoryStorageProvider } from '../../src/storage/InMemoryStorageProvider';
+import { CachedStorageProvider } from '../../src/storage/CachedStorageProvider';
+import { CacheManager } from '../../src/storage/cache/CacheManager';
+import type { CacheConfig } from '../../src/storage/cache/CacheConfig';
 import { CypherRuntimeError, UnboundParameterError } from '../../src/cypher/errors';
 import { Edge } from '../../src';
+
+function createAsyncCachedGraph() {
+  const cacheConfig: CacheConfig = {
+    maxNodesCount: 200,
+    maxEdgesCount: 400,
+    cacheStore: 'in-memory',
+    evictionStrategy: 'LRU',
+    preloadStrategy: 'none',
+  };
+  const cacheManager = new CacheManager(cacheConfig);
+  const cached = new CachedStorageProvider(new InMemoryStorageProvider(), 'exec-async-test', cacheManager, cacheConfig);
+  return { graph: new Graph(cached), cacheManager };
+}
 
 /** Helper: create a graph, run a query, return result. */
 async function executeQuery(
@@ -274,6 +297,83 @@ describe('Executor', () => {
       for (const row of result.rows) {
         expect(row.name).toBe('F');
       }
+    });
+
+    it('traverses intermediate nodes whose labels differ from target label across sync, tx-sync, and async providers', async () => {
+      const syncGraph = new Graph();
+      const { graph: asyncGraph, cacheManager } = createAsyncCachedGraph();
+
+      for (const g of [syncGraph, asyncGraph]) {
+        const a = await g.addNode('Person', { name: 'Alice' });
+        const p = await g.addNode('Post', { title: 'Hello' });
+        const b = await g.addNode('Person', { name: 'Bob' });
+        await g.addEdge(a.id, p.id, 'WROTE');
+        await g.addEdge(p.id, b.id, 'MENTIONS');
+      }
+
+      expect(
+        syncGraph.querySync("MATCH (a:Person)-[*2]->(b:Person) WHERE a.name = 'Alice' RETURN b.name AS name").rows,
+      ).toEqual([{ name: 'Bob' }]);
+
+      const tx = syncGraph.createTransaction();
+      await tx.begin();
+      expect(
+        syncGraph.querySync("MATCH (a:Person)-[*2]->(b:Person) WHERE a.name = 'Alice' RETURN b.name AS name", {
+          transaction: tx,
+        }).rows,
+      ).toEqual([{ name: 'Bob' }]);
+      await tx.rollback();
+
+      expect(
+        (await asyncGraph.query("MATCH (a:Person)-[*2]->(b:Person) WHERE a.name = 'Alice' RETURN b.name AS name")).rows,
+      ).toEqual([{ name: 'Bob' }]);
+      await cacheManager.invalidateAll();
+    });
+
+    it('finds exact-hop paths on shared-node DAGs without premature shortest-hop pruning', async () => {
+      const syncGraph = new Graph();
+      const { graph: asyncGraph, cacheManager } = createAsyncCachedGraph();
+
+      for (const g of [syncGraph, asyncGraph]) {
+        const a = await g.addNode('Item', { name: 'a' });
+        const b = await g.addNode('Item', { name: 'b' });
+        const x = await g.addNode('Item', { name: 'x' });
+        const d = await g.addNode('Item', { name: 'd' });
+        await g.addEdge(a.id, x.id, 'NEXT');
+        await g.addEdge(a.id, b.id, 'NEXT');
+        await g.addEdge(b.id, x.id, 'NEXT');
+        await g.addEdge(x.id, d.id, 'NEXT');
+      }
+
+      const q = "MATCH (a:Item)-[*3..3]->(d:Item) WHERE a.name = 'a' RETURN d.name AS name";
+      const qLimit = `${q} LIMIT 1`;
+
+      expect(syncGraph.querySync(q).rows).toEqual([{ name: 'd' }]);
+      expect(syncGraph.querySync(qLimit).rows).toEqual([{ name: 'd' }]);
+
+      const tx = syncGraph.createTransaction();
+      await tx.begin();
+      expect(syncGraph.querySync(q, { transaction: tx }).rows).toEqual([{ name: 'd' }]);
+      expect(syncGraph.querySync(qLimit, { transaction: tx }).rows).toEqual([{ name: 'd' }]);
+      await tx.rollback();
+
+      expect((await asyncGraph.query(q)).rows).toEqual([{ name: 'd' }]);
+      expect((await asyncGraph.query(qLimit)).rows).toEqual([{ name: 'd' }]);
+      await cacheManager.invalidateAll();
+    });
+
+    it('terminates on cyclic graphs using per-path relationship uniqueness', async () => {
+      const g = new Graph();
+      const a = await g.addNode('N', { name: 'a' });
+      const b = await g.addNode('N', { name: 'b' });
+      const c = await g.addNode('N', { name: 'c' });
+      await g.addEdge(a.id, b.id, 'E');
+      await g.addEdge(b.id, a.id, 'E');
+      await g.addEdge(b.id, c.id, 'E');
+
+      const res = g.querySync("MATCH (a:N {name: 'a'})-[*1..4]->(t:N) RETURN t.name AS name");
+      expect(res.rows.length).toBeGreaterThan(0);
+      expect(res.rows.map((r) => r.name)).toContain('c');
     });
   });
 
@@ -795,6 +895,162 @@ describe('Executor', () => {
       );
       const names = result.rows.map((r) => r.name as string).sort();
       expect(names).toEqual(['Bob', 'Charlie']);
+    });
+  });
+
+  // ── Null propagation, operator type checks, key serialization & UTF-16 order ──
+  describe('null propagation, type-safe operators, key serialization, and UTF-16 ordering', () => {
+    it('does not coerce null or missing properties to 0 in ordering comparisons across scan pushdown and FilterStep', () => {
+      const g = new Graph();
+      g.querySync(`
+        CREATE (:Person { name: 'NullScore', score: null }),
+               (:Person { name: 'MissingScore' }),
+               (:Person { name: 'ZeroScore', score: 0 }),
+               (:Person { name: 'LowScore', score: 10 })
+      `);
+
+      const pushdown = g.querySync('MATCH (n:Person) WHERE n.score < 50 RETURN n.name AS name ORDER BY n.name');
+      expect(pushdown.rows).toEqual([{ name: 'LowScore' }, { name: 'ZeroScore' }]);
+
+      const filterLess = g.querySync('MATCH (n:Person) WITH n WHERE n.score < 50 RETURN n.name AS name ORDER BY n.name');
+      expect(filterLess.rows).toEqual([{ name: 'LowScore' }, { name: 'ZeroScore' }]);
+
+      const filterLteZero = g.querySync('MATCH (n:Person) WITH n WHERE n.score <= 0 RETURN n.name AS name');
+      expect(filterLteZero.rows).toEqual([{ name: 'ZeroScore' }]);
+
+      const filterGteZero = g.querySync('MATCH (n:Person) WITH n WHERE n.score >= 0 RETURN n.name AS name ORDER BY n.name');
+      expect(filterGteZero.rows).toEqual([{ name: 'LowScore' }, { name: 'ZeroScore' }]);
+    });
+
+    it('propagates null in arithmetic, normalizes -0 to 0, and enforces runtime operand types', () => {
+      const g = new Graph();
+      g.querySync('CREATE (:Box { val: null, zero: 0 })');
+
+      const res = g.querySync(`
+        MATCH (b:Box)
+        RETURN b.val + 1 AS addNull,
+               'a' + b.val AS strNull,
+               b.val * 5 AS mulNull,
+               5 / b.val AS divNull,
+               5 % b.val AS modNull,
+               -b.val AS negNull,
+               -b.zero AS negZero
+      `);
+      expect(res.rows[0].addNull).toBeNull();
+      expect(res.rows[0].strNull).toBeNull();
+      expect(res.rows[0].mulNull).toBeNull();
+      expect(res.rows[0].divNull).toBeNull();
+      expect(res.rows[0].modNull).toBeNull();
+      expect(res.rows[0].negNull).toBeNull();
+      expect(Object.is(res.rows[0].negZero, 0)).toBe(true);
+
+      const ev = new ExpressionEvaluator();
+      expect(ev.applyBinaryOp('<', 'a', 'b')).toBe(true);
+      expect(ev.applyBinaryOp('<=', 'a', 'a')).toBe(true);
+      expect(ev.applyBinaryOp('>', 'b', 'a')).toBe(true);
+      expect(ev.applyBinaryOp('>=', 'b', 'b')).toBe(true);
+      expect(ev.applyBinaryOp('<', 1, null)).toBeNull();
+      expect(ev.applyBinaryOp('<', NaN, 1)).toBeNull();
+      expect(ev.applyBinaryOp('<', 'a', 1)).toBeNull();
+
+      expect(ev.applyBinaryOp('+', 1, 'a')).toBe('1a');
+      expect(ev.applyBinaryOp('+', 'x', true)).toBe('xtrue');
+      expect(ev.applyBinaryOp('+', true, 'x')).toBe('truex');
+      expect(ev.applyBinaryOp('+', [1, 2], [3])).toEqual([1, 2, 3]);
+      expect(ev.applyBinaryOp('+', [1, 2], 3)).toEqual([1, 2, 3]);
+      expect(ev.applyBinaryOp('+', 1, [2, 3])).toEqual([1, 2, 3]);
+      expect(() => ev.applyBinaryOp('+', { a: 1 }, 1)).toThrow(/Cannot apply '\+'/);
+
+      expect(ev.applyBinaryOp('-', 10, 3)).toBe(7);
+      expect(ev.applyBinaryOp('-', null, 1)).toBeNull();
+      expect(ev.applyBinaryOp('*', null, 2)).toBeNull();
+      expect(ev.applyBinaryOp('/', null, 2)).toBeNull();
+      expect(ev.applyBinaryOp('%', 10, 3)).toBe(1);
+      expect(ev.applyBinaryOp('%', null, 3)).toBeNull();
+      expect(ev.applyBinaryOp('^', 2, 3)).toBe(8);
+      expect(ev.applyBinaryOp('^', null, 3)).toBeNull();
+
+      expect(() => ev.applyBinaryOp('-', 'a', 1)).toThrow();
+      expect(() => ev.applyBinaryOp('%', 5, 0)).toThrow(/Modulo by zero/);
+      expect(() => ev.applyBinaryOp('*', 'a', 2)).toThrow(/multiply/);
+      expect(() => ev.applyBinaryOp('/', 'a', 2)).toThrow(/divide/);
+      expect(() => ev.applyBinaryOp('%', 'a', 2)).toThrow(/modulo/);
+      expect(() => ev.applyBinaryOp('^', 'a', 2)).toThrow(/exponentiate/);
+      expect(() => g.querySync("RETURN -'abc' AS bad")).toThrow(/Unary '-' requires a number/);
+    });
+
+    it('serializes distinct values and slot rows without type or UNBOUND collisions', async () => {
+      const g = new Graph();
+      const n = await g.addNode('N', { k: 1 });
+      const e = await g.addEdge(n.id, n.id, 'LOOP');
+
+      expect(serializeCypherKey(UNBOUND)).toBe('u:');
+      expect(serializeCypherKey(null)).toBe('0:null');
+      expect(serializeCypherKey(undefined)).toBe('0:undef');
+      expect(serializeCypherKey(NaN)).toBe('n:NaN');
+      expect(serializeCypherKey(-0)).toBe('n:0');
+      expect(serializeCypherKey(e)).toMatch(/^edge:/);
+      expect(serializeCypherKey([1, n, e])).toMatch(/^a:3:/);
+      expect(serializeCypherKey(Symbol('tag'))).toMatch(/^symbol:/);
+
+      expect(serializeSlotRowKey([1, UNBOUND])).not.toBe(serializeSlotRowKey([UNBOUND, 1]));
+      expect(serializeSlotRowKey(['a\x001:x', 2])).not.toBe(serializeSlotRowKey(['a', 'x', 2]));
+      expect(serializeSlotRowKey([UNBOUND, 1, 'a'])).toContain('1:3:n:1');
+      expect(serializeSlotRowKey([UNBOUND, 1, 'a'], [0, 1])).toBe('1:3:n:1');
+    });
+
+    it('orders strings deterministically by UTF-16 code units across compare, MIN/MAX, ORDER BY, and Graph.getNodes', async () => {
+      const ev = new ExpressionEvaluator();
+      expect(ev.compare('Bob', 'alice')).toBeLessThan(0);
+      expect(ev.compare(null, 1)).toBe(-1);
+      expect(ev.compare(1, null)).toBe(1);
+      expect(ev.compare(NaN, NaN)).toBe(0);
+      expect(ev.compare(NaN, 1)).toBe(1);
+      expect(ev.compare(1, NaN)).toBe(-1);
+      expect(ev.compare(1, 2)).toBe(-1);
+      expect(ev.compare(2, 1)).toBe(1);
+      expect(ev.compare(true, false)).toBe(1);
+      expect(ev.compare(false, true)).toBe(-1);
+      expect(ev.compare('a', 1)).toBe(1);
+      expect(ev.compare([1], [2])).toBe(-1);
+      expect(ev.compare([2], [1])).toBe(1);
+      expect(ev.compare([1], [1])).toBe(0);
+
+      const g = new Graph();
+      await g.addNode('Word', { val: 'alice' });
+      await g.addNode('Word', { val: 'Bob' });
+
+      const cypherOrdered = g.querySync('MATCH (w:Word) RETURN w.val AS v ORDER BY w.val ASC');
+      const agg = g.querySync("UNWIND ['alice', 'Bob'] AS s RETURN min(s) AS mn, max(s) AS mx");
+      const apiOrdered = await g.getNodes({
+        filter: { types: ['Word'] },
+        orderBy: { field: 'val', direction: 'asc' },
+      });
+
+      expect(cypherOrdered.rows.map((r) => r.v)).toEqual(['Bob', 'alice']);
+      expect(apiOrdered.map((n) => n.properties.val)).toEqual(['Bob', 'alice']);
+      expect(agg.rows[0]).toEqual({ mn: 'Bob', mx: 'alice' });
+    });
+  });
+
+  describe('RingQueue & Uint32RingQueue', () => {
+    it('supports growth, wraparound, and clear()', () => {
+      const rq = new RingQueue<number>(4);
+      for (let i = 0; i < 40; i++) rq.push(i);
+      expect(rq.shift()).toBe(0);
+      expect(rq.shift()).toBe(1);
+      for (let i = 40; i < 60; i++) rq.push(i);
+      expect(rq.length).toBe(58);
+      rq.clear();
+      expect(rq.length).toBe(0);
+      expect(rq.shift()).toBeUndefined();
+
+      const uq = new Uint32RingQueue(16);
+      for (let i = 0; i < 80; i++) uq.push(i);
+      expect(uq.shift()).toBe(0);
+      expect(uq.length).toBe(79);
+      uq.clear();
+      expect(uq.length).toBe(0);
     });
   });
 });

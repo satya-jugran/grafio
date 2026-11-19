@@ -193,227 +193,152 @@ export function runGraphPropertiesScenarios(
     });
   });
 
-  describe('Graph.addNodeProperty', () => {
+  describe('Graph.setNodeProperties', () => {
     let graph: Graph;
 
     beforeEach(async () => {
       graph = new Graph(provider);
     });
 
-    it('should add a new property to a node', async () => {
+    it('should add and merge properties on a node', async () => {
       const node = await graph.addNode('Person', { name: 'Alice' });
-      await graph.addNodeProperty(node.id, 'age', 30);
+      await graph.setNodeProperties(node.id, { age: 30, city: 'NYC' });
 
       const updated = await graph.getNode(node.id);
+      expect(updated?.properties.name).toBe('Alice');
       expect(updated?.properties.age).toBe(30);
+      expect(updated?.properties.city).toBe('NYC');
     });
 
-    it('should reject if property already exists', async () => {
+    it('should update existing property while preserving others when merge is true', async () => {
       const node = await graph.addNode('Person', { name: 'Alice', age: 30 });
-      await expect(graph.addNodeProperty(node.id, 'age', 31)).rejects.toThrow();
-    });
-
-    it('should reject non-primitive value', async () => {
-      const node = await graph.addNode('Person', { name: 'Alice' });
-      await expect(graph.addNodeProperty(node.id, 'address', { city: 'NYC' })).rejects.toThrow();
-    });
-
-    it('should throw NodeNotFoundError for non-existent node', async () => {
-      await expect(graph.addNodeProperty('non-existent', 'prop', 'value')).rejects.toThrow();
-    });
-  });
-
-  describe('Graph.updateNodeProperty', () => {
-    let graph: Graph;
-
-    beforeEach(async () => {
-      graph = new Graph(provider);
-    });
-
-    it('should update an existing node property', async () => {
-      const node = await graph.addNode('Person', { name: 'Alice', age: 30 });
-      await graph.updateNodeProperty(node.id, 'age', 31);
+      await graph.setNodeProperties(node.id, { age: 31 });
 
       const updated = await graph.getNode(node.id);
+      expect(updated?.properties.name).toBe('Alice');
       expect(updated?.properties.age).toBe(31);
     });
 
-    it('should throw PropertyNotFoundError if property does not exist', async () => {
-      const node = await graph.addNode('Person', { name: 'Alice' });
-      await expect(graph.updateNodeProperty(node.id, 'age', 31)).rejects.toThrow();
-    });
-
-    it('should reject non-primitive value', async () => {
-      const node = await graph.addNode('Person', { name: 'Alice', age: 30 });
-      await expect(graph.updateNodeProperty(node.id, 'age', { value: 31 })).rejects.toThrow();
-    });
-
-    it('should throw NodeNotFoundError for non-existent node', async () => {
-      await expect(graph.updateNodeProperty('non-existent', 'prop', 'value')).rejects.toThrow();
-    });
-  });
-
-  describe('Graph.deleteNodeProperty', () => {
-    let graph: Graph;
-
-    beforeEach(async () => {
-      graph = new Graph(provider);
-    });
-
-    it('should delete a property from a node', async () => {
-      const node = await graph.addNode('Person', { name: 'Alice', age: 30 });
-      await graph.deleteNodeProperty(node.id, 'age');
+    it('should replace all properties when merge is false', async () => {
+      const node = await graph.addNode('Person', { name: 'Alice', age: 30, city: 'NYC' });
+      await graph.setNodeProperties(node.id, { role: 'admin' }, { merge: false });
 
       const updated = await graph.getNode(node.id);
-      expect(updated?.properties.age).toBeUndefined();
+      expect(updated?.properties).toEqual({ role: 'admin' });
     });
 
-    it('should throw NodeNotFoundError for non-existent node', async () => {
-      await expect(graph.deleteNodeProperty('non-existent', 'prop')).rejects.toThrow();
-    });
-  });
-
-  describe('Graph.clearNodeProperties', () => {
-    let graph: Graph;
-
-    beforeEach(async () => {
-      graph = new Graph(provider);
-    });
-
-    it('should clear all properties from a node', async () => {
+    it('should clear all properties when replacing with empty object', async () => {
       const node = await graph.addNode('Person', { name: 'Alice', age: 30, city: 'NYC' });
-      await graph.clearNodeProperties(node.id);
+      await graph.setNodeProperties(node.id, {}, { merge: false });
 
       const updated = await graph.getNode(node.id);
       expect(Object.keys(updated?.properties || {}).length).toBe(0);
     });
 
+    it('should reject non-primitive value', async () => {
+      const node = await graph.addNode('Person', { name: 'Alice' });
+      await expect(graph.setNodeProperties(node.id, { address: { city: 'NYC' } })).rejects.toThrow();
+    });
+
     it('should throw NodeNotFoundError for non-existent node', async () => {
-      await expect(graph.clearNodeProperties('non-existent')).rejects.toThrow();
+      await expect(graph.setNodeProperties('non-existent', { prop: 'value' })).rejects.toThrow();
     });
   });
 
-  describe('Graph.addEdgeProperty', () => {
+  describe('Graph.unsetNodeProperties', () => {
     let graph: Graph;
 
     beforeEach(async () => {
       graph = new Graph(provider);
     });
 
-    it('should add a new property to an edge', async () => {
+    it('should delete properties from a node', async () => {
+      const node = await graph.addNode('Person', { name: 'Alice', age: 30 });
+      await graph.unsetNodeProperties(node.id, ['age']);
+
+      const updated = await graph.getNode(node.id);
+      expect(updated?.properties.name).toBe('Alice');
+      expect(updated?.properties.age).toBeUndefined();
+    });
+
+    it('should throw NodeNotFoundError for non-existent node', async () => {
+      await expect(graph.unsetNodeProperties('non-existent', ['prop'])).rejects.toThrow();
+    });
+  });
+
+  describe('Graph.setEdgeProperties', () => {
+    let graph: Graph;
+
+    beforeEach(async () => {
+      graph = new Graph(provider);
+    });
+
+    it('should add and merge properties on an edge', async () => {
       const alice = await graph.addNode('Person', { name: 'Alice' });
       const bob = await graph.addNode('Person', { name: 'Bob' });
       const edge = await graph.addEdge(alice.id, bob.id, 'KNOWS', {});
 
-      await graph.addEdgeProperty(edge.id, 'since', 2020);
+      await graph.setEdgeProperties(edge.id, { since: 2020 });
 
       const updated = await graph.getEdge(edge.id);
       expect(updated?.properties.since).toBe(2020);
     });
 
-    it('should reject if property already exists', async () => {
+    it('should update existing edge property when merging', async () => {
       const alice = await graph.addNode('Person', { name: 'Alice' });
       const bob = await graph.addNode('Person', { name: 'Bob' });
       const edge = await graph.addEdge(alice.id, bob.id, 'KNOWS', { since: 2020 });
 
-      await expect(graph.addEdgeProperty(edge.id, 'since', 2021)).rejects.toThrow();
-    });
-
-    it('should reject non-primitive value', async () => {
-      const alice = await graph.addNode('Person', { name: 'Alice' });
-      const bob = await graph.addNode('Person', { name: 'Bob' });
-      const edge = await graph.addEdge(alice.id, bob.id, 'KNOWS', {});
-
-      await expect(graph.addEdgeProperty(edge.id, 'metadata', { key: 'value' })).rejects.toThrow();
-    });
-
-    it('should throw EdgeNotFoundError for non-existent edge', async () => {
-      await expect(graph.addEdgeProperty('non-existent', 'prop', 'value')).rejects.toThrow();
-    });
-  });
-
-  describe('Graph.updateEdgeProperty', () => {
-    let graph: Graph;
-
-    beforeEach(async () => {
-      graph = new Graph(provider);
-    });
-
-    it('should update an existing edge property', async () => {
-      const alice = await graph.addNode('Person', { name: 'Alice' });
-      const bob = await graph.addNode('Person', { name: 'Bob' });
-      const edge = await graph.addEdge(alice.id, bob.id, 'KNOWS', { since: 2020 });
-
-      await graph.updateEdgeProperty(edge.id, 'since', 2021);
+      await graph.setEdgeProperties(edge.id, { since: 2021 });
 
       const updated = await graph.getEdge(edge.id);
       expect(updated?.properties.since).toBe(2021);
     });
 
-    it('should throw PropertyNotFoundError if property does not exist', async () => {
+    it('should replace all properties when merge is false', async () => {
       const alice = await graph.addNode('Person', { name: 'Alice' });
       const bob = await graph.addNode('Person', { name: 'Bob' });
-      const edge = await graph.addEdge(alice.id, bob.id, 'KNOWS', {});
+      const edge = await graph.addEdge(alice.id, bob.id, 'KNOWS', { since: 2020, weight: 0.5 });
 
-      await expect(graph.updateEdgeProperty(edge.id, 'since', 2021)).rejects.toThrow();
+      await graph.setEdgeProperties(edge.id, {}, { merge: false });
+
+      const updated = await graph.getEdge(edge.id);
+      expect(Object.keys(updated?.properties || {}).length).toBe(0);
     });
 
     it('should reject non-primitive value', async () => {
       const alice = await graph.addNode('Person', { name: 'Alice' });
       const bob = await graph.addNode('Person', { name: 'Bob' });
-      const edge = await graph.addEdge(alice.id, bob.id, 'KNOWS', { since: 2020 });
+      const edge = await graph.addEdge(alice.id, bob.id, 'KNOWS', {});
 
-      await expect(graph.updateEdgeProperty(edge.id, 'since', { year: 2021 })).rejects.toThrow();
+      await expect(graph.setEdgeProperties(edge.id, { metadata: { key: 'value' } })).rejects.toThrow();
     });
 
     it('should throw EdgeNotFoundError for non-existent edge', async () => {
-      await expect(graph.updateEdgeProperty('non-existent', 'prop', 'value')).rejects.toThrow();
+      await expect(graph.setEdgeProperties('non-existent', { prop: 'value' })).rejects.toThrow();
     });
   });
 
-  describe('Graph.deleteEdgeProperty', () => {
+  describe('Graph.unsetEdgeProperties', () => {
     let graph: Graph;
 
     beforeEach(async () => {
       graph = new Graph(provider);
     });
 
-    it('should delete a property from an edge', async () => {
+    it('should delete properties from an edge', async () => {
       const alice = await graph.addNode('Person', { name: 'Alice' });
       const bob = await graph.addNode('Person', { name: 'Bob' });
       const edge = await graph.addEdge(alice.id, bob.id, 'KNOWS', { since: 2020 });
 
-      await graph.deleteEdgeProperty(edge.id, 'since');
+      await graph.unsetEdgeProperties(edge.id, ['since']);
 
       const updated = await graph.getEdge(edge.id);
       expect(updated?.properties.since).toBeUndefined();
     });
 
     it('should throw EdgeNotFoundError for non-existent edge', async () => {
-      await expect(graph.deleteEdgeProperty('non-existent', 'prop')).rejects.toThrow();
-    });
-  });
-
-  describe('Graph.clearEdgeProperties', () => {
-    let graph: Graph;
-
-    beforeEach(async () => {
-      graph = new Graph(provider);
-    });
-
-    it('should clear all properties from an edge', async () => {
-      const alice = await graph.addNode('Person', { name: 'Alice' });
-      const bob = await graph.addNode('Person', { name: 'Bob' });
-      const edge = await graph.addEdge(alice.id, bob.id, 'KNOWS', { since: 2020, weight: 0.5 });
-
-      await graph.clearEdgeProperties(edge.id);
-
-      const updated = await graph.getEdge(edge.id);
-      expect(Object.keys(updated?.properties || {}).length).toBe(0);
-    });
-
-    it('should throw EdgeNotFoundError for non-existent edge', async () => {
-      await expect(graph.clearEdgeProperties('non-existent')).rejects.toThrow();
+      await expect(graph.unsetEdgeProperties('non-existent', ['prop'])).rejects.toThrow();
     });
   });
 }

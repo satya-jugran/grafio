@@ -1,8 +1,9 @@
 /**
  * Read step executor for the Cypher execution layer.
  *
- * Executes {@link NodeScanStep}, {@link NodeSeekStep}, and
- * {@link EdgeExpandStep} against a {@link Graph} instance.
+ * Executes {@link NodeScanStep}, {@link NodeSeekStep}, {@link VerifyNodeStep},
+ * and {@link EdgeExpandStep} against a {@link Graph} instance, with zero-overhead
+ * synchronous CSR+Delta kernel fast paths on {@link ISyncGraphKernel}.
  *
  * @module cypher/executor/steps/ReadStepExecutors
  */
@@ -11,6 +12,13 @@ import { Graph } from '../../../Graph';
 import { Node } from '../../../Node';
 import { Edge } from '../../../Edge';
 import { GraphTransaction } from '../../../Graph/GraphTransaction';
+import type {
+  ISyncGraphKernel,
+  ITransactionHandle,
+  StorageQueryOptions,
+} from '../../../storage/IStorageProvider';
+import { TAG_ABSENT } from '../../../storage/engine/ColumnStore';
+import type { Bitmask64Query } from '../../../storage/engine/StringDictionary';
 import {
   NodeScanStep,
   NodeSeekStep,
@@ -19,9 +27,10 @@ import {
   PropertyFilter,
 } from '../../plan/QueryPlan';
 import type { GraphQueryOptions } from '../../../Graph/GraphQueryOptions';
+import { UNBOUND, type VarSlotTable } from '../../plan/CompiledPlanMeta';
 import { UnboundParameterError } from '../../errors';
 import { Row, ExpressionEvaluator } from '../ExpressionEvaluator';
-import { parallelMap } from '../parallelMap';
+import { RingQueue } from '../RingQueue';
 
 interface ParameterReference {
   kind: 'Parameter';
@@ -40,11 +49,17 @@ function compareValues(
   expected: unknown,
   operator: ComparisonOperator,
 ): boolean {
+  if (actual === null || actual === undefined || expected === null || expected === undefined) {
+    return false;
+  }
+  if (typeof actual === 'number' && typeof expected === 'number') {
+    if (Number.isNaN(actual) || Number.isNaN(expected)) return false;
+    return compareComparableValues(actual, expected, operator);
+  }
   if (typeof actual === 'string' && typeof expected === 'string') {
     return compareComparableValues(actual, expected, operator);
   }
-
-  return compareComparableValues(Number(actual), Number(expected), operator);
+  return false;
 }
 
 function compareComparableValues(
@@ -60,74 +75,131 @@ function compareComparableValues(
   }
 }
 
+interface FrontierKernelItem {
+  nodeSlot: number;
+  hops: number;
+  usedEdgeSlots?: number[];
+  pathNodeSlots?: number[];
+  pathEdgeSlots?: number[];
+}
+
+interface FrontierNodeItem {
+  node: Node;
+  hops: number;
+  usedEdgeIds?: string[];
+  pathNodes?: Node[];
+  pathEdges?: Edge[];
+}
+
 /**
- * Executes read-only plan steps (NodeScan, NodeSeek, EdgeExpand)
+ * Executes read-only plan steps (NodeScan, NodeSeek, VerifyNode, EdgeExpand)
  * against a {@link Graph} instance.
  */
 export class ReadStepExecutor {
   private readonly _graph: Graph;
   private readonly _evaluator: ExpressionEvaluator;
-  private readonly _maxDegreeOfParallelism: number;
 
-  constructor(
-    graph: Graph,
-    evaluator: ExpressionEvaluator,
-    maxDegreeOfParallelism: number = 1,
-  ) {
+  constructor(graph: Graph, evaluator: ExpressionEvaluator) {
     this._graph = graph;
     this._evaluator = evaluator;
-    this._maxDegreeOfParallelism = Math.max(1, maxDegreeOfParallelism);
   }
 
   // ── NodeScanStep ───────────────────────────────────────────────
 
-  /**
-   * Execute a {@link NodeScanStep}: fetch nodes from storage, optionally
-   * filtered by type labels and property filters, then cross-join with
-   * the current row buffer.
-   */
   async executeNodeScan(
     step: NodeScanStep,
     rows: Row[],
     params: Record<string, unknown>,
+    slotTable: VarSlotTable,
     transaction?: GraphTransaction,
   ): Promise<Row[]> {
-    const filter: NonNullable<GraphQueryOptions['filter']> = {};
+    const filter = this._buildNodeScanFilter(step, params);
+    const nodes = Object.keys(filter).length > 0
+      ? await this._graph.getNodes({ filter, transaction })
+      : await this._graph.getNodes({ transaction });
 
+    return this._crossJoinNodes(rows, nodes, slotTable.getOrAdd(step.variable));
+  }
+
+  executeNodeScanSync(
+    kernel: ISyncGraphKernel,
+    step: NodeScanStep,
+    rows: Row[],
+    params: Record<string, unknown>,
+    slotTable: VarSlotTable,
+    transaction?: GraphTransaction,
+  ): Row[] {
+    if (rows.length === 0) return [];
+
+    const filter = this._buildNodeScanFilter(step, params);
+    const hasFilter = Object.keys(filter).length > 0;
+    const txHandle = transaction?._getHandle();
+    const varSlot = slotTable.getOrAdd(step.variable);
+
+    if (txHandle !== undefined) {
+      const nodes = kernel.queryNodesSync(
+        hasFilter ? { filter, transaction: txHandle } : { transaction: txHandle },
+      );
+      return this._crossJoinNodes(rows, nodes, varSlot);
+    }
+
+    const slots = kernel.queryNodeSlotsSync(hasFilter ? { filter } : undefined);
+    const slotCount = slots.length;
+    if (slotCount === 0) return [];
+
+    if (rows.length === 1) {
+      const base = rows[0];
+      const out = new Array<Row>(slotCount);
+      for (let i = 0; i < slotCount; i++) {
+        const nr = base.slice();
+        nr[varSlot] = kernel.getNodeEntityBySlot(slots[i]);
+        out[i] = nr;
+      }
+      return out;
+    }
+
+    const nodes = new Array<Node>(slotCount);
+    for (let i = 0; i < slotCount; i++) {
+      nodes[i] = kernel.getNodeEntityBySlot(slots[i]);
+    }
+    return this._crossJoinNodes(rows, nodes, varSlot);
+  }
+
+  private _buildNodeScanFilter(
+    step: NodeScanStep,
+    params: Record<string, unknown>,
+  ): NonNullable<GraphQueryOptions['filter']> {
+    const filter: NonNullable<GraphQueryOptions['filter']> = {};
     if (step.types?.length) {
       filter.types = step.types;
     } else if (step.label) {
       filter.types = [step.label];
     }
-
     if (step.propertyFilters?.length) {
-      filter.properties = this._resolvePropertyFilterParams(
-        step.propertyFilters,
-        params,
-      );
+      filter.properties = this._resolvePropertyFilterParams(step.propertyFilters, params);
     }
-
-    const nodes = Object.keys(filter).length > 0
-      ? await this._graph.getNodes({ filter, transaction })
-      : await this._graph.getNodes({ transaction });
-
-    return parallelMap(rows, (rowChunk) => {
-      const chunkResult: Row[] = [];
-      for (const row of rowChunk) {
-        for (const node of nodes) {
-          const newRow = new Map(row);
-          newRow.set(step.variable, node);
-          chunkResult.push(newRow);
-        }
-      }
-      return Promise.resolve(chunkResult);
-    }, this._maxDegreeOfParallelism);
+    return filter;
   }
 
-  /**
-   * Recursively resolve `$param` references in a property filter tree
-   * against the runtime parameter map.
-   */
+  private _crossJoinNodes(
+    rows: Row[],
+    nodes: readonly Node[],
+    varSlot: number,
+  ): Row[] {
+    if (rows.length === 0 || nodes.length === 0) return [];
+    const out = new Array<Row>(rows.length * nodes.length);
+    let idx = 0;
+    for (let r = 0; r < rows.length; r++) {
+      const base = rows[r];
+      for (let n = 0; n < nodes.length; n++) {
+        const nr = base.slice();
+        nr[varSlot] = nodes[n];
+        out[idx++] = nr;
+      }
+    }
+    return out;
+  }
+
   private _resolvePropertyFilterParams(
     filters: PropertyFilter[],
     params: Record<string, unknown>,
@@ -140,14 +212,13 @@ export class ReadStepExecutor {
     params: Record<string, unknown>,
   ): PropertyFilter {
     const resolved: PropertyFilter = {};
-
     if (f.key !== undefined) resolved.key = f.key;
     if (f.op !== undefined) resolved.op = f.op;
     if (f.AND) {
-      resolved.AND = f.AND.map(child => this._resolveOneFilter(child, params));
+      resolved.AND = f.AND.map((child) => this._resolveOneFilter(child, params));
     }
     if (f.OR) {
-      resolved.OR = f.OR.map(child => this._resolveOneFilter(child, params));
+      resolved.OR = f.OR.map((child) => this._resolveOneFilter(child, params));
     }
     if ('value' in f) {
       const value = f.value;
@@ -160,70 +231,153 @@ export class ReadStepExecutor {
         resolved.value = value;
       }
     }
-
     return resolved;
   }
 
   // ── VerifyNodeStep ───────────────────────────────────────────────
 
-  /**
-   * Execute a {@link VerifyNodeStep}: filter existing rows by verifying
-   * that their bound variable matches the pattern's required labels and properties.
-   */
   async executeVerifyNode(
     step: VerifyNodeStep,
     rows: Row[],
     params: Record<string, unknown>,
-    transaction?: GraphTransaction,
+    slotTable: VarSlotTable,
+    _transaction?: GraphTransaction,
   ): Promise<Row[]> {
-    let resolvedFilters: PropertyFilter[] | undefined;
-    if (step.propertyFilters?.length) {
-      resolvedFilters = this._resolvePropertyFilterParams(
-        step.propertyFilters,
-        params,
-      );
-    }
-
-    return parallelMap(rows, async (rowChunk) => {
-      const chunkResult: Row[] = [];
-      for (const row of rowChunk) {
-        const node = row.get(step.variable) as Node | undefined;
-        if (!node) continue;
-
-        if (step.types && step.types.length > 0) {
-          if (!node.labels || !step.types.some(t => node.labels.includes(t))) continue;
-        }
-
-        if (resolvedFilters) {
-          if (!this._evaluatePropertyFilters(node.properties, resolvedFilters)) continue;
-        }
-
-        chunkResult.push(row);
-      }
-      return chunkResult;
-    }, this._maxDegreeOfParallelism);
+    return this._verifyNodes(step, rows, params, slotTable);
   }
 
-  private _evaluatePropertyFilters(nodeProps: Record<string, unknown>, filters: PropertyFilter[]): boolean {
+  executeVerifyNodeSync(
+    kernel: ISyncGraphKernel,
+    step: VerifyNodeStep,
+    rows: Row[],
+    params: Record<string, unknown>,
+    slotTable: VarSlotTable,
+    _transaction?: GraphTransaction,
+  ): Row[] {
+    return this._verifyNodes(step, rows, params, slotTable, kernel);
+  }
+
+  private _verifyNodes(
+    step: VerifyNodeStep,
+    rows: Row[],
+    params: Record<string, unknown>,
+    slotTable: VarSlotTable,
+    kernel?: ISyncGraphKernel,
+  ): Row[] {
+    if (rows.length === 0) return [];
+    const resolvedFilters = step.propertyFilters?.length
+      ? this._resolvePropertyFilterParams(step.propertyFilters, params)
+      : undefined;
+    const varSlot = slotTable.getOrAdd(step.variable);
+
+    const arena = kernel?.arena;
+    const labelMask =
+      kernel && step.types?.length
+        ? kernel.arena.labelDict.buildQueryMask(step.types)
+        : undefined;
+    if (kernel && step.types?.length && labelMask === null) return [];
+
+    const checkColumnDirect = Boolean(kernel && !kernel.hasActiveTransactions);
+    const out: Row[] = [];
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const raw = row[varSlot];
+      if (raw === UNBOUND || !raw) continue;
+      const node = raw as Node;
+
+      if (
+        checkColumnDirect &&
+        kernel &&
+        arena &&
+        node._slot !== undefined &&
+        arena.nodeAlive[node._slot] === 1 &&
+        arena.nodeIds[node._slot] === node.id
+      ) {
+        const slot = node._slot;
+        if (labelMask && !arena.matchesNodeLabelMask(slot, labelMask)) continue;
+        if (resolvedFilters && !this._evaluateSlotFilters(kernel, slot, resolvedFilters)) continue;
+        out.push(row);
+      } else {
+        if (step.types?.length && (!node.labels || !step.types.some((t) => node.labels.includes(t)))) {
+          continue;
+        }
+        if (resolvedFilters && !this._evaluatePropertyFilters(node.properties, resolvedFilters)) {
+          continue;
+        }
+        out.push(row);
+      }
+    }
+    return out;
+  }
+
+  private _evaluateSlotFilters(
+    kernel: ISyncGraphKernel,
+    slot: number,
+    filters: PropertyFilter[],
+  ): boolean {
+    for (let i = 0; i < filters.length; i++) {
+      if (!this._evaluateOneSlotFilter(kernel, slot, filters[i])) return false;
+    }
+    return true;
+  }
+
+  private _evaluateOneSlotFilter(
+    kernel: ISyncGraphKernel,
+    slot: number,
+    filter: PropertyFilter,
+  ): boolean {
+    if (filter.AND && Array.isArray(filter.AND)) {
+      for (let i = 0; i < filter.AND.length; i++) {
+        if (!this._evaluateOneSlotFilter(kernel, slot, filter.AND[i])) return false;
+      }
+      return true;
+    }
+    if (filter.OR && Array.isArray(filter.OR)) {
+      for (let i = 0; i < filter.OR.length; i++) {
+        if (this._evaluateOneSlotFilter(kernel, slot, filter.OR[i])) return true;
+      }
+      return false;
+    }
+
+    const key = filter.key as string;
+    const keyId = kernel.arena.nodePropDict.lookup(key);
+    let actualValue: unknown = undefined;
+    if (keyId >= 0) {
+      const col = kernel.arena.nodeColumns.getColumnByKeyId(keyId);
+      if (col && col.tags[slot] !== TAG_ABSENT) {
+        actualValue = col.get(slot);
+      }
+    }
+    return this._matchOp(actualValue, filter.value, (filter.op as string) || '=');
+  }
+
+  private _evaluatePropertyFilters(
+    nodeProps: Readonly<Record<string, unknown>>,
+    filters: PropertyFilter[],
+  ): boolean {
     for (const filter of filters) {
       if (!this._evaluateOneFilter(nodeProps, filter)) return false;
     }
     return true;
   }
 
-  private _evaluateOneFilter(nodeProps: Record<string, unknown>, filter: PropertyFilter): boolean {
+  private _evaluateOneFilter(
+    nodeProps: Readonly<Record<string, unknown>>,
+    filter: PropertyFilter,
+  ): boolean {
     if (filter.AND && Array.isArray(filter.AND)) {
-      return filter.AND.every(f => this._evaluateOneFilter(nodeProps, f));
+      return filter.AND.every((f) => this._evaluateOneFilter(nodeProps, f));
     }
     if (filter.OR && Array.isArray(filter.OR)) {
-      return filter.OR.some(f => this._evaluateOneFilter(nodeProps, f));
+      return filter.OR.some((f) => this._evaluateOneFilter(nodeProps, f));
     }
-
     const key = filter.key as string;
     const op = (filter.op as string) || '=';
-    const expectedValue = filter.value;
-    const actualValue = nodeProps[key];
+    return this._matchOp(nodeProps[key], filter.value, op);
+  }
 
+  private _matchOp(actualValue: unknown, expectedValue: unknown, op: string): boolean {
     switch (op) {
       case '=': return actualValue === expectedValue;
       case '<>': return actualValue !== expectedValue;
@@ -244,14 +398,11 @@ export class ReadStepExecutor {
 
   // ── NodeSeekStep ───────────────────────────────────────────────
 
-  /**
-   * Direct node lookup — O(1) via `graph.getNode(id)` for id-indexed
-   * seeks or `graph.getNodes({filter})` for property-indexed seeks.
-   */
   async executeNodeSeek(
     step: NodeSeekStep,
     rows: Row[],
     params: Record<string, unknown>,
+    slotTable: VarSlotTable,
     transaction?: GraphTransaction,
   ): Promise<Row[]> {
     let nodes: readonly Node[];
@@ -265,89 +416,124 @@ export class ReadStepExecutor {
       }
       case 'property': {
         const resolvedValue = this._evaluator.resolveParam(step.value, params);
-        const filter: {
-          types?: string[];
-          properties: Array<{ key: string; value: unknown; op?: '=' }>;
-        } = {
+        const filter: NonNullable<GraphQueryOptions['filter']> = {
           properties: [{ key: step.key!, value: resolvedValue, op: '=' }],
         };
         if (step.types?.length) filter.types = step.types;
-         nodes = await this._graph.getNodes({ filter, transaction });
+        nodes = await this._graph.getNodes({ filter, transaction });
         break;
       }
       default:
         nodes = [];
     }
 
-    return parallelMap(rows, async (rowChunk) => {
-      const chunkResult: Row[] = [];
-      for (const row of rowChunk) {
-        for (const node of nodes) {
-          const newRow = new Map(row);
-          newRow.set(step.variable, node);
-          chunkResult.push(newRow);
-        }
+    return this._crossJoinNodes(rows, nodes, slotTable.getOrAdd(step.variable));
+  }
+
+  executeNodeSeekSync(
+    kernel: ISyncGraphKernel,
+    step: NodeSeekStep,
+    rows: Row[],
+    params: Record<string, unknown>,
+    slotTable: VarSlotTable,
+    transaction?: GraphTransaction,
+  ): Row[] {
+    if (rows.length === 0) return [];
+    const txHandle = transaction?._getHandle();
+    let nodes: Node[];
+
+    switch (step.index) {
+      case 'id': {
+        const id = this._evaluator.resolveParam(step.value, params);
+        const node = kernel.getNodeSync(String(id ?? ''), txHandle);
+        nodes = node ? [node] : [];
+        break;
       }
-      return chunkResult;
-    }, this._maxDegreeOfParallelism);
+      case 'property': {
+        const resolvedValue = this._evaluator.resolveParam(step.value, params);
+        const filter: NonNullable<GraphQueryOptions['filter']> = {
+          properties: [{ key: step.key!, value: resolvedValue, op: '=' }],
+        };
+        if (step.types?.length) filter.types = step.types;
+        nodes = kernel.queryNodesSync({ filter, transaction: txHandle });
+        break;
+      }
+      default:
+        nodes = [];
+    }
+
+    return this._crossJoinNodes(rows, nodes, slotTable.getOrAdd(step.variable));
   }
 
   // ── EdgeExpandStep ─────────────────────────────────────────────
 
-  /**
-   * Execute an {@link EdgeExpandStep}: for each row, expand from the
-   * bound source node and cross-join with the matched target nodes.
-   */
   async executeEdgeExpand(
     step: EdgeExpandStep,
     rows: Row[],
-    params: Record<string, unknown>,
+    _params: Record<string, unknown>,
+    slotTable: VarSlotTable,
     transaction?: GraphTransaction,
   ): Promise<Row[]> {
-    return parallelMap(rows, async (rowChunk) => {
-      const chunkResult: Row[] = [];
-      for (const row of rowChunk) {
-        const sourceNode = row.get(step.source) as Node | undefined;
-        if (!sourceNode) continue;
-        const expanded = await this._expandFromNode(step, row, sourceNode, transaction);
-        chunkResult.push(...expanded);
+    const srcSlotVar = slotTable.getOrAdd(step.source);
+    const tgtSlotVar = slotTable.getOrAdd(step.target);
+    const edgeSlotVar = step.edgeVar ? slotTable.getOrAdd(step.edgeVar) : -1;
+    const pathSlotVar = step.pathVar ? slotTable.getOrAdd(step.pathVar) : -1;
+
+    const result: Row[] = [];
+    for (const row of rows) {
+      const rawSrc = row[srcSlotVar];
+      if (rawSrc === UNBOUND || !rawSrc) continue;
+      const sourceNode = rawSrc as Node;
+
+      const expanded = step.strategy === 'single-hop'
+        ? await this._expandSingleHopAsync(
+            step,
+            row,
+            sourceNode,
+            tgtSlotVar,
+            edgeSlotVar,
+            pathSlotVar,
+            transaction,
+          )
+        : await this._expandMultiHopAsync(
+            step,
+            row,
+            sourceNode,
+            tgtSlotVar,
+            edgeSlotVar,
+            pathSlotVar,
+            transaction,
+          );
+      for (let i = 0; i < expanded.length; i++) {
+        result.push(expanded[i]);
       }
-      return chunkResult;
-    }, this._maxDegreeOfParallelism);
-  }
-
-  private async _expandFromNode(
-    step: EdgeExpandStep,
-    row: Row,
-    sourceNode: Node,
-    transaction?: GraphTransaction,
-  ): Promise<Row[]> {
-    if (step.strategy === 'single-hop') {
-      return this._expandSingleHop(step, row, sourceNode, transaction);
     }
-    return this._expandMultiHop(step, row, sourceNode, transaction);
+    return result;
   }
 
-  private async _expandSingleHop(
+  private async _expandSingleHopAsync(
     step: EdgeExpandStep,
     row: Row,
     sourceNode: Node,
+    tgtSlotVar: number,
+    edgeSlotVar: number,
+    pathSlotVar: number,
     transaction?: GraphTransaction,
   ): Promise<Row[]> {
-    const filterArg = step.types.length > 0
-      ? { filter: { types: step.types } }
-      : undefined;
-
+    const filterArg = step.types.length > 0 ? { filter: { types: step.types } } : undefined;
     const edges =
       step.direction === 'out'
         ? await this._graph.getEdgesFrom(sourceNode.id, { ...filterArg, transaction })
         : await this._graph.getEdgesTo(sourceNode.id, { ...filterArg, transaction });
 
-    const targetIds = edges.map(e => step.direction === 'out' ? e.targetId : e.sourceId);
+    const targetIds = edges.map((e) => (step.direction === 'out' ? e.targetId : e.sourceId));
     const uniqueIds = [...new Set(targetIds)];
     const nodeMap = await this._graph.getNodesByIds(uniqueIds, transaction);
 
+    const existingRaw = row[tgtSlotVar];
+    const existingTarget = existingRaw !== UNBOUND ? (existingRaw as Node | undefined) : undefined;
     const result: Row[] = [];
+
     for (const edge of edges) {
       const targetId = step.direction === 'out' ? edge.targetId : edge.sourceId;
       const targetNode = nodeMap.get(targetId);
@@ -356,82 +542,519 @@ export class ReadStepExecutor {
       if (
         step.targetTypes &&
         step.targetTypes.length > 0 &&
-        !targetNode.labels.some(l => step.targetTypes!.includes(l))
+        !targetNode.labels.some((l) => step.targetTypes!.includes(l))
       ) {
         continue;
       }
+      if (existingTarget && existingTarget.id !== targetNode.id) continue;
 
-      const existingTarget = row.get(step.target) as Node | undefined;
-      if (existingTarget && existingTarget.id !== targetNode.id) {
-        continue;
-      }
+      const newRow = row.slice();
+      if (edgeSlotVar >= 0) newRow[edgeSlotVar] = edge;
+      newRow[tgtSlotVar] = targetNode;
 
-      const newRow = new Map(row);
-      if (step.edgeVar) newRow.set(step.edgeVar, edge);
-      newRow.set(step.target, targetNode);
-
-      if (step.pathVar) {
-        const existingPath = newRow.get(step.pathVar) as
-          | (Node | Edge)[]
-          | undefined;
-        if (existingPath && existingPath.length > 0) {
-          newRow.set(step.pathVar, [...existingPath, edge, targetNode]);
+      if (pathSlotVar >= 0) {
+        const existingPath = newRow[pathSlotVar];
+        if (existingPath !== UNBOUND && Array.isArray(existingPath) && existingPath.length > 0) {
+          newRow[pathSlotVar] = [...existingPath, edge, targetNode];
         } else {
-          newRow.set(step.pathVar, [sourceNode, edge, targetNode]);
+          newRow[pathSlotVar] = [sourceNode, edge, targetNode];
         }
       }
-
       result.push(newRow);
     }
     return result;
   }
 
-  private async _expandMultiHop(
+  private async _expandMultiHopAsync(
     step: EdgeExpandStep,
     row: Row,
     sourceNode: Node,
+    tgtSlotVar: number,
+    edgeSlotVar: number,
+    pathSlotVar: number,
     transaction?: GraphTransaction,
   ): Promise<Row[]> {
     const result: Row[] = [];
-    const visited = new Map<string, number>([[sourceNode.id, 0]]);
-
-    const frontier: Array<{
-      node: Node;
-      row: Row;
-      hops: number;
-      pathNodes?: Node[];
-      pathEdges?: Edge[];
-    }> = [
-        {
-          node: sourceNode,
-          row,
-          hops: 0,
-          pathNodes: step.pathVar ? [sourceNode] : undefined,
-          pathEdges: step.pathVar ? [] : undefined,
-        },
-      ];
-
+    const needPath = pathSlotVar >= 0;
     const isBFS = step.strategy !== 'multi-hop-dfs';
+    const queue = isBFS ? new RingQueue<FrontierNodeItem>() : undefined;
+    const stack: FrontierNodeItem[] = [];
 
-    while (frontier.length > 0) {
-      const { node, row: curRow, hops, pathNodes, pathEdges } = isBFS
-        ? frontier.shift()!
-        : frontier.pop()!;
+    const initial: FrontierNodeItem = {
+      node: sourceNode,
+      hops: 0,
+      pathNodes: needPath ? [sourceNode] : undefined,
+      pathEdges: needPath ? [] : undefined,
+    };
+    if (queue) queue.push(initial);
+    else stack.push(initial);
 
+    const existingRaw = row[tgtSlotVar];
+    const existingTarget = existingRaw !== UNBOUND ? (existingRaw as Node | undefined) : undefined;
+
+    while ((queue ? queue.length : stack.length) > 0) {
+      const { node, hops, usedEdgeIds, pathNodes, pathEdges } = queue ? queue.shift()! : stack.pop()!;
       if (hops >= step.maxHops) continue;
 
-      const filterArg = step.types.length > 0
-        ? { filter: { types: step.types } }
-        : undefined;
-
+      const filterArg = step.types.length > 0 ? { filter: { types: step.types } } : undefined;
       const edges =
         step.direction === 'out'
           ? await this._graph.getEdgesFrom(node.id, { ...filterArg, transaction })
           : await this._graph.getEdgesTo(node.id, { ...filterArg, transaction });
 
-      const edgeIds = edges.map(e => step.direction === 'out' ? e.targetId : e.sourceId);
-      const uniqueIds = [...new Set(edgeIds)];
+      const targetIds = edges.map((e) => (step.direction === 'out' ? e.targetId : e.sourceId));
+      const uniqueIds = [...new Set(targetIds)];
       const nodeMap = await this._graph.getNodesByIds(uniqueIds, transaction);
+
+      for (const edge of edges) {
+        // Per-path relationship uniqueness (openCypher trail semantics)
+        const edgeUsed = needPath
+          ? (pathEdges !== undefined && pathEdges.some((pe) => pe.id === edge.id))
+          : (usedEdgeIds !== undefined && usedEdgeIds.includes(edge.id));
+        if (edgeUsed) continue;
+
+        const targetId = step.direction === 'out' ? edge.targetId : edge.sourceId;
+        const targetNode = nodeMap.get(targetId);
+        if (!targetNode) continue;
+
+        const newHops = hops + 1;
+        const matchesTargetLabels =
+          !step.targetTypes ||
+          step.targetTypes.length === 0 ||
+          targetNode.labels.some((l) => step.targetTypes!.includes(l));
+        const canEmit =
+          newHops >= step.minHops &&
+          newHops <= step.maxHops &&
+          matchesTargetLabels &&
+          (!existingTarget || existingTarget.id === targetNode.id);
+        const canExpand = newHops < step.maxHops;
+
+        const newPathNodes = needPath && (canEmit || canExpand) ? [...(pathNodes ?? []), targetNode] : undefined;
+        const newPathEdges = needPath && (canEmit || canExpand) ? [...(pathEdges ?? []), edge] : undefined;
+
+        if (canEmit) {
+          const newRow = row.slice();
+          if (edgeSlotVar >= 0) newRow[edgeSlotVar] = edge;
+          newRow[tgtSlotVar] = targetNode;
+          if (needPath && newPathNodes && newPathEdges) {
+            const pathValue: (Node | Edge)[] = [newPathNodes[0]];
+            for (let i = 0; i < newPathEdges.length; i++) {
+              pathValue.push(newPathEdges[i], newPathNodes[i + 1]);
+            }
+            newRow[pathSlotVar] = pathValue;
+          }
+          result.push(newRow);
+        }
+
+        if (canExpand) {
+          const item: FrontierNodeItem = {
+            node: targetNode,
+            hops: newHops,
+            usedEdgeIds: needPath
+              ? undefined
+              : usedEdgeIds
+                ? [...usedEdgeIds, edge.id]
+                : [edge.id],
+            pathNodes: newPathNodes,
+            pathEdges: newPathEdges,
+          };
+          if (queue) queue.push(item);
+          else stack.push(item);
+        }
+      }
+    }
+    return result;
+  }
+
+  // ── Sync CSR + Delta EdgeExpand ──────────────────────────────────
+
+  executeEdgeExpandSync(
+    kernel: ISyncGraphKernel,
+    step: EdgeExpandStep,
+    rows: Row[],
+    _params: Record<string, unknown>,
+    slotTable: VarSlotTable,
+    transaction?: GraphTransaction,
+  ): Row[] {
+    if (rows.length === 0) return [];
+
+    const srcSlotVar = slotTable.getOrAdd(step.source);
+    const tgtSlotVar = slotTable.getOrAdd(step.target);
+    const edgeSlotVar = step.edgeVar ? slotTable.getOrAdd(step.edgeVar) : -1;
+    const pathSlotVar = step.pathVar ? slotTable.getOrAdd(step.pathVar) : -1;
+    const txHandle = transaction?._getHandle();
+
+    if (txHandle !== undefined) {
+      const out: Row[] = [];
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        const rawSrc = row[srcSlotVar];
+        if (rawSrc === UNBOUND || !rawSrc) continue;
+        this._expandFromNodeTxSync(
+          kernel,
+          step,
+          row,
+          rawSrc as Node,
+          tgtSlotVar,
+          edgeSlotVar,
+          pathSlotVar,
+          txHandle,
+          out,
+        );
+      }
+      return out;
+    }
+
+    const arena = kernel.arena;
+
+    // Precompile allowed edge type IDs
+    let singleTypeId = -1;
+    let allowedTypeSet: Set<number> | null = null;
+    if (step.types.length > 0) {
+      const knownIds: number[] = [];
+      for (let i = 0; i < step.types.length; i++) {
+        const tid = arena.edgeTypeDict.lookup(step.types[i]);
+        if (tid >= 0) knownIds.push(tid);
+      }
+      if (knownIds.length === 0) return [];
+      if (knownIds.length === 1) {
+        singleTypeId = knownIds[0];
+      } else {
+        allowedTypeSet = new Set(knownIds);
+      }
+    }
+
+    // Precompile target label bitmask
+    let targetMask: Bitmask64Query | undefined;
+    if (step.targetTypes && step.targetTypes.length > 0) {
+      const compiled = arena.labelDict.buildQueryMask(step.targetTypes);
+      if (compiled === null) return [];
+      targetMask = compiled;
+    }
+
+    const needEdgeEntity = edgeSlotVar >= 0 || pathSlotVar >= 0;
+    const out: Row[] = [];
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const rawSrc = row[srcSlotVar];
+      if (rawSrc === UNBOUND || !rawSrc) continue;
+      const sourceNode = rawSrc as Node;
+
+      const srcSlot =
+        sourceNode._slot !== undefined &&
+        arena.nodeAlive[sourceNode._slot] === 1 &&
+        arena.nodeIds[sourceNode._slot] === sourceNode.id
+          ? sourceNode._slot
+          : kernel.getNodeSlot(sourceNode.id);
+      if (srcSlot < 0) continue;
+
+      if (step.strategy === 'single-hop') {
+        this._expandSingleHopKernelSync(
+          kernel,
+          step,
+          row,
+          sourceNode,
+          srcSlot,
+          tgtSlotVar,
+          edgeSlotVar,
+          pathSlotVar,
+          singleTypeId,
+          allowedTypeSet,
+          targetMask,
+          needEdgeEntity,
+          out,
+        );
+      } else {
+        this._expandMultiHopKernelSync(
+          kernel,
+          step,
+          row,
+          sourceNode,
+          srcSlot,
+          tgtSlotVar,
+          edgeSlotVar,
+          pathSlotVar,
+          singleTypeId,
+          allowedTypeSet,
+          targetMask,
+          out,
+        );
+      }
+    }
+
+    return out;
+  }
+
+  private _expandSingleHopKernelSync(
+    kernel: ISyncGraphKernel,
+    step: EdgeExpandStep,
+    row: Row,
+    sourceNode: Node,
+    srcSlot: number,
+    tgtSlotVar: number,
+    edgeSlotVar: number,
+    pathSlotVar: number,
+    singleTypeId: number,
+    allowedTypeSet: Set<number> | null,
+    targetMask: Bitmask64Query | undefined,
+    needEdgeEntity: boolean,
+    out: Row[],
+  ): void {
+    const arena = kernel.arena;
+    const adj = kernel.adjacency;
+    const edgeAlive = arena.edgeAlive;
+    const nodeAlive = arena.nodeAlive;
+    const isOut = step.direction === 'out';
+
+    const existingRaw = row[tgtSlotVar];
+    const existingTarget = existingRaw !== UNBOUND ? (existingRaw as Node | undefined) : undefined;
+    let existingTargetSlot = -2; // -2 = none
+    if (existingTarget) {
+      existingTargetSlot =
+        existingTarget._slot !== undefined &&
+        nodeAlive[existingTarget._slot] === 1 &&
+        arena.nodeIds[existingTarget._slot] === existingTarget.id
+          ? existingTarget._slot
+          : kernel.getNodeSlot(existingTarget.id);
+      if (existingTargetSlot < 0) return;
+    }
+
+    const existingPath =
+      pathSlotVar >= 0 && row[pathSlotVar] !== UNBOUND && Array.isArray(row[pathSlotVar]) && (row[pathSlotVar] as unknown[]).length > 0
+        ? (row[pathSlotVar] as (Node | Edge)[])
+        : undefined;
+
+    const visitSlice = (entries: Uint32Array, start: number, end: number): void => {
+      for (let i = start; i < end; i += 3) {
+        const edgeSlot = entries[i];
+        if (edgeAlive[edgeSlot] === 0) continue;
+
+        const typeId = entries[i + 2];
+        if (singleTypeId >= 0 && typeId !== singleTypeId) continue;
+        if (allowedTypeSet && !allowedTypeSet.has(typeId)) continue;
+
+        const neighborSlot = entries[i + 1];
+        if (nodeAlive[neighborSlot] === 0) continue;
+        if (existingTargetSlot >= 0 && neighborSlot !== existingTargetSlot) continue;
+        if (targetMask && !arena.matchesNodeLabelMask(neighborSlot, targetMask)) continue;
+
+        const targetNode = kernel.getNodeEntityBySlot(neighborSlot);
+        const newRow = row.slice();
+        newRow[tgtSlotVar] = targetNode;
+
+        if (needEdgeEntity) {
+          const edgeObj = kernel.getEdgeEntityBySlot(edgeSlot);
+          if (edgeSlotVar >= 0) newRow[edgeSlotVar] = edgeObj;
+          if (pathSlotVar >= 0) {
+            newRow[pathSlotVar] = existingPath
+              ? [...existingPath, edgeObj, targetNode]
+              : [sourceNode, edgeObj, targetNode];
+          }
+        }
+        out.push(newRow);
+      }
+    };
+
+    if (isOut) {
+      const csrEntries = adj.getCsrOutEntries();
+      const csrStart = adj.getCsrOutStart(srcSlot);
+      const csrEnd = adj.getCsrOutEnd(srcSlot);
+      if (csrStart < csrEnd) visitSlice(csrEntries, csrStart, csrEnd);
+
+      const dBuf = adj.getDeltaOutBuf(srcSlot);
+      const dWords = adj.getDeltaOutWordLen(srcSlot);
+      if (dBuf && dWords > 0) visitSlice(dBuf, 0, dWords);
+    } else {
+      const csrEntries = adj.getCsrInEntries();
+      const csrStart = adj.getCsrInStart(srcSlot);
+      const csrEnd = adj.getCsrInEnd(srcSlot);
+      if (csrStart < csrEnd) visitSlice(csrEntries, csrStart, csrEnd);
+
+      const dBuf = adj.getDeltaInBuf(srcSlot);
+      const dWords = adj.getDeltaInWordLen(srcSlot);
+      if (dBuf && dWords > 0) visitSlice(dBuf, 0, dWords);
+    }
+  }
+
+  private _expandMultiHopKernelSync(
+    kernel: ISyncGraphKernel,
+    step: EdgeExpandStep,
+    row: Row,
+    sourceNode: Node,
+    srcSlot: number,
+    tgtSlotVar: number,
+    edgeSlotVar: number,
+    pathSlotVar: number,
+    singleTypeId: number,
+    allowedTypeSet: Set<number> | null,
+    targetMask: Bitmask64Query | undefined,
+    out: Row[],
+  ): void {
+    const arena = kernel.arena;
+    const adj = kernel.adjacency;
+    const edgeAlive = arena.edgeAlive;
+    const nodeAlive = arena.nodeAlive;
+    const isOut = step.direction === 'out';
+    const isBFS = step.strategy !== 'multi-hop-dfs';
+    const needPath = pathSlotVar >= 0;
+
+    const existingRaw = row[tgtSlotVar];
+    const existingTarget = existingRaw !== UNBOUND ? (existingRaw as Node | undefined) : undefined;
+    let existingTargetSlot = -2;
+    if (existingTarget) {
+      existingTargetSlot =
+        existingTarget._slot !== undefined &&
+        nodeAlive[existingTarget._slot] === 1 &&
+        arena.nodeIds[existingTarget._slot] === existingTarget.id
+          ? existingTarget._slot
+          : kernel.getNodeSlot(existingTarget.id);
+      if (existingTargetSlot < 0) return;
+    }
+
+    const queue = isBFS ? new RingQueue<FrontierKernelItem>() : undefined;
+    const stack: FrontierKernelItem[] = [];
+    const initial: FrontierKernelItem = {
+      nodeSlot: srcSlot,
+      hops: 0,
+      pathNodeSlots: needPath ? [srcSlot] : undefined,
+      pathEdgeSlots: needPath ? [] : undefined,
+    };
+    if (queue) queue.push(initial);
+    else stack.push(initial);
+
+    const csrEntries = isOut ? adj.getCsrOutEntries() : adj.getCsrInEntries();
+
+    const expandSlice = (
+      entries: Uint32Array,
+      start: number,
+      end: number,
+      hops: number,
+      usedEdgeSlots: number[] | undefined,
+      pathNodeSlots: number[] | undefined,
+      pathEdgeSlots: number[] | undefined,
+    ): void => {
+      for (let i = start; i < end; i += 3) {
+        const edgeSlot = entries[i];
+        if (edgeAlive[edgeSlot] === 0) continue;
+
+        const typeId = entries[i + 2];
+        if (singleTypeId >= 0 && typeId !== singleTypeId) continue;
+        if (allowedTypeSet && !allowedTypeSet.has(typeId)) continue;
+
+        // Per-path relationship uniqueness (openCypher trail semantics)
+        const activeUsedEdges = needPath ? pathEdgeSlots : usedEdgeSlots;
+        if (activeUsedEdges !== undefined && activeUsedEdges.includes(edgeSlot)) {
+          continue;
+        }
+
+        const neighborSlot = entries[i + 1];
+        if (nodeAlive[neighborSlot] === 0) continue;
+
+        const newHops = hops + 1;
+        const canEmit =
+          newHops >= step.minHops &&
+          newHops <= step.maxHops &&
+          (existingTargetSlot < 0 || neighborSlot === existingTargetSlot) &&
+          (!targetMask || arena.matchesNodeLabelMask(neighborSlot, targetMask));
+        const canExpand = newHops < step.maxHops;
+
+        const newPathNodeSlots =
+          needPath && (canEmit || canExpand) ? [...pathNodeSlots!, neighborSlot] : undefined;
+        const newPathEdgeSlots =
+          needPath && (canEmit || canExpand) ? [...pathEdgeSlots!, edgeSlot] : undefined;
+
+        if (canEmit) {
+          const newRow = row.slice();
+          const targetNode = kernel.getNodeEntityBySlot(neighborSlot);
+          newRow[tgtSlotVar] = targetNode;
+          if (edgeSlotVar >= 0) {
+            newRow[edgeSlotVar] = kernel.getEdgeEntityBySlot(edgeSlot);
+          }
+          if (needPath && newPathNodeSlots && newPathEdgeSlots) {
+            const pathValue: (Node | Edge)[] = [
+              newPathNodeSlots[0] === srcSlot
+                ? sourceNode
+                : kernel.getNodeEntityBySlot(newPathNodeSlots[0]),
+            ];
+            for (let k = 0; k < newPathEdgeSlots.length; k++) {
+              pathValue.push(
+                kernel.getEdgeEntityBySlot(newPathEdgeSlots[k]),
+                k === newPathEdgeSlots.length - 1
+                  ? targetNode
+                  : kernel.getNodeEntityBySlot(newPathNodeSlots[k + 1]),
+              );
+            }
+            newRow[pathSlotVar] = pathValue;
+          }
+          out.push(newRow);
+        }
+
+        if (canExpand) {
+          const nextItem: FrontierKernelItem = {
+            nodeSlot: neighborSlot,
+            hops: newHops,
+            usedEdgeSlots: needPath
+              ? undefined
+              : usedEdgeSlots
+                ? [...usedEdgeSlots, edgeSlot]
+                : [edgeSlot],
+            pathNodeSlots: newPathNodeSlots,
+            pathEdgeSlots: newPathEdgeSlots,
+          };
+          if (queue) queue.push(nextItem);
+          else stack.push(nextItem);
+        }
+      }
+    };
+
+    while ((queue ? queue.length : stack.length) > 0) {
+      const item = queue ? queue.shift()! : stack.pop()!;
+      if (item.hops >= step.maxHops) continue;
+      const uSlot = item.nodeSlot;
+
+      const csrStart = isOut ? adj.getCsrOutStart(uSlot) : adj.getCsrInStart(uSlot);
+      const csrEnd = isOut ? adj.getCsrOutEnd(uSlot) : adj.getCsrInEnd(uSlot);
+      if (csrStart < csrEnd) {
+        expandSlice(csrEntries, csrStart, csrEnd, item.hops, item.usedEdgeSlots, item.pathNodeSlots, item.pathEdgeSlots);
+      }
+
+      const dBuf = isOut ? adj.getDeltaOutBuf(uSlot) : adj.getDeltaInBuf(uSlot);
+      const dWords = isOut ? adj.getDeltaOutWordLen(uSlot) : adj.getDeltaInWordLen(uSlot);
+      if (dBuf && dWords > 0) {
+        expandSlice(dBuf, 0, dWords, item.hops, item.usedEdgeSlots, item.pathNodeSlots, item.pathEdgeSlots);
+      }
+    }
+  }
+
+  private _expandFromNodeTxSync(
+    kernel: ISyncGraphKernel,
+    step: EdgeExpandStep,
+    row: Row,
+    sourceNode: Node,
+    tgtSlotVar: number,
+    edgeSlotVar: number,
+    pathSlotVar: number,
+    txHandle: ITransactionHandle,
+    out: Row[],
+  ): void {
+    const queryOpts: StorageQueryOptions =
+      step.types.length > 0
+        ? { filter: { types: step.types }, transaction: txHandle }
+        : { transaction: txHandle };
+
+    const existingRaw = row[tgtSlotVar];
+    const existingTarget = existingRaw !== UNBOUND ? (existingRaw as Node | undefined) : undefined;
+
+    if (step.strategy === 'single-hop') {
+      const edges =
+        step.direction === 'out'
+          ? kernel.getEdgesBySourceSync(sourceNode.id, queryOpts)
+          : kernel.getEdgesByTargetSync(sourceNode.id, queryOpts);
+
+      const targetIds = edges.map((e) => (step.direction === 'out' ? e.targetId : e.sourceId));
+      const uniqueIds = [...new Set(targetIds)];
+      const nodeMap = kernel.getNodesByIdsSync(uniqueIds, txHandle);
 
       for (const edge of edges) {
         const targetId = step.direction === 'out' ? edge.targetId : edge.sourceId;
@@ -439,54 +1062,110 @@ export class ReadStepExecutor {
         if (!targetNode) continue;
 
         if (
-          step.targetTypes &&
-          step.targetTypes.length > 0 &&
-          !targetNode.labels.some(l => step.targetTypes!.includes(l))
+          step.targetTypes?.length &&
+          !targetNode.labels.some((l) => step.targetTypes!.includes(l))
         ) {
           continue;
         }
+        if (existingTarget && existingTarget.id !== targetNode.id) continue;
 
-        const newHops = hops + 1;
-        const newPathNodes = step.pathVar
-          ? [...(pathNodes ?? []), targetNode]
-          : undefined;
-        const newPathEdges = step.pathVar
-          ? [...(pathEdges ?? []), edge]
-          : undefined;
-
-        if (newHops >= step.minHops && newHops <= step.maxHops) {
-          const existingTarget = curRow.get(step.target) as Node | undefined;
-          if (!existingTarget || existingTarget.id === targetNode.id) {
-            const newRow = new Map(curRow);
-            if (step.edgeVar) newRow.set(step.edgeVar, edge);
-            newRow.set(step.target, targetNode);
-
-            if (step.pathVar && newPathNodes && newPathEdges) {
-              const pathValue: (Node | Edge)[] = [newPathNodes[0]];
-              for (let i = 0; i < newPathEdges.length; i++) {
-                pathValue.push(newPathEdges[i], newPathNodes[i + 1]);
-              }
-              newRow.set(step.pathVar, pathValue);
-            }
-
-            result.push(newRow);
+        const newRow = row.slice();
+        if (edgeSlotVar >= 0) newRow[edgeSlotVar] = edge;
+        newRow[tgtSlotVar] = targetNode;
+        if (pathSlotVar >= 0) {
+          const existingPath = newRow[pathSlotVar];
+          if (existingPath !== UNBOUND && Array.isArray(existingPath) && existingPath.length > 0) {
+            newRow[pathSlotVar] = [...existingPath, edge, targetNode];
+          } else {
+            newRow[pathSlotVar] = [sourceNode, edge, targetNode];
           }
         }
+        out.push(newRow);
+      }
+      return;
+    }
 
-        const prevHops = visited.get(targetId);
-        if (newHops < step.maxHops && (prevHops === undefined || newHops <= prevHops)) {
-          visited.set(targetId, newHops);
-          const nextRow = new Map(curRow);
-          frontier.push({
+    const needPath = pathSlotVar >= 0;
+    const isBFS = step.strategy !== 'multi-hop-dfs';
+    const queue = isBFS ? new RingQueue<FrontierNodeItem>() : undefined;
+    const stack: FrontierNodeItem[] = [];
+    const initial: FrontierNodeItem = {
+      node: sourceNode,
+      hops: 0,
+      pathNodes: needPath ? [sourceNode] : undefined,
+      pathEdges: needPath ? [] : undefined,
+    };
+    if (queue) queue.push(initial);
+    else stack.push(initial);
+
+    while ((queue ? queue.length : stack.length) > 0) {
+      const { node, hops, usedEdgeIds, pathNodes, pathEdges } = queue ? queue.shift()! : stack.pop()!;
+      if (hops >= step.maxHops) continue;
+
+      const edges =
+        step.direction === 'out'
+          ? kernel.getEdgesBySourceSync(node.id, queryOpts)
+          : kernel.getEdgesByTargetSync(node.id, queryOpts);
+
+      const targetIds = edges.map((e) => (step.direction === 'out' ? e.targetId : e.sourceId));
+      const uniqueIds = [...new Set(targetIds)];
+      const nodeMap = kernel.getNodesByIdsSync(uniqueIds, txHandle);
+
+      for (const edge of edges) {
+        // Per-path relationship uniqueness (openCypher trail semantics)
+        const edgeUsed = needPath
+          ? (pathEdges !== undefined && pathEdges.some((pe) => pe.id === edge.id))
+          : (usedEdgeIds !== undefined && usedEdgeIds.includes(edge.id));
+        if (edgeUsed) continue;
+
+        const targetId = step.direction === 'out' ? edge.targetId : edge.sourceId;
+        const targetNode = nodeMap.get(targetId);
+        if (!targetNode) continue;
+
+        const newHops = hops + 1;
+        const matchesTargetLabels =
+          !step.targetTypes?.length ||
+          targetNode.labels.some((l) => step.targetTypes!.includes(l));
+        const canEmit =
+          newHops >= step.minHops &&
+          newHops <= step.maxHops &&
+          matchesTargetLabels &&
+          (!existingTarget || existingTarget.id === targetNode.id);
+        const canExpand = newHops < step.maxHops;
+
+        const newPathNodes = needPath && (canEmit || canExpand) ? [...(pathNodes ?? []), targetNode] : undefined;
+        const newPathEdges = needPath && (canEmit || canExpand) ? [...(pathEdges ?? []), edge] : undefined;
+
+        if (canEmit) {
+          const newRow = row.slice();
+          if (edgeSlotVar >= 0) newRow[edgeSlotVar] = edge;
+          newRow[tgtSlotVar] = targetNode;
+          if (needPath && newPathNodes && newPathEdges) {
+            const pathValue: (Node | Edge)[] = [newPathNodes[0]];
+            for (let k = 0; k < newPathEdges.length; k++) {
+              pathValue.push(newPathEdges[k], newPathNodes[k + 1]);
+            }
+            newRow[pathSlotVar] = pathValue;
+          }
+          out.push(newRow);
+        }
+
+        if (canExpand) {
+          const item: FrontierNodeItem = {
             node: targetNode,
-            row: nextRow,
             hops: newHops,
+            usedEdgeIds: needPath
+              ? undefined
+              : usedEdgeIds
+                ? [...usedEdgeIds, edge.id]
+                : [edge.id],
             pathNodes: newPathNodes,
             pathEdges: newPathEdges,
-          });
+          };
+          if (queue) queue.push(item);
+          else stack.push(item);
         }
       }
     }
-    return result;
   }
 }

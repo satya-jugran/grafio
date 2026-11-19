@@ -1,30 +1,44 @@
 /**
  * Aggregate step executor for the Cypher execution layer.
  *
- * Supports two execution paths:
- * - **Path A (storage-level)**: delegates to Graph aggregate APIs
- *   (`getNodeCount`, `aggregateNodeProperty`, etc.) when possible.
- * - **Path B (in-process)**: computes aggregates over materialised
- *   row buffers for complex plans that can't use Path A.
+ * Supports:
+ * - **Path A (storage-level)**: delegates directly to `ISyncGraphKernel` / `Graph` aggregates.
+ * - **Path F (fused columnar sync)**: single-pass over `queryNodeSlotsSync` for
+ *   `NodeScanStep -> FilterStep? -> AggregateStep` without intermediate `SlotRow` allocations.
+ * - **Path B (in-process)**: computes aggregates over {@link SlotRow} buffers using compiled closures.
  *
  * @module cypher/executor/steps/AggregateStepExecutor
  */
 
 import { Graph } from '../../../Graph';
 import { GraphTransaction } from '../../../Graph/GraphTransaction';
+import type { ISyncGraphKernel } from '../../../storage/IStorageProvider';
 import {
   AggregateStep,
   AggregateSpec,
+  FilterStep,
+  NodeScanStep,
 } from '../../plan/QueryPlan';
+import type { GraphQueryOptions } from '../../../Graph/GraphQueryOptions';
 import { Expression } from '../../ast/AstNode';
-import { CypherRuntimeError } from '../../errors';
-import { Row, ExpressionEvaluator } from '../ExpressionEvaluator';
+import type { CompiledPlanMeta } from '../../plan/CompiledPlanMeta';
+import { CypherRuntimeError, UnboundParameterError } from '../../errors';
+import { compileExpression, type CompiledExprFn } from '../ClosureCompiler';
+import { Row, ExpressionEvaluator, serializeCypherKey } from '../ExpressionEvaluator';
+
+interface AggAccumulator {
+  count: number;
+  sum: number;
+  avgSum: number;
+  avgCount: number;
+  min: unknown;
+  max: unknown;
+  collect: unknown[];
+  distinctSeen?: Set<string>;
+}
 
 /**
  * Executes aggregate plan steps against a {@link Graph}.
- *
- * Requires both the {@link Graph} instance and an
- * {@link ExpressionEvaluator} for computing aggregate expressions.
  */
 export class AggregateStepExecutor {
   private readonly _graph: Graph;
@@ -35,23 +49,240 @@ export class AggregateStepExecutor {
     this._evaluator = evaluator;
   }
 
-  // ── Main entry point ────────────────────────────────────────────
+  private _getCompiled(expr: Expression, meta: CompiledPlanMeta): CompiledExprFn {
+    let fn = meta.compiledExprs.get(expr);
+    if (!fn) {
+      fn = compileExpression(expr, meta.slotTable);
+      meta.compiledExprs.set(expr, fn);
+    }
+    return fn;
+  }
 
-  /**
-   * Execute an {@link AggregateStep}, dispatching to storage-level
-   * aggregation (Path A) for simple plans or in-process aggregation
-   * (Path B) for complex plans with preceding pipeline steps.
-   */
+  // ── Main entry points ──────────────────────────────────────────
+
   async executeAggregate(
     step: AggregateStep,
     rows: Row[],
     params: Record<string, unknown>,
+    meta: CompiledPlanMeta,
     transaction?: GraphTransaction,
   ): Promise<Row[]> {
     if (step.useStorageLevel && this._canUseStorageLevel(step)) {
-      return this._executeAggregateStorageLevel(step, transaction);
+      return this._executeAggregateStorageLevel(step, meta, transaction);
     }
-    return this._executeAggregateInProcess(step, rows, params);
+    return this._executeAggregateInProcess(step, rows, params, meta);
+  }
+
+  executeAggregateSync(
+    kernel: ISyncGraphKernel,
+    step: AggregateStep,
+    rows: Row[],
+    params: Record<string, unknown>,
+    meta: CompiledPlanMeta,
+    transaction?: GraphTransaction,
+  ): Row[] {
+    if (step.useStorageLevel && this._canUseStorageLevel(step)) {
+      return this._executeAggregateStorageLevelSync(kernel, step, meta, transaction);
+    }
+    return this._executeAggregateInProcess(step, rows, params, meta, kernel);
+  }
+
+  /**
+   * Fused single-pass columnar execution for `NodeScanStep -> FilterStep? -> AggregateStep`
+   * on synchronous in-memory graphs with no active transactions.
+   */
+  executeFusedNodeAggregateSync(
+    kernel: ISyncGraphKernel,
+    scanStep: NodeScanStep,
+    filterStep: FilterStep | undefined,
+    aggStep: AggregateStep,
+    seedRow: Row,
+    params: Record<string, unknown>,
+    meta: CompiledPlanMeta,
+  ): Row[] {
+    const filter: NonNullable<GraphQueryOptions['filter']> = {};
+    if (scanStep.types?.length) {
+      filter.types = scanStep.types;
+    } else if (scanStep.label) {
+      filter.types = [scanStep.label];
+    }
+    if (scanStep.propertyFilters?.length) {
+      filter.properties = scanStep.propertyFilters.map((f) =>
+        this._resolveFilterParams(f, params),
+      );
+    }
+
+    const slots = kernel.queryNodeSlotsSync(
+      Object.keys(filter).length > 0 ? { filter } : undefined,
+    );
+
+    const nodeSlot = meta.slotTable.getOrAdd(scanStep.variable);
+    const probeRow = seedRow.slice();
+    const filterFn = filterStep ? this._getCompiled(filterStep.predicate, meta) : null;
+
+    const groupFns = aggStep.groupBy.map((g) => this._getCompiled(g, meta));
+    const groupSlots = aggStep.groupByAliases.map((a) => meta.slotTable.getOrAdd(a));
+
+    const aggFns = aggStep.aggregates.map((spec) =>
+      spec.expression.kind === 'Literal' && spec.expression.value === '*'
+        ? null
+        : this._getCompiled(spec.expression, meta),
+    );
+    const aggSlots = aggStep.aggregates.map((spec) => meta.slotTable.getOrAdd(spec.alias));
+
+    if (groupFns.length === 0) {
+      const accs = this._createAccumulators(aggStep.aggregates);
+      for (let i = 0; i < slots.length; i++) {
+        probeRow[nodeSlot] = kernel.getNodeEntityBySlot(slots[i]);
+        if (filterFn && !filterFn(probeRow, params, kernel)) continue;
+        this._updateAccumulators(accs, aggStep.aggregates, aggFns, probeRow, params, kernel);
+      }
+      const outRow = meta.slotTable.createEmptyRow();
+      for (let a = 0; a < aggSlots.length; a++) {
+        outRow[aggSlots[a]] = this._finalizeAccumulator(accs[a], aggStep.aggregates[a].function);
+      }
+      return [outRow];
+    }
+
+    const groups = new Map<string, { keyValues: unknown[]; accs: AggAccumulator[] }>();
+    for (let i = 0; i < slots.length; i++) {
+      probeRow[nodeSlot] = kernel.getNodeEntityBySlot(slots[i]);
+      if (filterFn && !filterFn(probeRow, params, kernel)) continue;
+
+      const keyValues = new Array<unknown>(groupFns.length);
+      for (let g = 0; g < groupFns.length; g++) {
+        keyValues[g] = groupFns[g](probeRow, params, kernel);
+      }
+      const keyStr = this._serializeGroupKey(keyValues);
+      let entry = groups.get(keyStr);
+      if (!entry) {
+        entry = { keyValues, accs: this._createAccumulators(aggStep.aggregates) };
+        groups.set(keyStr, entry);
+      }
+      this._updateAccumulators(entry.accs, aggStep.aggregates, aggFns, probeRow, params, kernel);
+    }
+
+    const out: Row[] = [];
+    for (const group of groups.values()) {
+      const outRow = meta.slotTable.createEmptyRow();
+      for (let g = 0; g < groupSlots.length; g++) {
+        outRow[groupSlots[g]] = group.keyValues[g];
+      }
+      for (let a = 0; a < aggSlots.length; a++) {
+        outRow[aggSlots[a]] = this._finalizeAccumulator(
+          group.accs[a],
+          aggStep.aggregates[a].function,
+        );
+      }
+      out.push(outRow);
+    }
+    return out;
+  }
+
+  private _resolveFilterParams(
+    f: import('../../plan/QueryPlan').PropertyFilter,
+    params: Record<string, unknown>,
+  ): import('../../plan/QueryPlan').PropertyFilter {
+    const resolved: import('../../plan/QueryPlan').PropertyFilter = {};
+    if (f.key !== undefined) resolved.key = f.key;
+    if (f.op !== undefined) resolved.op = f.op;
+    if (f.AND) resolved.AND = f.AND.map((c) => this._resolveFilterParams(c, params));
+    if (f.OR) resolved.OR = f.OR.map((c) => this._resolveFilterParams(c, params));
+    if ('value' in f) {
+      const val = f.value;
+      if (
+        typeof val === 'object' &&
+        val !== null &&
+        (val as { kind?: unknown }).kind === 'Parameter' &&
+        typeof (val as { name?: unknown }).name === 'string'
+      ) {
+        const pname = (val as { name: string }).name;
+        if (!(pname in params)) throw new UnboundParameterError(pname);
+        resolved.value = params[pname];
+      } else {
+        resolved.value = val;
+      }
+    }
+    return resolved;
+  }
+
+  private _createAccumulators(specs: AggregateSpec[]): AggAccumulator[] {
+    return specs.map((spec) => ({
+      count: 0,
+      sum: 0,
+      avgSum: 0,
+      avgCount: 0,
+      min: undefined,
+      max: undefined,
+      collect: [],
+      distinctSeen: spec.distinct ? new Set<string>() : undefined,
+    }));
+  }
+
+  private _updateAccumulators(
+    accs: AggAccumulator[],
+    specs: AggregateSpec[],
+    fns: Array<CompiledExprFn | null>,
+    row: Row,
+    params: Record<string, unknown>,
+    kernel: ISyncGraphKernel,
+  ): void {
+    for (let a = 0; a < specs.length; a++) {
+      const fn = fns[a];
+      const val = fn === null ? 1 : fn(row, params, kernel);
+      if (val === null || val === undefined) continue;
+
+      const acc = accs[a];
+      if (acc.distinctSeen) {
+        const key = this._valueDistinctKey(val);
+        if (acc.distinctSeen.has(key)) continue;
+        acc.distinctSeen.add(key);
+      }
+
+      switch (specs[a].function) {
+        case 'COUNT':
+          acc.count++;
+          break;
+        case 'SUM': {
+          const n = Number(val);
+          if (!Number.isNaN(n)) acc.sum += n;
+          break;
+        }
+        case 'AVG': {
+          const n = Number(val);
+          if (!Number.isNaN(n)) {
+            acc.avgSum += n;
+            acc.avgCount++;
+          }
+          break;
+        }
+        case 'MIN':
+          if (acc.min === undefined || this._evaluator.compare(val, acc.min) < 0) {
+            acc.min = val;
+          }
+          break;
+        case 'MAX':
+          if (acc.max === undefined || this._evaluator.compare(val, acc.max) > 0) {
+            acc.max = val;
+          }
+          break;
+        case 'COLLECT':
+          acc.collect.push(val);
+          break;
+      }
+    }
+  }
+
+  private _finalizeAccumulator(acc: AggAccumulator, fn: string): unknown {
+    switch (fn) {
+      case 'COUNT': return acc.count;
+      case 'SUM': return acc.sum;
+      case 'AVG': return acc.avgCount === 0 ? 0 : acc.avgSum / acc.avgCount;
+      case 'MIN': return acc.min === undefined ? null : acc.min;
+      case 'MAX': return acc.max === undefined ? null : acc.max;
+      case 'COLLECT': return acc.collect;
+      default: throw new CypherRuntimeError(`Unknown aggregate function: ${fn}`);
+    }
   }
 
   // ── Storage-level eligibility ──────────────────────────────────
@@ -60,17 +291,8 @@ export class AggregateStepExecutor {
     if (!step.sourceVariable || !step.sourceEntity) return false;
     if (step.groupBy.length > 0) return false;
 
-    if (step.sourceEntity === 'edge') {
-      for (const spec of step.aggregates) {
-        if (!this._isSimpleAggregateExpr(spec.expression, step.sourceVariable!)) {
-          return false;
-        }
-      }
-      return true;
-    }
-
     for (const spec of step.aggregates) {
-      if (!this._isSimpleAggregateExpr(spec.expression, step.sourceVariable!)) {
+      if (!this._isSimpleAggregateExpr(spec.expression, step.sourceVariable)) {
         return false;
       }
     }
@@ -101,20 +323,11 @@ export class AggregateStepExecutor {
     return null;
   }
 
-  // ── Path A: Storage-level aggregation ──────────────────────────
-
-  private async _executeAggregateStorageLevel(
-    step: AggregateStep,
-    transaction?: GraphTransaction,
-  ): Promise<Row[]> {
-    if (step.sourceEntity === 'edge') {
-      return this._executeEdgeAggregateStorageLevel(step, transaction);
-    }
-
-    const sourceTypes = step.sourceTypes;
-    const typeFilter = sourceTypes ? { types: sourceTypes } : undefined;
-    const resultRow = new Map<string, unknown>();
-
+  private _partitionAggregateSpecs(step: AggregateStep): {
+    countAggs: AggregateSpec[];
+    propertyAggs: Map<string, AggregateSpec[]>;
+    collectAggs: AggregateSpec[];
+  } {
     const countAggs: AggregateSpec[] = [];
     const propertyAggs = new Map<string, AggregateSpec[]>();
     const collectAggs: AggregateSpec[] = [];
@@ -129,19 +342,38 @@ export class AggregateStepExecutor {
         countAggs.push(spec);
       } else {
         const coalesceKey = `${propKey}|${spec.distinct}`;
-        if (!propertyAggs.has(coalesceKey)) {
-          propertyAggs.set(coalesceKey, []);
+        let list = propertyAggs.get(coalesceKey);
+        if (!list) {
+          list = [];
+          propertyAggs.set(coalesceKey, list);
         }
-        propertyAggs.get(coalesceKey)!.push(spec);
+        list.push(spec);
       }
     }
+    return { countAggs, propertyAggs, collectAggs };
+  }
+
+  // ── Path A (Async) ─────────────────────────────────────────────
+
+  private async _executeAggregateStorageLevel(
+    step: AggregateStep,
+    meta: CompiledPlanMeta,
+    transaction?: GraphTransaction,
+  ): Promise<Row[]> {
+    if (step.sourceEntity === 'edge') {
+      return this._executeEdgeAggregateStorageLevel(step, meta, transaction);
+    }
+
+    const typeFilter = step.sourceTypes ? { types: step.sourceTypes } : undefined;
+    const resultRow = meta.slotTable.createEmptyRow();
+    const { countAggs, propertyAggs, collectAggs } = this._partitionAggregateSpecs(step);
 
     if (countAggs.length > 0) {
       const nodeCount = await this._graph.getNodeCount(
         typeFilter ? { filter: typeFilter, transaction } : { transaction },
       );
       for (const spec of countAggs) {
-        resultRow.set(spec.alias, nodeCount);
+        resultRow[meta.slotTable.getOrAdd(spec.alias)] = nodeCount;
       }
     }
 
@@ -149,12 +381,15 @@ export class AggregateStepExecutor {
       const [propKey, distinctStr] = coalesceKey.split('|');
       const distinct = distinctStr === 'true';
       const aggResult = await this._graph.aggregateNodeProperty(propKey, {
-        filter: typeFilter as { types: string[] },
+        filter: typeFilter,
         distinct,
         transaction,
       });
       for (const spec of specs) {
-        resultRow.set(spec.alias, this._extractAggField(aggResult, spec.function));
+        resultRow[meta.slotTable.getOrAdd(spec.alias)] = this._extractAggField(
+          aggResult,
+          spec.function,
+        );
       }
     }
 
@@ -167,7 +402,9 @@ export class AggregateStepExecutor {
         const values = nodes
           .map((n) => (propKey ? n.properties[propKey] : n))
           .filter((v) => v !== undefined);
-        resultRow.set(spec.alias, spec.distinct ? [...new Set(values)] : values);
+        resultRow[meta.slotTable.getOrAdd(spec.alias)] = spec.distinct
+          ? this._deduplicatedValues(values)
+          : values;
       }
     }
 
@@ -176,38 +413,19 @@ export class AggregateStepExecutor {
 
   private async _executeEdgeAggregateStorageLevel(
     step: AggregateStep,
+    meta: CompiledPlanMeta,
     transaction?: GraphTransaction,
   ): Promise<Row[]> {
     if (step.sourceTypes && step.sourceTypes.length > 0) {
       throw new Error(
         'Edge storage-level aggregation cannot be used with source node type ' +
-        'constraints. The planner should have rejected this plan in _isEdgeSimplePlan.'
+        'constraints. The planner should have rejected this plan in _isEdgeSimplePlan.',
       );
     }
 
     const typeFilter = step.edgeTypes?.length ? { types: step.edgeTypes } : undefined;
-    const resultRow = new Map<string, unknown>();
-
-    const countAggs: AggregateSpec[] = [];
-    const propertyAggs = new Map<string, AggregateSpec[]>();
-    const collectAggs: AggregateSpec[] = [];
-
-    for (const spec of step.aggregates) {
-      if (spec.function === 'COLLECT') {
-        collectAggs.push(spec);
-        continue;
-      }
-      const propKey = this._extractPropertyKey(spec.expression, step.sourceVariable!);
-      if (propKey === null) {
-        countAggs.push(spec);
-      } else {
-        const coalesceKey = `${propKey}|${spec.distinct}`;
-        if (!propertyAggs.has(coalesceKey)) {
-          propertyAggs.set(coalesceKey, []);
-        }
-        propertyAggs.get(coalesceKey)!.push(spec);
-      }
-    }
+    const resultRow = meta.slotTable.createEmptyRow();
+    const { countAggs, propertyAggs, collectAggs } = this._partitionAggregateSpecs(step);
 
     if (countAggs.length > 0) {
       const edgeCount = await this._graph.getEdgeCount(
@@ -216,7 +434,7 @@ export class AggregateStepExecutor {
           : (transaction ? { transaction } : undefined),
       );
       for (const spec of countAggs) {
-        resultRow.set(spec.alias, edgeCount);
+        resultRow[meta.slotTable.getOrAdd(spec.alias)] = edgeCount;
       }
     }
 
@@ -229,7 +447,10 @@ export class AggregateStepExecutor {
         transaction,
       });
       for (const spec of specs) {
-        resultRow.set(spec.alias, this._extractAggField(aggResult, spec.function));
+        resultRow[meta.slotTable.getOrAdd(spec.alias)] = this._extractAggField(
+          aggResult,
+          spec.function,
+        );
       }
     }
 
@@ -244,7 +465,113 @@ export class AggregateStepExecutor {
         const values = edges
           .map((e) => (propKey ? e.properties[propKey] : e))
           .filter((v) => v !== undefined);
-        resultRow.set(spec.alias, spec.distinct ? [...new Set(values)] : values);
+        resultRow[meta.slotTable.getOrAdd(spec.alias)] = spec.distinct
+          ? this._deduplicatedValues(values)
+          : values;
+      }
+    }
+
+    return [resultRow];
+  }
+
+  // ── Path A (Sync Kernel) ───────────────────────────────────────
+
+  private _executeAggregateStorageLevelSync(
+    kernel: ISyncGraphKernel,
+    step: AggregateStep,
+    meta: CompiledPlanMeta,
+    transaction?: GraphTransaction,
+  ): Row[] {
+    const txHandle = transaction?._getHandle();
+    const resultRow = meta.slotTable.createEmptyRow();
+    const { countAggs, propertyAggs, collectAggs } = this._partitionAggregateSpecs(step);
+
+    if (step.sourceEntity === 'edge') {
+      if (step.sourceTypes && step.sourceTypes.length > 0) {
+        throw new Error(
+          'Edge storage-level aggregation cannot be used with source node type ' +
+          'constraints. The planner should have rejected this plan in _isEdgeSimplePlan.',
+        );
+      }
+      const typeFilter = step.edgeTypes?.length ? { types: step.edgeTypes } : undefined;
+      const queryOpts = typeFilter
+        ? { filter: typeFilter, transaction: txHandle }
+        : (txHandle ? { transaction: txHandle } : undefined);
+
+      if (countAggs.length > 0) {
+        const edgeCount = kernel.countEdgesSync(queryOpts);
+        for (const spec of countAggs) {
+          resultRow[meta.slotTable.getOrAdd(spec.alias)] = edgeCount;
+        }
+      }
+
+      for (const [coalesceKey, specs] of propertyAggs) {
+        const [propKey, distinctStr] = coalesceKey.split('|');
+        const aggResult = kernel.aggregateEdgePropertySync(propKey, {
+          filter: typeFilter,
+          distinct: distinctStr === 'true',
+          transaction: txHandle,
+        });
+        for (const spec of specs) {
+          resultRow[meta.slotTable.getOrAdd(spec.alias)] = this._extractAggField(
+            aggResult,
+            spec.function,
+          );
+        }
+      }
+
+      if (collectAggs.length > 0) {
+        const edges = kernel.queryEdgesSync(queryOpts);
+        for (const spec of collectAggs) {
+          const propKey = this._extractPropertyKey(spec.expression, step.sourceVariable!);
+          const values = edges
+            .map((e) => (propKey ? e.properties[propKey] : e))
+            .filter((v) => v !== undefined);
+          resultRow[meta.slotTable.getOrAdd(spec.alias)] = spec.distinct
+            ? this._deduplicatedValues(values)
+            : values;
+        }
+      }
+      return [resultRow];
+    }
+
+    const typeFilter = step.sourceTypes ? { types: step.sourceTypes } : undefined;
+    const queryOpts = typeFilter
+      ? { filter: typeFilter, transaction: txHandle }
+      : (txHandle ? { transaction: txHandle } : undefined);
+
+    if (countAggs.length > 0) {
+      const nodeCount = kernel.countNodesSync(queryOpts);
+      for (const spec of countAggs) {
+        resultRow[meta.slotTable.getOrAdd(spec.alias)] = nodeCount;
+      }
+    }
+
+    for (const [coalesceKey, specs] of propertyAggs) {
+      const [propKey, distinctStr] = coalesceKey.split('|');
+      const aggResult = kernel.aggregateNodePropertySync(propKey, {
+        filter: typeFilter,
+        distinct: distinctStr === 'true',
+        transaction: txHandle,
+      });
+      for (const spec of specs) {
+        resultRow[meta.slotTable.getOrAdd(spec.alias)] = this._extractAggField(
+          aggResult,
+          spec.function,
+        );
+      }
+    }
+
+    if (collectAggs.length > 0) {
+      const nodes = kernel.queryNodesSync(queryOpts);
+      for (const spec of collectAggs) {
+        const propKey = this._extractPropertyKey(spec.expression, step.sourceVariable!);
+        const values = nodes
+          .map((n) => (propKey ? n.properties[propKey] : n))
+          .filter((v) => v !== undefined);
+        resultRow[meta.slotTable.getOrAdd(spec.alias)] = spec.distinct
+          ? this._deduplicatedValues(values)
+          : values;
       }
     }
 
@@ -271,36 +598,56 @@ export class AggregateStepExecutor {
     step: AggregateStep,
     rows: Row[],
     params: Record<string, unknown>,
+    meta: CompiledPlanMeta,
+    kernel?: ISyncGraphKernel,
   ): Row[] {
     if (step.groupBy.length === 0) {
-      const resultRow = new Map<string, unknown>();
+      const resultRow = meta.slotTable.createEmptyRow();
       for (const spec of step.aggregates) {
-        resultRow.set(spec.alias, this._computeAggregate(spec, rows, params));
+        resultRow[meta.slotTable.getOrAdd(spec.alias)] = this._computeAggregate(
+          spec,
+          rows,
+          params,
+          meta,
+          kernel,
+        );
       }
       return [resultRow];
     }
 
+    const groupFns = step.groupBy.map((expr) => this._getCompiled(expr, meta));
+    const groupSlots = step.groupByAliases.map((a) => meta.slotTable.getOrAdd(a));
     const groups = new Map<string, { keyValues: unknown[]; rows: Row[] }>();
-    for (const row of rows) {
-      const keyValues: unknown[] = step.groupBy.map((expr) =>
-        this._evaluator.evaluate(expr, row, params),
-      );
-      const keyStr = this._serializeGroupKey(keyValues);
-      if (!groups.has(keyStr)) {
-        groups.set(keyStr, { keyValues, rows: [] });
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const keyValues = new Array<unknown>(groupFns.length);
+      for (let g = 0; g < groupFns.length; g++) {
+        keyValues[g] = groupFns[g](row, params, kernel);
       }
-      groups.get(keyStr)!.rows.push(row);
+      const keyStr = this._serializeGroupKey(keyValues);
+      let group = groups.get(keyStr);
+      if (!group) {
+        group = { keyValues, rows: [] };
+        groups.set(keyStr, group);
+      }
+      group.rows.push(row);
     }
 
     const result: Row[] = [];
-    for (const [, group] of groups) {
-      const resultRow = new Map<string, unknown>();
-      for (let i = 0; i < step.groupBy.length; i++) {
-        const alias = step.groupByAliases[i];
-        resultRow.set(alias, group.keyValues[i]);
+    for (const group of groups.values()) {
+      const resultRow = meta.slotTable.createEmptyRow();
+      for (let i = 0; i < groupSlots.length; i++) {
+        resultRow[groupSlots[i]] = group.keyValues[i];
       }
       for (const spec of step.aggregates) {
-        resultRow.set(spec.alias, this._computeAggregate(spec, group.rows, params));
+        resultRow[meta.slotTable.getOrAdd(spec.alias)] = this._computeAggregate(
+          spec,
+          group.rows,
+          params,
+          meta,
+          kernel,
+        );
       }
       result.push(resultRow);
     }
@@ -311,11 +658,20 @@ export class AggregateStepExecutor {
     spec: AggregateSpec,
     rows: Row[],
     params: Record<string, unknown>,
+    meta: CompiledPlanMeta,
+    kernel?: ISyncGraphKernel,
   ): unknown {
     const { expression, distinct } = spec;
-    let values: unknown[] = rows
-      .map((row) => this._evaluateExpressionForAggregate(expression, row, params))
-      .filter((v) => v !== null && v !== undefined);
+    const isStar = expression.kind === 'Literal' && expression.value === '*';
+    const fn = isStar ? null : this._getCompiled(expression, meta);
+
+    let values: unknown[] = [];
+    for (let i = 0; i < rows.length; i++) {
+      const v = fn === null ? 1 : fn(rows[i], params, kernel);
+      if (v !== null && v !== undefined) {
+        values.push(v);
+      }
+    }
 
     if (distinct) {
       values = this._deduplicatedValues(values);
@@ -325,25 +681,40 @@ export class AggregateStepExecutor {
       case 'COUNT':
         return values.length;
       case 'SUM': {
-        const nums = values.map(Number).filter((n) => !isNaN(n));
-        return nums.reduce((a, b) => a + b, 0);
+        let sum = 0;
+        for (let i = 0; i < values.length; i++) {
+          const n = Number(values[i]);
+          if (!Number.isNaN(n)) sum += n;
+        }
+        return sum;
       }
       case 'AVG': {
-        const nums = values.map(Number).filter((n) => !isNaN(n));
-        if (nums.length === 0) return 0;
-        return nums.reduce((a, b) => a + b, 0) / nums.length;
+        let sum = 0;
+        let count = 0;
+        for (let i = 0; i < values.length; i++) {
+          const n = Number(values[i]);
+          if (!Number.isNaN(n)) {
+            sum += n;
+            count++;
+          }
+        }
+        return count === 0 ? 0 : sum / count;
       }
       case 'MIN': {
         if (values.length === 0) return null;
-        return values.reduce((a, b) =>
-          this._evaluator.compare(a, b) <= 0 ? a : b,
-        );
+        let min = values[0];
+        for (let i = 1; i < values.length; i++) {
+          if (this._evaluator.compare(values[i], min) < 0) min = values[i];
+        }
+        return min;
       }
       case 'MAX': {
         if (values.length === 0) return null;
-        return values.reduce((a, b) =>
-          this._evaluator.compare(a, b) >= 0 ? a : b,
-        );
+        let max = values[0];
+        for (let i = 1; i < values.length; i++) {
+          if (this._evaluator.compare(values[i], max) > 0) max = values[i];
+        }
+        return max;
       }
       case 'COLLECT':
         return values;
@@ -352,37 +723,15 @@ export class AggregateStepExecutor {
     }
   }
 
-  private _evaluateExpressionForAggregate(
-    expr: Expression,
-    row: Row,
-    params: Record<string, unknown>,
-  ): unknown {
-    if (expr.kind === 'Literal' && expr.value === '*') {
-      return 1;
-    }
-    return this._evaluator.evaluate(expr, row, params);
+  private _valueDistinctKey(v: unknown): string {
+    return serializeCypherKey(v);
   }
 
-  /**
-   * Deduplicate values using identity-based comparison for graph entities
-   * (nodes / edges) and value equality for primitives.  Matches the
-   * established identity-key pattern used by {@link _serializeGroupKey} and
-   * {@link PipelineStepExecutor.executeProject} DISTINCT handling.
-   */
   private _deduplicatedValues(values: unknown[]): unknown[] {
     const seen = new Set<string>();
     const result: unknown[] = [];
     for (const v of values) {
-      let key: string;
-      if (v === null) {
-        key = '\x00null';
-      } else if (v === undefined) {
-        key = '\x00undef';
-      } else if (typeof v === 'object' && v !== null && 'id' in (v as object)) {
-        key = (v as { id: string }).id;
-      } else {
-        key = String(v);
-      }
+      const key = this._valueDistinctKey(v);
       if (!seen.has(key)) {
         seen.add(key);
         result.push(v);
@@ -393,13 +742,9 @@ export class AggregateStepExecutor {
 
   private _serializeGroupKey(keyValues: unknown[]): string {
     return keyValues
-      .map((v) => {
-        if (v === null) return '\x00null';
-        if (v === undefined) return '\x00undef';
-        if (typeof v === 'object' && v !== null && 'id' in (v as object)) {
-          return (v as { id: string }).id;
-        }
-        return String(v);
+      .map((v, idx) => {
+        const sk = serializeCypherKey(v);
+        return `${idx}:${sk.length}:${sk}`;
       })
       .join('\x00');
   }

@@ -1,70 +1,38 @@
 import type {
   NodeData,
   EdgeData,
+  ReadonlyNodeData,
+  ReadonlyEdgeData,
   GraphData,
-  AggregateOp,
   AggregateResult,
   QueryOptionsFilterProperty,
+  PropertyPatch,
 } from '../types';
 import type {
   IStorageProvider,
-  IOrderBy,
   ITransactionHandle,
   StorageQueryOptions,
+  IndexMetadata,
+  CreateIndexOptions,
 } from './IStorageProvider';
 import type { CacheConfig } from './cache/CacheConfig';
 import type { CacheManager } from './cache/CacheManager';
 
 /**
- * CachedStorageProvider wraps any IStorageProvider with a cache layer.
- *
- * It implements IStorageProvider so it is transparent to Graph — the Graph class
- * works with a CachedStorageProvider exactly as it would with a raw
- * MongoStorageProvider or InMemoryStorageProvider.
- *
- * ## Read path
- * 1. Check CacheManager for the item
- * 2. On cache HIT → return cached data
- * 3. On cache MISS → delegate to underlying provider → cache the result
- *
- * ## Write path
- * 1. Delegate to underlying provider
- * 2. On success → invalidate or populate cache
- *
- * ## Transaction handling
- * - Reads inside a transaction ALWAYS bypass the cache (must see uncommitted state)
- * - Writes inside a transaction use optimistic invalidation (immediate, no commit wait)
- *
- * @example
- * ```typescript
- * const mongoProvider = new MongoStorageProvider(db, { graphId: 'tenant-a' });
- * const cacheManager = GraphManager.getInstance().getCacheManager();
- * const cachedProvider = new CachedStorageProvider(mongoProvider, 'tenant-a', cacheManager);
- * const graph = new Graph(cachedProvider);
- * ```
+ * CachedStorageProvider wraps a remote/slow IStorageProvider (such as MongoDB)
+ * with a read-through / write-invalidate cache layer.
  */
 export class CachedStorageProvider implements IStorageProvider {
   constructor(
-    /**
-     * The underlying storage provider (e.g. MongoStorageProvider).
-     * CachedStorageProvider does not implement ensureIndexes — that is
-     * the caller's responsibility on the underlying provider.
-     */
     private readonly _underlying: IStorageProvider,
-    /**
-     * The graphId partition key for this provider instance.
-     * All cache keys are namespaced as `${graphId}:${nodeId}`.
-     */
     private readonly _graphId: string,
-    /**
-     * The shared CacheManager instance (from GraphManager).
-     */
     private readonly _cacheManager: CacheManager,
-    /**
-     * Cache configuration (used for preload strategy).
-     */
-    private readonly _config: CacheConfig
-  ) { }
+    private readonly _config: CacheConfig,
+  ) {}
+
+  get indexEpoch(): number {
+    return this._underlying.indexEpoch;
+  }
 
   // ─── Lifecycle ───────────────────────────────────────────────────────────────
 
@@ -73,7 +41,10 @@ export class CachedStorageProvider implements IStorageProvider {
     await this._cacheManager.invalidateAllForGraph(this._graphId);
   }
 
-  // The following comment is needed to exclude these methods from coverage
+  compact(): void {
+    this._underlying.compact?.();
+  }
+
   /* istanbul ignore next */
   async getNodeCount(options?: StorageQueryOptions): Promise<number> {
     return this._underlying.getNodeCount(options);
@@ -87,7 +58,7 @@ export class CachedStorageProvider implements IStorageProvider {
   /* istanbul ignore next */
   async aggregateNodeProperty(
     key: string,
-    options?: StorageQueryOptions
+    options?: StorageQueryOptions,
   ): Promise<AggregateResult> {
     return this._underlying.aggregateNodeProperty(key, options);
   }
@@ -95,7 +66,7 @@ export class CachedStorageProvider implements IStorageProvider {
   /* istanbul ignore next */
   async aggregateEdgeProperty(
     key: string,
-    options?: StorageQueryOptions
+    options?: StorageQueryOptions,
   ): Promise<AggregateResult> {
     return this._underlying.aggregateEdgeProperty(key, options);
   }
@@ -104,27 +75,37 @@ export class CachedStorageProvider implements IStorageProvider {
 
   async insertNode(node: NodeData, transaction?: ITransactionHandle): Promise<void> {
     await this._underlying.insertNode(node, transaction);
-
-    // Skip cache population inside transactions — uncommitted data must not be cached
     if (transaction) return;
 
-    // Populate cache if budget allows (inserts are write-through)
     const stats = await this._cacheManager.getStats();
     if (stats.totalNodes < this._config.maxNodesCount) {
       await this._cacheManager.setNode(this._graphId, node.id, node);
     }
   }
 
+  async insertNodes(nodes: readonly NodeData[], transaction?: ITransactionHandle): Promise<void> {
+    await this._underlying.insertNodes(nodes, transaction);
+    if (transaction) return;
+
+    const stats = await this._cacheManager.getStats();
+    let total = stats.totalNodes;
+    for (const node of nodes) {
+      if (total >= this._config.maxNodesCount) break;
+      await this._cacheManager.setNode(this._graphId, node.id, node);
+      total++;
+    }
+  }
+
   async deleteNode(id: string, transaction?: ITransactionHandle): Promise<void> {
     await this._underlying.deleteNode(id, transaction);
-    // Invalidate cache regardless of transaction (it's already deleted from storage)
-    await this._cacheManager.invalidateNode(this._graphId, id);
+    if (!transaction) {
+      await this._cacheManager.invalidateNode(this._graphId, id);
+    }
   }
 
   // ─── Node queries ───────────────────────────────────────────────────────────
 
   async hasNode(id: string, transaction?: ITransactionHandle): Promise<boolean> {
-    // Bypass cache in transactions — must read uncommitted state
     if (transaction) {
       return this._underlying.hasNode(id, transaction);
     }
@@ -134,15 +115,13 @@ export class CachedStorageProvider implements IStorageProvider {
 
     const exists = await this._underlying.hasNode(id, transaction);
     if (exists) {
-      // Cache the node data while we know it exists
       const node = await this._underlying.getNode(id, transaction);
-      if (node) await this._cacheManager.setNode(this._graphId, id, node);
+      if (node) await this._cacheManager.setNode(this._graphId, id, node as NodeData);
     }
     return exists;
   }
 
-  async getNode(id: string, transaction?: ITransactionHandle): Promise<NodeData | undefined> {
-    // Bypass cache in transactions
+  async getNode(id: string, transaction?: ITransactionHandle): Promise<ReadonlyNodeData | undefined> {
     if (transaction) {
       return this._underlying.getNode(id, transaction);
     }
@@ -152,68 +131,81 @@ export class CachedStorageProvider implements IStorageProvider {
 
     const node = await this._underlying.getNode(id, transaction);
     if (node) {
-      await this._cacheManager.setNode(this._graphId, id, node);
+      await this._cacheManager.setNode(this._graphId, id, node as NodeData);
     }
     return node;
   }
 
-  async getNodesByIds(ids: string[], transaction?: ITransactionHandle): Promise<Map<string, NodeData>> {
+  async getNodesByIds(
+    ids: string[],
+    transaction?: ITransactionHandle,
+  ): Promise<Map<string, ReadonlyNodeData>> {
     if (transaction) {
       return this._underlying.getNodesByIds(ids, transaction);
     }
 
-    // Try cache first
     const uniqueIds = Array.from(new Set(ids));
     const cached = await this._cacheManager.getNodes(this._graphId, uniqueIds);
     const cachedIds = new Set(cached.keys());
-    const missingIds = uniqueIds.filter(id => !cachedIds.has(id));
+    const missingIds = uniqueIds.filter((id) => !cachedIds.has(id));
 
     if (missingIds.length === 0) {
       return cached;
     }
 
-    // Fetch missing from underlying provider
     const fetched = await this._underlying.getNodesByIds(missingIds, transaction);
-
-    // Cache the fetched nodes
     for (const [id, node] of fetched) {
-      await this._cacheManager.setNode(this._graphId, id, node);
+      await this._cacheManager.setNode(this._graphId, id, node as NodeData);
     }
 
-    // Merge cached + fetched
-    const result = new Map<string, NodeData>(cached);
+    const result = new Map<string, ReadonlyNodeData>(cached);
     for (const [id, node] of fetched) {
       result.set(id, node);
     }
-
     return result;
   }
 
   // ─── Edge mutations ─────────────────────────────────────────────────────────
 
   async insertEdge(edge: EdgeData, transaction?: ITransactionHandle): Promise<void> {
-    const result = await this._underlying.insertEdge(edge, transaction);
-
-    // Skip cache population inside transactions — uncommitted data must not be cached
-    if (transaction) return result;
+    await this._underlying.insertEdge(edge, transaction);
+    if (transaction) return;
 
     const stats = await this._cacheManager.getStats();
     if (stats.totalEdges < this._config.maxEdgesCount) {
       await this._cacheManager.setEdge(this._graphId, edge.id, edge);
-      // Update adjacency index for getEdgesBySource/getEdgesByTarget optimization
       await this._cacheManager.addEdgeToAdjacencyIndex(this._graphId, 'source', edge.sourceId, edge.id);
       await this._cacheManager.addEdgeToAdjacencyIndex(this._graphId, 'target', edge.targetId, edge.id);
+    } else {
+      this._cacheManager.markNodeAdjacencyIncomplete(this._graphId, 'source', edge.sourceId);
+      this._cacheManager.markNodeAdjacencyIncomplete(this._graphId, 'target', edge.targetId);
     }
-    return result;
+  }
+
+  async insertEdges(edges: readonly EdgeData[], transaction?: ITransactionHandle): Promise<void> {
+    await this._underlying.insertEdges(edges, transaction);
+    if (transaction) return;
+
+    const stats = await this._cacheManager.getStats();
+    let total = stats.totalEdges;
+    for (const edge of edges) {
+      if (total >= this._config.maxEdgesCount) {
+        this._cacheManager.markNodeAdjacencyIncomplete(this._graphId, 'source', edge.sourceId);
+        this._cacheManager.markNodeAdjacencyIncomplete(this._graphId, 'target', edge.targetId);
+        continue;
+      }
+      await this._cacheManager.setEdge(this._graphId, edge.id, edge);
+      await this._cacheManager.addEdgeToAdjacencyIndex(this._graphId, 'source', edge.sourceId, edge.id);
+      await this._cacheManager.addEdgeToAdjacencyIndex(this._graphId, 'target', edge.targetId, edge.id);
+      total++;
+    }
   }
 
   async deleteEdge(id: string, transaction?: ITransactionHandle): Promise<void> {
-    // Get edge data first for adjacency index cleanup
-    const edge = await this._underlying.getEdge(id, transaction);
+    const edge = transaction ? undefined : await this._underlying.getEdge(id, transaction);
     await this._underlying.deleteEdge(id, transaction);
-    // Invalidate cache regardless of transaction (it's already deleted from storage)
+    if (transaction) return;
     await this._cacheManager.invalidateEdge(this._graphId, id);
-    // Clean up adjacency index
     if (edge) {
       await this._cacheManager.removeEdgeFromAdjacencyIndex(this._graphId, 'source', edge.sourceId, id);
       await this._cacheManager.removeEdgeFromAdjacencyIndex(this._graphId, 'target', edge.targetId, id);
@@ -233,12 +225,12 @@ export class CachedStorageProvider implements IStorageProvider {
     const exists = await this._underlying.hasEdge(id, transaction);
     if (exists) {
       const edge = await this._underlying.getEdge(id, transaction);
-      if (edge) await this._cacheManager.setEdge(this._graphId, id, edge);
+      if (edge) await this._cacheManager.setEdge(this._graphId, id, edge as EdgeData);
     }
     return exists;
   }
 
-  async getEdge(id: string, transaction?: ITransactionHandle): Promise<EdgeData | undefined> {
+  async getEdge(id: string, transaction?: ITransactionHandle): Promise<ReadonlyEdgeData | undefined> {
     if (transaction) {
       return this._underlying.getEdge(id, transaction);
     }
@@ -248,174 +240,140 @@ export class CachedStorageProvider implements IStorageProvider {
 
     const edge = await this._underlying.getEdge(id, transaction);
     if (edge) {
-      await this._cacheManager.setEdge(this._graphId, id, edge);
+      await this._cacheManager.setEdge(this._graphId, id, edge as EdgeData);
     }
     return edge;
   }
 
   async getEdgesBySource(
     nodeId: string,
-    options?: StorageQueryOptions
-  ): Promise<EdgeData[]> {
-    const transaction = options?.transaction;
-
-    // Bypass cache in transactions
-    if (transaction) {
-      return this._underlying.getEdgesBySource(nodeId, options);
-    }
-
-    // Try adjacency index first - if it returns non-empty, use those edges
-    const edgeIds = await this._cacheManager.getEdgeIdsByAdjacencyIndex(this._graphId, 'source', nodeId);
-    if (edgeIds.length > 0) {
-      // Fetch each edge individually from cache by ID
-      const edges: EdgeData[] = [];
-      for (const edgeId of edgeIds) {
-        const edge = await this._cacheManager.getEdge(this._graphId, edgeId);
-        if (edge) {
-          // Check if edge matches the type filter
-          const types = options?.filter?.types;
-          const typeMatch = !types || types.length === 0 || types.includes(edge.type);
-          if (!typeMatch) continue;
-
-          // Check if edge matches the property filters
-          const properties = options?.filter?.properties;
-          const propertyMatch = !properties || properties.length === 0 || properties.every(
-            (prop) => this._matchesPropertyFilter(edge.properties ?? {}, prop)
-          );
-          if (!propertyMatch) continue;
-
-          edges.push(edge);
-        }
-      }
-      // If we got at least some edges from cache, apply order/limit and return
-      if (edges.length > 0) {
-        return this._applyOrderAndLimit(edges, options);
-      }
-    }
-
-    // Adjacency index returned empty - could be genuinely no edges, or cache not warmed
-    // Fall back to underlying provider
-    return this._underlying.getEdgesBySource(nodeId, options);
+    options?: StorageQueryOptions,
+  ): Promise<ReadonlyEdgeData[]> {
+    return this._getEdgesByDirection('source', nodeId, options);
   }
 
   async getEdgesByTarget(
     nodeId: string,
-    options?: StorageQueryOptions
-  ): Promise<EdgeData[]> {
-    const transaction = options?.transaction;
+    options?: StorageQueryOptions,
+  ): Promise<ReadonlyEdgeData[]> {
+    return this._getEdgesByDirection('target', nodeId, options);
+  }
 
-    // Bypass cache in transactions
+  private async _getEdgesByDirection(
+    direction: 'source' | 'target',
+    nodeId: string,
+    options?: StorageQueryOptions,
+  ): Promise<ReadonlyEdgeData[]> {
+    const transaction = options?.transaction;
     if (transaction) {
-      return this._underlying.getEdgesByTarget(nodeId, options);
+      return direction === 'source'
+        ? this._underlying.getEdgesBySource(nodeId, options)
+        : this._underlying.getEdgesByTarget(nodeId, options);
     }
 
-    // Try adjacency index first - if it returns non-empty, use those edges
-    const edgeIds = await this._cacheManager.getEdgeIdsByAdjacencyIndex(this._graphId, 'target', nodeId);
-    if (edgeIds.length > 0) {
-      // Fetch each edge individually from cache by ID
+    if (this._cacheManager.isNodeAdjacencyComplete(this._graphId, direction, nodeId)) {
+      const edgeIds = await this._cacheManager.getEdgeIdsByAdjacencyIndex(this._graphId, direction, nodeId);
       const edges: EdgeData[] = [];
+      let allCachedPresent = true;
       for (const edgeId of edgeIds) {
         const edge = await this._cacheManager.getEdge(this._graphId, edgeId);
-        if (edge) {
-          // Check if edge matches the type filter
-          const types = options?.filter?.types;
-          const typeMatch = !types || types.length === 0 || types.includes(edge.type);
-          if (!typeMatch) continue;
-
-          // Check if edge matches the property filters
-          const properties = options?.filter?.properties;
-          const propertyMatch = !properties || properties.length === 0 || properties.every(
-            (prop) => this._matchesPropertyFilter(edge.properties ?? {}, prop)
-          );
-          if (!propertyMatch) continue;
-
-          edges.push(edge);
+        if (!edge) {
+          allCachedPresent = false;
+          this._cacheManager.markNodeAdjacencyIncomplete(this._graphId, direction, nodeId);
+          break;
         }
+        const types = options?.filter?.types;
+        const typeMatch = !types || types.length === 0 || types.includes(edge.type);
+        if (!typeMatch) continue;
+
+        const properties = options?.filter?.properties;
+        const propertyMatch = !properties || properties.length === 0 || properties.every(
+          (prop) => this._matchesPropertyFilter(edge.properties ?? {}, prop),
+        );
+        if (!propertyMatch) continue;
+
+        edges.push(edge);
       }
-      // If we got at least some edges from cache, apply order/limit and return
-      if (edges.length > 0) {
+      if (allCachedPresent) {
         return this._applyOrderAndLimit(edges, options);
       }
     }
 
-    // Adjacency index returned empty - could be genuinely no edges, or cache not warmed
-    // Fall back to underlying provider
-    return this._underlying.getEdgesByTarget(nodeId, options);
+    const fetched = direction === 'source'
+      ? await this._underlying.getEdgesBySource(nodeId, options)
+      : await this._underlying.getEdgesByTarget(nodeId, options);
+
+    // Populate read-through adjacency cache only when returning the full unfiltered set
+    if (!options?.filter && !options?.orderBy && options?.limit === undefined) {
+      const stats = await this._cacheManager.getStats();
+      if (stats.totalEdges + fetched.length <= this._config.maxEdgesCount) {
+        for (const edge of fetched) {
+          await this._cacheManager.setEdge(this._graphId, edge.id, edge as EdgeData);
+          await this._cacheManager.addEdgeToAdjacencyIndex(this._graphId, direction, nodeId, edge.id);
+        }
+        this._cacheManager.markNodeAdjacencyComplete(this._graphId, direction, nodeId);
+      }
+    }
+
+    return fetched;
   }
 
-  async getNodes(options?: StorageQueryOptions): Promise<NodeData[]> {
+  async getNodes(options?: StorageQueryOptions): Promise<ReadonlyNodeData[]> {
     return this._underlying.getNodes(options);
   }
 
-  async getEdges(options?: StorageQueryOptions): Promise<EdgeData[]> {
+  async getEdges(options?: StorageQueryOptions): Promise<ReadonlyEdgeData[]> {
     return this._underlying.getEdges(options);
   }
 
-  // ─── Property mutations ─────────────────────────────────────────────────────
+  // ─── Property & Label mutations ─────────────────────────────────────────────
 
-  async addProperty(
+  async patchProperties(
     target: 'node' | 'edge',
     id: string,
-    key: string,
-    value: unknown,
-    transaction?: ITransactionHandle
+    patch: PropertyPatch,
+    transaction?: ITransactionHandle,
   ): Promise<void> {
-    await this._underlying.addProperty(target, id, key, value, transaction);
-    await this._invalidate(target, id);
+    await this._underlying.patchProperties(target, id, patch, transaction);
+    if (!transaction) {
+      await this._invalidate(target, id);
+    }
   }
 
-  async updateProperty(
-    target: 'node' | 'edge',
-    id: string,
-    key: string,
-    value: unknown,
-    transaction?: ITransactionHandle
+  async removeNodeLabels(
+    nodeId: string,
+    labels: string[],
+    transaction?: ITransactionHandle,
   ): Promise<void> {
-    await this._underlying.updateProperty(target, id, key, value, transaction);
-    await this._invalidate(target, id);
-  }
-
-  async deleteProperty(
-    target: 'node' | 'edge',
-    id: string,
-    key: string,
-    transaction?: ITransactionHandle
-  ): Promise<void> {
-    await this._underlying.deleteProperty(target, id, key, transaction);
-    await this._invalidate(target, id);
-  }
-
-  async clearProperties(
-    target: 'node' | 'edge',
-    id: string,
-    transaction?: ITransactionHandle
-  ): Promise<void> {
-    await this._underlying.clearProperties(target, id, transaction);
-    await this._invalidate(target, id);
-  }
-
-  // ─── Label mutations ────────────────────────────────────────────────────────
-
-  async removeNodeLabels(nodeId: string, labels: string[], transaction?: ITransactionHandle): Promise<void> {
     await this._underlying.removeNodeLabels(nodeId, labels, transaction);
-    await this._invalidate('node', nodeId);
+    if (!transaction) {
+      await this._invalidate('node', nodeId);
+    }
   }
 
-  // ─── Index management ────────────────────────────────────────────────────────
+  // ─── Index management ───────────────────────────────────────────────────────
 
   async createIndex(
     name: string,
     target: 'node' | 'edge',
-    propertyKeys: string[]
+    propertyKeys: string[],
+    options?: CreateIndexOptions,
   ): Promise<void> {
+    if (options !== undefined) {
+      return this._underlying.createIndex(name, target, propertyKeys, options);
+    }
     return this._underlying.createIndex(name, target, propertyKeys);
   }
 
-  async hasIndex(target: 'node' | 'edge', propertyKeys: string[]): Promise<boolean> {
-    return this._underlying.hasIndex(target, propertyKeys);
+  async hasIndex(
+    target: 'node' | 'edge',
+    propertyKeys: string[],
+    labelOrType?: string,
+  ): Promise<boolean> {
+    return this._underlying.hasIndex(target, propertyKeys, labelOrType);
   }
 
-  async getIndex(name: string): Promise<{ name: string; target: 'node' | 'edge'; propertyKeys: string[] } | undefined> {
+  async getIndex(name: string): Promise<IndexMetadata | undefined> {
     return this._underlying.getIndex(name);
   }
 
@@ -423,11 +381,11 @@ export class CachedStorageProvider implements IStorageProvider {
     return this._underlying.deleteIndex(name);
   }
 
-  async getIndexes(): Promise<{ name: string; target: 'node' | 'edge'; propertyKeys: string[] }[]> {
+  async getIndexes(): Promise<IndexMetadata[]> {
     return this._underlying.getIndexes();
   }
 
-  // ─── Data portability ────────────────────────────────────────────────────────
+  // ─── Data portability ───────────────────────────────────────────────────────
 
   async exportJSON(): Promise<GraphData> {
     return this._underlying.exportJSON();
@@ -438,7 +396,7 @@ export class CachedStorageProvider implements IStorageProvider {
     await this._cacheManager.invalidateAllForGraph(this._graphId);
   }
 
-  // ─── Transaction support ─────────────────────────────────────────────────────
+  // ─── Transaction support ────────────────────────────────────────────────────
 
   supportsTransactions(): boolean {
     return this._underlying.supportsTransactions();
@@ -449,72 +407,62 @@ export class CachedStorageProvider implements IStorageProvider {
   }
 
   async commitTransaction(handle: ITransactionHandle): Promise<void> {
-    return this._underlying.commitTransaction(handle);
+    await this._underlying.commitTransaction(handle);
+    await this._cacheManager.invalidateAllForGraph(this._graphId);
   }
 
   async rollbackTransaction(handle: ITransactionHandle): Promise<void> {
     return this._underlying.rollbackTransaction(handle);
   }
 
-  // ─── Pre-loading ─────────────────────────────────────────────────────────────
+  // ─── Pre-loading ────────────────────────────────────────────────────────────
 
-  /**
-   * Pre-warms the cache based on the configured preloadStrategy.
-   *
-   * Must be called explicitly after construction when pre-loading is desired.
-   * Safe to skip when preloadStrategy is 'none'.
-   *
-   * @returns void
-   *
-   * @example
-   * ```typescript
-   * const cachedProvider = new CachedStorageProvider(mongo, 'tenant-a', cacheManager, {
-   *   ...config,
-   *   preloadStrategy: 'recent',
-   *   timestampProperty: 'createdAt',
-   * });
-   * await cachedProvider.warmCache();
-   * ```
-   */
   async warmCache(): Promise<void> {
     switch (this._config.preloadStrategy) {
       case 'none':
-        // No pre-loading — cache starts empty
         break;
 
       case 'all': {
-        // Load all nodes/edges up to budget
         const nodes = await this._underlying.getNodes({ limit: this._config.maxNodesCount });
         for (const node of nodes) {
-          await this._cacheManager.setNode(this._graphId, node.id, node);
+          await this._cacheManager.setNode(this._graphId, node.id, node as NodeData);
         }
-
+        const totalEdges = await this._underlying.getEdgeCount();
         const edges = await this._underlying.getEdges({ limit: this._config.maxEdgesCount });
+        let storedAllEdges = edges.length >= totalEdges;
         for (const edge of edges) {
-          await this._cacheManager.setEdge(this._graphId, edge.id, edge);
+          const alreadyCached = (await this._cacheManager.getEdge(this._graphId, edge.id)) !== undefined;
+          if (!alreadyCached) {
+            const stats = await this._cacheManager.getStats();
+            if (stats.totalEdges >= this._config.maxEdgesCount) {
+              storedAllEdges = false;
+              break;
+            }
+          }
+          await this._cacheManager.setEdge(this._graphId, edge.id, edge as EdgeData);
           await this._cacheManager.addEdgeToAdjacencyIndex(this._graphId, 'source', edge.sourceId, edge.id);
           await this._cacheManager.addEdgeToAdjacencyIndex(this._graphId, 'target', edge.targetId, edge.id);
+        }
+        if (storedAllEdges) {
+          this._cacheManager.markAllAdjacencyComplete(this._graphId);
         }
         break;
       }
 
       case 'recent': {
-        // Load nodes/edges sorted by updatedOn (descending - most recent first)
-        // Storage provider handles sorting natively for efficiency
         const nodes = await this._underlying.getNodes({
           limit: this._config.maxNodesCount,
-          orderBy: { field: 'updatedOn', direction: 'desc' }
+          orderBy: { field: 'updatedOn', direction: 'desc' },
         });
         for (const node of nodes) {
-          await this._cacheManager.setNode(this._graphId, node.id, node);
+          await this._cacheManager.setNode(this._graphId, node.id, node as NodeData);
         }
-
         const edges = await this._underlying.getEdges({
           limit: this._config.maxEdgesCount,
-          orderBy: { field: 'updatedOn', direction: 'desc' }
+          orderBy: { field: 'updatedOn', direction: 'desc' },
         });
         for (const edge of edges) {
-          await this._cacheManager.setEdge(this._graphId, edge.id, edge);
+          await this._cacheManager.setEdge(this._graphId, edge.id, edge as EdgeData);
           await this._cacheManager.addEdgeToAdjacencyIndex(this._graphId, 'source', edge.sourceId, edge.id);
           await this._cacheManager.addEdgeToAdjacencyIndex(this._graphId, 'target', edge.targetId, edge.id);
         }
@@ -522,15 +470,13 @@ export class CachedStorageProvider implements IStorageProvider {
       }
 
       case 'first-n': {
-        // Load first N nodes/edges as returned by storage provider
         const nodes = await this._underlying.getNodes({ limit: this._config.maxNodesCount });
         for (const node of nodes) {
-          await this._cacheManager.setNode(this._graphId, node.id, node);
+          await this._cacheManager.setNode(this._graphId, node.id, node as NodeData);
         }
-
         const edges = await this._underlying.getEdges({ limit: this._config.maxEdgesCount });
         for (const edge of edges) {
-          await this._cacheManager.setEdge(this._graphId, edge.id, edge);
+          await this._cacheManager.setEdge(this._graphId, edge.id, edge as EdgeData);
           await this._cacheManager.addEdgeToAdjacencyIndex(this._graphId, 'source', edge.sourceId, edge.id);
           await this._cacheManager.addEdgeToAdjacencyIndex(this._graphId, 'target', edge.targetId, edge.id);
         }
@@ -549,21 +495,15 @@ export class CachedStorageProvider implements IStorageProvider {
     }
   }
 
-  /**
-   * Checks if properties match a filter specification with operator AND/OR chaining support.
-   * Recursively evaluates AND (all must match) and OR (any must match) sub-filters.
-   */
-  private _matchesPropertyFilter(properties: Record<string, unknown>, filter: QueryOptionsFilterProperty): boolean {
-    // Handle AND - ALL conditions must be true
+  private _matchesPropertyFilter(
+    properties: Readonly<Record<string, unknown>>,
+    filter: QueryOptionsFilterProperty,
+  ): boolean {
     if (filter.AND && filter.AND.length > 0) {
       for (const subFilter of filter.AND) {
-        if (!this._matchesPropertyFilter(properties, subFilter)) {
-          return false;
-        }
+        if (!this._matchesPropertyFilter(properties, subFilter)) return false;
       }
     }
-
-    // Handle OR - ANY condition must be true
     if (filter.OR && filter.OR.length > 0) {
       let orMatched = false;
       for (const subFilter of filter.OR) {
@@ -572,16 +512,9 @@ export class CachedStorageProvider implements IStorageProvider {
           break;
         }
       }
-      if (!orMatched) {
-        return false;
-      }
+      if (!orMatched) return false;
     }
-
-    // Handle base case - single property filter with operator
-    // If key is not provided, this is a structural filter (AND/OR only) - always matches for base comparison
-    if (filter.key === undefined) {
-      return true;
-    }
+    if (filter.key === undefined) return true;
     const actualValue = properties[filter.key];
     const filterValue = filter.value;
     const op = filter.op ?? '=';
@@ -592,13 +525,17 @@ export class CachedStorageProvider implements IStorageProvider {
       case '<>':
         return actualValue !== filterValue;
       case '>':
-        return typeof actualValue === 'number' && typeof filterValue === 'number' && actualValue > filterValue;
+        return (typeof actualValue === 'number' && typeof filterValue === 'number' && actualValue > filterValue) ||
+          (typeof actualValue === 'string' && typeof filterValue === 'string' && actualValue > filterValue);
       case '<':
-        return typeof actualValue === 'number' && typeof filterValue === 'number' && actualValue < filterValue;
+        return (typeof actualValue === 'number' && typeof filterValue === 'number' && actualValue < filterValue) ||
+          (typeof actualValue === 'string' && typeof filterValue === 'string' && actualValue < filterValue);
       case '>=':
-        return typeof actualValue === 'number' && typeof filterValue === 'number' && actualValue >= filterValue;
+        return (typeof actualValue === 'number' && typeof filterValue === 'number' && actualValue >= filterValue) ||
+          (typeof actualValue === 'string' && typeof filterValue === 'string' && actualValue >= filterValue);
       case '<=':
-        return typeof actualValue === 'number' && typeof filterValue === 'number' && actualValue <= filterValue;
+        return (typeof actualValue === 'number' && typeof filterValue === 'number' && actualValue <= filterValue) ||
+          (typeof actualValue === 'string' && typeof filterValue === 'string' && actualValue <= filterValue);
       case 'CONTAINS':
         return typeof actualValue === 'string' && typeof filterValue === 'string' && actualValue.includes(filterValue);
       case 'STARTS_WITH':
@@ -618,15 +555,14 @@ export class CachedStorageProvider implements IStorageProvider {
     }
   }
 
-  private _applyOrderAndLimit(edges: EdgeData[], options?: StorageQueryOptions): EdgeData[] {
+  private _applyOrderAndLimit(
+    edges: ReadonlyEdgeData[],
+    options?: StorageQueryOptions,
+  ): ReadonlyEdgeData[] {
     let output = edges;
-
-    // Apply ordering if specified
     if (options?.orderBy) {
       const { field, direction } = options.orderBy;
       output = [...output].sort((a, b) => {
-        // Direct fields (createdOn, updatedOn) are on the object itself
-        // Other properties are in the properties object
         const aVal = (field === 'createdOn' || field === 'updatedOn' ? a[field] : a.properties?.[field]) as number | undefined;
         const bVal = (field === 'createdOn' || field === 'updatedOn' ? b[field] : b.properties?.[field]) as number | undefined;
         if (aVal === undefined && bVal === undefined) return 0;
@@ -636,13 +572,9 @@ export class CachedStorageProvider implements IStorageProvider {
         return direction === 'asc' ? (aVal < bVal ? -1 : 1) : (aVal > bVal ? -1 : 1);
       });
     }
-
-    // Apply limit
     if (options?.limit !== undefined) {
       output = output.slice(0, options.limit);
     }
-
     return output;
   }
-
 }

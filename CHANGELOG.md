@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [8.0.0] - 2026-11-18
+
+### Breaking Changes & Architectural Contracts
+
+`v8.0.0` is a clean major architecture upgrade with the following intentional breaking changes and storage/query contracts:
+
+1. **Toolchain Upgrade (`typescript@^7.0.2`, `@swc/jest`, `tsx`):**
+   - Upgraded TypeScript to `^7.0.2` across root, `@grafio/browser`, and `@grafio/visualizer`.
+   - Replaced `ts-jest`, `ts-node`, `cross-env`, and `tsconfig.perf.json` with `@swc/jest` + `tsx`.
+   - Isolated production compilation in `tsconfig.json` with `"types": []` (test suites use `tsconfig.test.json` with `"types": ["node", "jest"]`).
+2. **Removed Deprecated Granular Property APIs & Error Classes:**
+   - Removed the 10 granular property methods (`addNodeProperty`, `updateNodeProperty`, `deleteNodeProperty`, `clearNodeProperties`, `addEdgeProperty`, `updateEdgeProperty`, `deleteEdgeProperty`, `clearEdgeProperties`) and `PropertyAlreadyExistsError` / `PropertyNotFoundError` in favor of `set*Properties` / `unset*Properties` (`patchProperties`) and Cypher `SET` / `REMOVE`.
+3. **Removed `maxDegreeOfParallelism` & `parallelMap`:**
+   - Deleted `src/cypher/executor/parallelMap.ts` and `maxDegreeOfParallelism` options/parameters in favor of the zero-microtask `ISyncGraphKernel` execution path and sequential async execution.
+4. **Removed Stale v7 Architecture Doc:**
+   - Deleted the outdated `docs/grafio-architecture.html` document from the repository.
+5. **Sub-Package Packaging & Externalization (`@grafio/browser`, `@grafio/visualizer`):**
+   - Removed unpublishable `"grafio": "file:.."` entries from `browser/package.json` and `visualizer/package.json`.
+   - Externalized `['three', '3d-force-graph', 'three-spritetext', 'force-graph']` in `visualizer/scripts/build.js` so runtime 3D dependencies are not bundled into `dist/visualizer.*`.
+   - Enabled `"stripInternal": true` and `"removeComments": true` in `browser/tsconfig.json`.
+6. **Core Storage & Query Contracts:**
+   - **Default Compact IDs:** `InMemoryStorageProvider` defaults to `idStrategy: 'compact'` (`@n<slot>:<gen>` / `@e<slot>:<gen>`), with optional `idStrategy: 'uuid'` and explicit custom IDs.
+   - **Opt-In Scoped Property Indexes:** `hasIndex` returns `true` only for explicitly registered indexes (preserving `labelOrType` scoping).
+   - **Uncached In-Memory Factory:** `InMemoryGraphFactory` binds directly to `InMemoryStorageProvider` without `CachedStorageProvider` wrapping (`CachedStorageProvider` / `RedisCache` are reserved for remote/async storage providers).
+   - **Two-Tier Dangling-Edge Lifecycle:** `Graph.importJSON` and raw `IStorageProvider.insertEdge` / `insertEdges` intentionally support dangling endpoints (per v7.15.1+) and bind them automatically via `SlotArena.bindDanglingEdgesForNode` when missing endpoint nodes are inserted later, while `Graph.addEdge` / `addEdges` and Cypher `CREATE` / `MERGE` enforce endpoint existence.
+   - **Storage-Level Aggregate Contract:** `IStorageProvider.aggregateNodeProperty` / `aggregateEdgeProperty` return numeric `AggregateResult` summaries; non-numeric `MIN`/`MAX` comparisons execute via `ExpressionEvaluator.compare` using deterministic UTF-16 code-unit ordering.
+
+### Major Features & Engine Architecture
+
+- Dense `uint32` SoA `SlotArena` with generational slot recycling and lazy Copy-on-Write `Node` / `Edge` property materialization.
+- Tag-encoded adaptive `ColumnStore` (`Float64Array`, bit-packed booleans, string arrays, and automatic mixed promotion).
+- Hybrid Global CSR + Delta `AdjacencyStore` with `graph.compact()`, retired CSR slot lifecycle, and `ISyncGraphKernel` synchronous Fast Path.
+- Scoped `PropertyIndexStore` supporting hash equality, lazily sorted range scans, and compound indexes.
+- `TransactionManager` property-level deltas with symmetric write-conflict detection and implicit Cypher auto-transaction undo checkpoints.
+- `PlanCache` (LRU + `indexEpoch`), `SlotRow` (`unknown[]`), CSP-safe `ClosureCompiler`, `RingQueue` BFS traversal, unified `Graph.query()` / `Graph.querySync()`, and accurate `CypherSummary.labelsRemoved`.
+
 ## [7.15.1] - 2026-06-03
 
 ### Bug Fix
@@ -14,7 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [7.15.0] - 2026-06-03
 
-### ✨ New Features
+### New Features
 
 1. **UNWIND Clause Support**
    - Added full openCypher support for the `UNWIND` clause.
@@ -23,7 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [7.14.0] - 2026-06-01
 
-### ✨ New Features
+### New Features
 
 1. **Full `RETURN` Clause Expression Support**
    - Added support for `CASE WHEN` conditional expressions.
@@ -32,7 +68,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
    - Added support for list predicates: `ALL`, `ANY`, `NONE`, and `SINGLE`.
    - The `RETURN` clause now fully supports all standard openCypher expressions.
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 1. **Syntax & Semantic Fixes**
    - Hardened `Parser._isIdentifier()` to correctly exclude literal tokens (e.g. `STRING`, `BOOLEAN`, `NULL`), preventing them from masking syntax errors.
@@ -41,7 +77,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [7.13.0] - 2026-05-31
 
-### ✨ New Features
+### New Features
 
 1. **Pattern Comprehensions and Paths as Expressions**
    - Added support for openCypher pattern comprehensions (`[(a)-[:R]->(b) | b.name]`), allowing inline pattern matching that returns a list of projected values.
@@ -51,7 +87,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [7.12.0] - 2026-05-29
 
-### ✨ New Features
+### New Features
 
 1. **REMOVE Label Support**
    - Added full openCypher support for removing node labels (`REMOVE n:Label1:Label2`).
@@ -60,7 +96,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [7.11.0] - 2026-05-29
 
-### ✨ New Features
+### New Features
 
 1. **Regular Expression Matching (`=~`) and List Comprehensions**
    - Added support for openCypher regular expression matching using `=~`.
@@ -69,7 +105,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [7.10.0] - 2026-05-28
 
-### ✨ New Features
+### New Features
 
 1. **EXISTS Subquery Clause Support**
    - Added support for openCypher `EXISTS { MATCH ... }` subqueries.
@@ -79,7 +115,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [7.9.0] - 2026-05-28
 
-### ✨ New Features
+### New Features
 
 1. **UNION and UNION ALL Clause Support**
    - Added support for openCypher `UNION` and `UNION ALL` clauses.
@@ -91,7 +127,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [7.8.0] - 2026-05-27
 
-### ✨ New Features
+### New Features
 
 1. **OPTIONAL MATCH Clause Support**
    - Added support for the openCypher `OPTIONAL MATCH` clause, enabling left-outer-join semantics.
@@ -99,14 +135,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
    - Fully supports nested `WHERE` clauses within `OPTIONAL MATCH`.
    - Supports Named Paths (`path = (a)-->(b)`) which are correctly null-filled when missing.
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 1. **WHERE Clause Semantic Scoping**
    - Fixed scope leakage where a `WHERE` clause could reference variables introduced in a subsequent `MATCH` or `OPTIONAL MATCH` clause. Variable validation now uses an incremental scope to strictly enforce linear declaration order.
 
 ## [7.7.0] - 2026-05-26
 
-### ✨ New Features
+### New Features
 
 1. **SET Map Assignment and Mutation**
    - Added support for the openCypher `SET n = {map}` syntax to replace all properties on a node or edge.
@@ -116,7 +152,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [7.6.0] - 2026-05-25
 
-### ✨ New Features
+### New Features
 
 1. **WITH Clause Support**
    - Added support for the openCypher `WITH` clause, enabling multi-segment query pipelining.
@@ -127,7 +163,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [7.5.0] - 2026-05-25
 
-### ✨ New Features
+### New Features
 
 1. **MERGE Clause Support**
    - Added support for the openCypher `MERGE` clause.
@@ -136,7 +172,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [7.4.0] - 2026-05-23
 
-### 💥 Breaking Changes
+### Breaking Changes
 
 1. **Multi-label support for nodes — `Node.type` replaced with `Node.labels`**
    - `Node.type` (singular `string`) removed in favor of `Node.labels` (plural `readonly string[]`)
@@ -148,7 +184,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
    - `GraphToMermaid` renders multi-label nodes as `Label1:Label2`
    - Cypher `labels(n)` function already returns `string[]`; `CREATE (n:Person|Employee)` now stores both labels
 
-### ✨ New Features
+### New Features
 
 1. **Multi-label nodes**
    - Nodes can now have multiple labels: `await graph.addNode(['Person', 'Employee'], { name: 'Alice' })`
@@ -158,7 +194,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [7.3.0] - 2026-05-22
 
-### ✨ New Features
+### New Features
 
 1. **Cypher Path Functions: `nodes()` and `relationships()`**
    - `nodes(path)` — returns all nodes from a path expression as a list
@@ -173,7 +209,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [7.2.0] - 2026-05-19
 
-### ✨ New Features
+### New Features
 
 1. **Cypher Data Modification Queries**
    - Cypher now supports data modification queries including:
@@ -188,7 +224,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 3. **Cypher Index creation and deletion queries**
    - Cypher now supports `CREATE INDEX`, `DROP INDEX`, `SHOW INDEXES`
 
-### 🚨 Breaking Changes
+### Breaking Changes
 
 1. **Indexes Now Created by Name**
    - Indexes are now created and referenced by their assigned name
@@ -196,7 +232,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [7.1.0] - 2026-05-17
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 1. **Cypher Transaction Support**
    - Added `transaction` field to `CypherEngineOptions` interface
@@ -204,11 +240,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
    - `Executor.execute()` threads transaction through all graph method calls (NodeScan, NodeSeek, EdgeExpand, Aggregate)
    - All graph reads within a Cypher query can now use a transaction for consistent reads
 
-### ✨ New Features
+### New Features
 1. **Aggregation and multi-hop performance improvements**
    - While traversing the underlying storage can now query in batches which was single node fetch earlier.
 
-### 📝 Documentation
+### Documentation
 
 1. **Complete Documentation Website**
    - Added Docusaurus documentation under `/docs` directory
@@ -219,7 +255,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [7.0.0] - 2026-05-13
 
-### 🚨 Breaking Changes
+### Breaking Changes
 
 1. **`IStorageProvider` Interface Refactoring**
    - Replaced discrete query methods (`getNodesByType`, `getNodesByProperty`, `getAllNodes`, etc.) with a unified `StorageQueryOptions`-based API
@@ -236,7 +272,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
    - **`ITransactionHandle` and `IOrderBy` interfaces** moved from `IStorageProvider.ts` to `types.ts` (re-exported from `IStorageProvider` for backward compatibility)
    - **`createIndex` method removed the optional type argument and it will create both indexes with type and without type.
 
-### ✨ New Features
+### New Features
 
 1. **Cypher Aggregation Functions**
    - `COUNT(*)` — count all matched rows
@@ -301,7 +337,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - Extended `CypherSummary` with optional `planExecutionStats` field
     - Executor tracks per-step timing during query execution
 
-### 📝 Documentation
+### Documentation
 
 1. **Updated README with Cypher aggregation features**
    - Documented `COUNT`, `AVG`, `SUM`, `MIN`, `MAX`, `COLLECT` functions
@@ -317,7 +353,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [6.3.0] - 2026-05-11
 
-### ✨ New Features
+### New Features
 
 1. **Read-Only Cypher Query Interface**
    - Added a read-only `CypherEngine` that executes openCypher-compatible queries against a `Graph` instance
@@ -333,7 +369,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [6.2.0] - 2026-05-09
 
-### ✨ New Features
+### New Features
 
 1. **Cache Optimization for getAllNodes/getAllEdges**
    - Added `getTotalNodeCount()` and `getTotalEdgeCount()` to `IStorageProvider` interface
@@ -356,7 +392,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [6.1.0] - 2026-05-08
 
-### ✨ New Features
+### New Features
 
 1. **Caching Layer Implementation**
    - Added `CacheConfig` for configuring cache behavior (maxNodesCount, maxEdgesCount, evictionStrategy, preloadStrategy)
@@ -419,7 +455,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [5.4.1] - 2026-05-07
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 1. **Added exports field to package.json**
    - Added proper `exports` field for Node.js module resolution
@@ -428,7 +464,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [5.4.0] - 2026-05-05
 
-### ✨ New Features
+### New Features
 
 1. **Transaction-Aware Query Methods**
    - All public Graph methods now accept an optional `transaction` parameter
@@ -444,7 +480,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
    - Allows cleaner API usage: `{ transaction: tx }` or `{ filter: { edgeType: 'KNOWS' } }`
    - Exported `GraphOptions` type from the library for external use
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 1. **Tombstone Fallback Bug in InMemoryStorageProvider**
    - Fixed `addProperty`, `updateProperty`, `deleteProperty`, `clearProperties` methods
@@ -459,7 +495,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [5.3.0] - 2026-05-04
 
-### ✨ New Features
+### New Features
 
 1. **Transaction Support**
    - Added `GraphTransaction` class for managing multi-operation atomic updates
@@ -492,7 +528,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [5.2.0] - 2026-05-03
 
-### ✨ New Features
+### New Features
 
 1. **Property Constraints**
    - Added `isPrimitive()` validation ensuring property values are only supported primitive types (string, number, boolean, null, undefined)
@@ -517,7 +553,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [5.1.0] - 2026-05-02
 
-### ✨ New Features
+### New Features
 
 1. **MongoDB Performance Test Suite** — `perf/mongodb/`
    - Added `entryPoint.ts` for MongoDB-backed graph benchmarks.
@@ -538,13 +574,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
    - Convenience method combining `forGraph()` + `importJSON()`.
    - Filters incoming data by `graphId` partition for multi-graph data scenarios.
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 - `buildGraph()` now uses `InMemoryStorageProvider` with correct `graphId` instead of default provider.
 
 ## [5.0.0] - 2026-05-01
 
-### 🚨 Breaking Changes
+### Breaking Changes
 
 1. **All `Graph` methods are now `async`** (return `Promise<T>`)
    - Every public method on `Graph` — `addNode()`, `addEdge()`, `getNodes()`, `traverse()`, `isDAG()`, `topologicalSort()`, `exportJSON()`, `importJSON()`, `clear()`, etc. — now returns a `Promise`.
@@ -559,7 +595,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 3. **`IStorageProvider` interface is fully async**
    - All methods now return `Promise<T>`. Any custom `IStorageProvider` implementation must be updated.
 
-### ✨ New Features
+### New Features
 
 1. **`MongoStorageProvider`** — `src/storage/MongoStorageProvider.ts`
    - Full `IStorageProvider` implementation backed by MongoDB.
@@ -590,7 +626,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
    - `InMemoryGraphFactory`: simple factory for in-memory graphs.
    - Both factories accept optional `graphId` parameter for multi-graph scenarios.
 
-### 📦 New Exports
+### New Exports
 
 - `MongoStorageProvider` — MongoDB storage backend
 - `MongoStorageProviderOptions` — configuration type for `MongoStorageProvider`
@@ -599,7 +635,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `InMemoryGraphFactory` — in-memory Graph factory
 - `InMemoryStorageProviderOptions` — configuration type for `InMemoryStorageProvider`
 
-### 🔧 Internal Changes
+### Internal Changes
 
 - `GraphIndex`, `GraphTraversal`, `GraphAdminOps` all async-native internally.
 - `perf/` benchmark system updated to async (`buildGraph`, `runScenario`, all scenario setup/run functions).
@@ -610,7 +646,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [4.0.0] - 2026-04-30
 
-### 🚨 Breaking Changes
+### Breaking Changes
 
 1. **`Graph` constructor signature changed**
    - Old: `new Graph()`
@@ -622,7 +658,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
    - `GraphSerializer` class is removed entirely
    - Replaced by `GraphAdminOps` + provider-owned `exportJSON`/`importJSON`
 
-### ✨ New Features
+### New Features
 
 1. **`IStorageProvider` — Pluggable Storage Abstraction**
    - New `IStorageProvider` interface in `src/storage/IStorageProvider.ts`
@@ -650,18 +686,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
    - `GraphTraversal` now takes `IStorageProvider` directly instead of `GraphIndex`
    - Enables traversal over any storage backend without a `GraphIndex` wrapper
 
-### 🗑️ Deprecated (kept for backward compatibility)
+### Deprecated (kept for backward compatibility)
 
 - `graph.toJSON()` — use `graph.exportJSON()` instead
 - `Graph.fromJSON(data)` — use `Graph.importJSON(data)` instead
 
-### 🆕 New Exports
+### New Exports
 
 - `IStorageProvider` (type) — storage provider interface
 - `InMemoryStorageProvider` — default in-memory implementation
 - `GraphAdminOps` — admin operations class
 
-### 🔒 Internal Improvements
+### Internal Improvements
 
 - `GraphIndex` is now a pure CRUD orchestrator: all Map/Set storage moved to `InMemoryStorageProvider`
 - All `@internal` accessor methods (`_getNodeMap`, `_getEdgeMap`, `_getEdgesBySource`, `_getEdgesByTarget`, `_insertNode`, `_insertEdge`, `_removeEdgeInternal`) removed from `GraphIndex`
@@ -671,7 +707,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [3.2.0] - 2026-04-29
 
-### 🔒 Internal Improvements
+### Internal Improvements
 
 > These are internal correctness, safety, and performance fixes with no changes to the public API.
 
@@ -705,7 +741,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
    - Previously every `toJSON()` call triggered a full O(V+E) topological sort just to order the output
    - Nodes are now serialized in stable insertion order; `_traversal` dependency removed from `GraphSerializer`
 
-### 🆕 New Exports
+### New Exports
 
 - `NodeHasEdgesError` — thrown when `removeNode(id)` is called without `cascade` on a node that still has incident edges
 
@@ -713,7 +749,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [3.1.0] - 2026-04-18
 
-### ✨ New Features
+### New Features
 
 1. **GraphToMermaid - Mermaid Diagram Generation**
    - New `GraphToMermaid` class to convert graph data to Mermaid flowchart syntax
@@ -724,12 +760,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
    - Example usage:
      ```typescript
      import { Graph, GraphToMermaid } from 'grafio';
-     
+
      const graph = new Graph();
      const alice = graph.addNode('Person', { name: 'Alice' });
      const bob = graph.addNode('Person', { name: 'Bob' });
      graph.addEdge(alice.id, bob.id, 'KNOWS');
-     
+
      const mermaid = new GraphToMermaid(graph);
      console.log(mermaid.toString());
      // flowchart TD
@@ -737,7 +773,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
      //     def456["Person | def456"]
      //     abc123 -->|"KNOWS"| def456
      ```
-### 🧪 Test Coverage
+### Test Coverage
 
 - **SocialGraph.test.ts** - 75 tests (Facebook-style social graph with People, Posts, Photos, Comments)
 
@@ -745,7 +781,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [3.0.0] - 2026-04-14
 
-### 🚨 Breaking Changes
+### Breaking Changes
 
 1. **TraversalOptions API Updated**
    - `nodeType` renamed to `nodeTypes` (array instead of single string)
@@ -757,7 +793,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
    - New: `string[][] | null` (array of paths)
    - Source and target now accept wildcards: `string | string[]`
 
-### ✨ New Features
+### New Features
 
 1. **Wildcard Traversal**
    - `traverse('*', target)` - find one path for each matching source to target
@@ -779,7 +815,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [2.1.0] - 2026-04-12
 
-### 🚀 Performance Improvements
+### Performance Improvements
 
 1. **Adjacency Maps for O(1) Lookups**
    - Added `_edgesBySource` and `_edgesByTarget` adjacency maps for constant-time edge lookups
@@ -789,7 +825,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
    - `isDAG()` uses adjacency map for cycle detection
    - `removeNode(cascade)` uses adjacency maps for efficient incident edge cleanup
 
-### ✨ New Features
+### New Features
 
 1. **Type-Filtered Traversal**
    - `traverse()` now accepts `TraversalOptions` with `nodeType` and `edgeType` filters
@@ -806,7 +842,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 3. **API Renaming**
    - `getEdgesBetween()` renamed to `getDirectEdgesBetween()` for clarity (only finds direct edges, not multi-hop paths)
 
-### 📦 Exported Types
+### Exported Types
 
 - `TraversalOptions` interface now exported from main module
 
@@ -814,7 +850,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [2.0.0] - 2026-04-11
 
-### 🚨 Breaking Changes
+### Breaking Changes
 
 This release introduces significant API changes.
 
@@ -864,7 +900,7 @@ This release introduces significant API changes.
 **`errors.ts`**
 - Error messages updated to reference `id` instead of `name`
 
-### ✨ New Features
+### New Features
 
 1. **Node Types (Labels)**
    - Nodes now have a `type` property (e.g., "Course", "Chapter", "Author")
@@ -886,7 +922,7 @@ This release introduces significant API changes.
 5. **DAG Validation**
    - `isDAG()` method to check for cycles
 
-### 🧪 Test Data
+### Test Data
 
 - **`complex-graph.json`** - Updated to new format with 8 Person nodes and 10 edges
 - **`education-graph.json`** - New test data with:
@@ -900,7 +936,7 @@ This release introduces significant API changes.
   - 4 Tags
   - Edge types: CONTAINS, AUTHOR_OF, PUBLISHED_BY, TAGGED_WITH
 
-### 🧪 Test Coverage
+### Test Coverage
 
 - **Graph.test.ts** - 74 tests (added 7 new tests for `isDAG()`)
 - **ComplexGraph.test.ts** - Updated for new API

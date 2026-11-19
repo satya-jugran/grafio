@@ -101,23 +101,12 @@ export class InvalidPropertyError extends GraphError {
 }
 
 /**
- * Error thrown when attempting to add a property that already exists
+ * Error thrown when committing a transaction that conflicts with another committed transaction
  */
-export class PropertyAlreadyExistsError extends GraphError {
-  constructor(targetType: 'node' | 'edge', targetId: string, propertyKey: string) {
-    super(`Property '${propertyKey}' already exists on ${targetType} '${targetId}'`);
-    this.name = 'PropertyAlreadyExistsError';
-    Object.setPrototypeOf(this, PropertyAlreadyExistsError.prototype);
-  }
-}
-
-/**
- * Error thrown when attempting to update a property that does not exist
- */
-export class PropertyNotFoundError extends GraphError {
-  constructor(targetType: 'node' | 'edge', targetId: string, propertyKey: string) {
-    super(`Property '${propertyKey}' not found on ${targetType} '${targetId}'`);
-    this.name = 'PropertyNotFoundError';
-    Object.setPrototypeOf(this, PropertyNotFoundError.prototype);
+export class TransactionConflictError extends GraphError {
+  constructor(message = 'Transaction conflict detected during commit') {
+    super(message);
+    this.name = 'TransactionConflictError';
+    Object.setPrototypeOf(this, TransactionConflictError.prototype);
   }
 }

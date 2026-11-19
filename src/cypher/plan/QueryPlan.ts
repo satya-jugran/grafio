@@ -481,6 +481,8 @@ export interface CreateIndexStep {
   target: 'node' | 'edge';
   /** Property keys to index (single or compound). */
   propertyKeys: string[];
+  /** Optional node label or edge type scoping this index. */
+  labelOrType?: string;
 }
 
 /** Drop a property index by name. */

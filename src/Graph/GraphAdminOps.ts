@@ -37,7 +37,6 @@ export class GraphAdminOps {
    * @throws InvalidPropertyError if any node or edge has non-primitive property values
    * @throws NodeAlreadyExistsError if a node id is already present
    * @throws EdgeAlreadyExistsError if an edge id is already present
-   * @throws NodeNotFoundError if an edge references a non-existent node
    */
   async importJSON(data: GraphData): Promise<void> {
     // Validate all node properties are flat primitives

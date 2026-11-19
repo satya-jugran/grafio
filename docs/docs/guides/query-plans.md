@@ -160,9 +160,17 @@ MATCH (p:Person) RETURN p.name LIMIT 10
 MATCH (p:Person {city: 'NYC'}) RETURN p.name LIMIT 10
 ```
 
-### Use CypherEngineOptions.maxDegreeOfParallelism
+### Leverage Plan Caching & CSR Compaction
+
 ```typescript
-const engine = new CypherEngine(graph, { maxDegreeOfParallelism: 8 })
+// Reuse compiled query plans via CypherEngine PlanCache (default: 512 entries)
+const engine = new CypherEngine(graph, { planCacheSize: 512 });
+
+// Execute synchronously on InMemoryStorageProvider without microtask overhead
+const fast = engine.executeSync('MATCH (p:Person) WHERE p.name = $name RETURN p', { name: 'Alice' });
+
+// Compact incremental delta edges into CSR arrays after bulk writes or deletes
+graph.compact();
 ```
 
 ## Next Steps

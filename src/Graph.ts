@@ -9,52 +9,37 @@ import type { TraversalOptions } from './Graph/TraversalOptions';
 import type { GraphQueryOptions } from './Graph/GraphQueryOptions';
 import {
   isCacheWarmableStorageProvider,
+  type CreateIndexOptions,
+  type IndexMetadata,
   type IStorageProvider,
+  type ISyncGraphKernel,
 } from './storage/IStorageProvider';
+import {
+  CypherEngine,
+  type CypherEngineOptions,
+  type CypherQueryOptions,
+} from './cypher/CypherEngine';
+import type { CypherResult } from './cypher/Result';
+import type { PlanFormat } from './cypher/plan/PlanFormatter';
 
-// Re-export for external use
 export type { GraphQueryOptions } from './Graph/GraphQueryOptions';
 export type { TraversalOptions } from './Graph/TraversalOptions';
 export { GraphTransaction } from './Graph/GraphTransaction';
 export { TransactionNotActiveError, TransactionFailedError } from './Graph/GraphTransaction';
+export { TransactionConflictError } from './errors';
 
 /**
- * A graph database with pluggable storage backend.
- * Manages nodes and directed edges with arbitrary JSON properties.
- * Uses adjacency maps and type indexes for O(1) lookups.
- *
- * All methods are async to support both synchronous in-memory providers
- * and asynchronous network-based providers (MongoDB, PostgreSQL, etc.)
- * through a single unified API.
- *
- * By default uses an in-memory storage provider. Pass a custom
- * IStorageProvider to switch to a file-backed or remote backend.
- *
- * @example
- * // Default in-memory (existing behaviour, unchanged)
- * const graph = new Graph();
- * const node = await graph.addNode('Person', { name: 'Alice' });
-
- * @example
- * // Multi-label node
- * const node = await graph.addNode(['Person', 'Employee'], { name: 'Alice' });
- *
- * @example
- * // MongoDB-backed graph
- * import { MongoClient } from 'mongodb';
- * import { Graph, MongoStorageProvider } from 'grafio';
- * const client = new MongoClient('mongodb://localhost:27017');
- * await client.connect();
- * const provider = new MongoStorageProvider(client.db('graph'));
- * const graph = new Graph(provider);
+ * High-performance graph database with built-in Cypher query execution,
+ * pluggable storage, transactions, and graph analysis.
  */
 export class Graph {
   private readonly _index: GraphIndex;
   private readonly _traversal: GraphTraversal;
   private readonly _adminOps: GraphAdminOps;
+  private _cypher: CypherEngine | null = null;
 
   /**
-   * @param storageProvider - Optional storage backend. Defaults to InMemoryStorageProvider.
+   * @param storageProvider - Optional storage backend. Defaults to `InMemoryStorageProvider`.
    */
   constructor(storageProvider?: IStorageProvider) {
     this._index = new GraphIndex(storageProvider);
@@ -63,27 +48,93 @@ export class Graph {
     this._adminOps = new GraphAdminOps(store);
   }
 
-  /**
-   * Checks if the storage provider supports transactions.
-   * @returns true if transactions are supported, false otherwise
-   */
+  /** @internal Exposes the synchronous kernel when backed by InMemoryStorageProvider. */
+  _getSyncKernel(): ISyncGraphKernel | null {
+    return this._index._getSyncKernel();
+  }
+
+  /** Monotonic schema/index epoch counter from the backing storage provider. */
+  get indexEpoch(): number {
+    return this._index.indexEpoch;
+  }
+
+  private _getCypherEngine(options?: CypherEngineOptions): CypherEngine {
+    if (!this._cypher) {
+      this._cypher = new CypherEngine(this, options);
+    }
+    return this._cypher;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Cypher Query API (Unified Graph Interface)
+  // ---------------------------------------------------------------------------
+
+  public async query(
+    cypher: string,
+    options?: CypherQueryOptions,
+  ): Promise<CypherResult & { executionPlan?: string }>;
+  public async query(
+    cypher: string,
+    params: Record<string, unknown> | undefined,
+    options?: CypherQueryOptions,
+  ): Promise<CypherResult & { executionPlan?: string }>;
+  public async query(
+    cypher: string,
+    paramsOrOptions?: Record<string, unknown> | CypherQueryOptions,
+    options?: CypherQueryOptions,
+  ): Promise<CypherResult & { executionPlan?: string }> {
+    const engine = this._getCypherEngine();
+    if (options !== undefined) {
+      return engine.execute(cypher, (paramsOrOptions ?? {}) as Record<string, unknown>, options);
+    }
+    return paramsOrOptions === undefined
+      ? engine.execute(cypher)
+      : engine.execute(cypher, paramsOrOptions as Record<string, unknown>);
+  }
+
+  public querySync(
+    cypher: string,
+    options?: CypherQueryOptions,
+  ): CypherResult & { executionPlan?: string };
+  public querySync(
+    cypher: string,
+    params: Record<string, unknown> | undefined,
+    options?: CypherQueryOptions,
+  ): CypherResult & { executionPlan?: string };
+  public querySync(
+    cypher: string,
+    paramsOrOptions?: Record<string, unknown> | CypherQueryOptions,
+    options?: CypherQueryOptions,
+  ): CypherResult & { executionPlan?: string } {
+    const engine = this._getCypherEngine();
+    if (options !== undefined) {
+      return engine.executeSync(cypher, (paramsOrOptions ?? {}) as Record<string, unknown>, options);
+    }
+    return paramsOrOptions === undefined
+      ? engine.executeSync(cypher)
+      : engine.executeSync(cypher, paramsOrOptions as Record<string, unknown>);
+  }
+
+  public async getQueryPlan(
+    cypher: string,
+    params: Record<string, unknown> = {},
+    format: PlanFormat = 'json',
+  ): Promise<string> {
+    return this._getCypherEngine().getQueryPlan(cypher, params, format);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Lifecycle & Transactions
+  // ---------------------------------------------------------------------------
+
   supportsTransactions(): boolean {
     return this._index._getStore().supportsTransactions();
   }
 
-  /**
-   * Creates a new transaction for atomic multi-operation updates.
-   * @returns A new GraphTransaction instance
-   */
   createTransaction(): GraphTransaction {
     return new GraphTransaction(this._index._getStore());
   }
 
-  /**
-   * Warms the cache by pre-loading data according to the configured preloadStrategy.
-   * Only applies when caching is enabled via GraphManager.
-   * @returns Promise that resolves when cache warming is complete
-   */
   async warmCache(): Promise<void> {
     const store = this._index._getStore();
     if (isCacheWarmableStorageProvider(store)) {
@@ -92,427 +143,255 @@ export class Graph {
   }
 
   /**
-   * Returns all nodes in the graph.
-   * @param options - Optional GraphQueryOptions for filtering/ordering/limit
+   * Compacts adjacency delta buffers and dead tombstones into flat Global CSR arrays.
    */
+  compact(): void {
+    this._index.compact();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Node Queries & Mutations
+  // ---------------------------------------------------------------------------
+
   async getNodes(options?: GraphQueryOptions): Promise<readonly Node[]> {
     return this._index.getNodes(options);
   }
 
-  /**
-   * Returns all edges in the graph.
-   * @param options - Optional GraphQueryOptions for filtering/ordering/limit
-   */
   async getEdges(options?: GraphQueryOptions): Promise<readonly Edge[]> {
     return this._index.getEdges(options);
   }
 
-  /**
-   * Returns the count of nodes matching the query options (O(1) without filter).
-   * @param options - Optional GraphQueryOptions for filtering
-   */
   async getNodeCount(options?: GraphQueryOptions): Promise<number> {
     return this._index.getNodeCount(options);
   }
 
-  /**
-   * Returns the count of edges matching the query options (O(1) without filter).
-   * @param options - Optional GraphQueryOptions for filtering
-   */
   async getEdgeCount(options?: GraphQueryOptions): Promise<number> {
     return this._index.getEdgeCount(options);
   }
 
-  /**
-   * Checks if a node exists in the graph.
-   * @param id - Id of the node
-   * @param transaction - Optional transaction for consistent reads within a transaction
-   */
   async hasNode(id: string, transaction?: GraphTransaction): Promise<boolean> {
     return this._index.hasNode(id, transaction);
   }
 
-  /**
-   * Checks if an edge exists in the graph.
-   * @param id - Id of the edge
-   * @param transaction - Optional transaction for consistent reads within a transaction
-   */
   async hasEdge(id: string, transaction?: GraphTransaction): Promise<boolean> {
     return this._index.hasEdge(id, transaction);
   }
 
-  /**
-   * Adds a new node to the graph.
-   * @deprecated Use `CypherEngine.execute('CREATE (n:Label {prop: $val})')` instead.
-   * @param labels - One or more node labels (e.g., "Course" or ["Person", "Employee"])
-   * @param properties - Optional JSON properties
-   * @param transaction - Optional transaction to use for this operation
-   * @returns The newly created Node
-   */
-  async addNode(labels: string | string[], properties: Record<string, unknown> = {}, transaction?: GraphTransaction): Promise<Node> {
-    return this._index.addNode(labels, properties, transaction);
+  async addNode(
+    labels: string | string[],
+    properties: Record<string, unknown> = {},
+    transaction?: GraphTransaction,
+    id?: string,
+  ): Promise<Node> {
+    return this._index.addNode(labels, properties, transaction, id);
   }
 
-  /**
-   * Removes a node from the graph.
-   * @deprecated Use `CypherEngine.execute('MATCH (n) WHERE id(n) = $id DETACH DELETE n')` instead.
-   * @param id - Id of the node to remove
-   * @param cascade - If true, also removes all incident edges (default: false)
-   * @param transaction - Optional transaction to use for this operation
-   * @returns An object containing the result and optionally the count of cascade-deleted edges
-   */
-  async removeNode(id: string, cascade: boolean = false, transaction?: GraphTransaction): Promise<{result: boolean; cascadeDeletedEdgesCount?: number}> {
+  async addNodes(
+    items: ReadonlyArray<{
+      labels: string | string[];
+      properties?: Record<string, unknown>;
+      id?: string;
+    }>,
+    transaction?: GraphTransaction,
+  ): Promise<Node[]> {
+    return this._index.addNodes(items, transaction);
+  }
+
+  async removeNode(
+    id: string,
+    cascade: boolean = false,
+    transaction?: GraphTransaction,
+  ): Promise<{ result: boolean; cascadeDeletedEdgesCount?: number }> {
     return this._index.removeNode(id, cascade, transaction);
   }
 
-  /**
-   * Retrieves a node by id.
-   * @param id - Id of the node
-   * @param transaction - Optional transaction for consistent reads within a transaction
-   * @returns The Node if found, undefined otherwise
-   */
   async getNode(id: string, transaction?: GraphTransaction): Promise<Node | undefined> {
     return this._index.getNode(id, transaction);
   }
 
-  /**
- * Retrieves nodes by their ids.
- * @param ids - Array of node ids
- * @param transaction - Optional transaction
- * @returns Map of id → Node
- */
   async getNodesByIds(ids: string[], transaction?: GraphTransaction): Promise<Map<string, Node>> {
     return this._index.getNodesByIds(ids, transaction);
   }
 
-  /**
-   * Retrieves nodes by their type.
-   * @param type - The node type to filter by
-   * @param transaction - Optional transaction for consistent reads within a transaction
-   * @returns Array of Nodes with the specified type
-   */
+  // ---------------------------------------------------------------------------
+  // Edge Queries & Mutations
+  // ---------------------------------------------------------------------------
 
-  /**
-   * Adds a new directed edge to the graph.
-   * @deprecated Use `CypherEngine.execute('MATCH (a),(b) WHERE id(a)=$src AND id(b)=$tgt CREATE (a)-[:TYPE]->(b)')` instead.
-   * @param sourceId - Id of the source node
-   * @param targetId - Id of the target node
-   * @param type - The relationship type
-   * @param properties - Optional JSON properties
-   * @param transaction - Optional transaction to use for this operation
-   * @returns The newly created Edge
-   */
   async addEdge(
     sourceId: string,
     targetId: string,
     type: string,
     properties: Record<string, unknown> = {},
-    transaction?: GraphTransaction
+    transaction?: GraphTransaction,
+    id?: string,
   ): Promise<Edge> {
-    return this._index.addEdge(sourceId, targetId, type, properties, transaction);
+    return this._index.addEdge(sourceId, targetId, type, properties, transaction, id);
   }
 
-  /**
-   * Removes an edge from the graph.
-   * @deprecated Use `CypherEngine.execute('MATCH ()-[r]->() WHERE id(r) = $id DELETE r')` instead.
-   * @param id - Id of the edge to remove
-   * @param transaction - Optional transaction to use for this operation
-   * @returns true if the edge was removed, false if it didn't exist
-   */
+  async addEdges(
+    items: ReadonlyArray<{
+      sourceId: string;
+      targetId: string;
+      type: string;
+      properties?: Record<string, unknown>;
+      id?: string;
+    }>,
+    transaction?: GraphTransaction,
+  ): Promise<Edge[]> {
+    return this._index.addEdges(items, transaction);
+  }
+
   async removeEdge(id: string, transaction?: GraphTransaction): Promise<boolean> {
     return this._index.removeEdge(id, transaction);
   }
 
-  /**
-   * Retrieves an edge by id.
-   * @param id - Id of the edge
-   * @param transaction - Optional transaction to use for this operation
-   * @returns The Edge if found, undefined otherwise
-   */
   async getEdge(id: string, transaction?: GraphTransaction): Promise<Edge | undefined> {
     return this._index.getEdge(id, transaction);
   }
 
-  /**
-   * Gets all edges originating from a node (outgoing edges).
-   * @param sourceId - Id of the source node
-   * @param options - Optional query options with edgeType filter
-   * @returns Array of outgoing Edges
-   */
   async getEdgesFrom(sourceId: string, options?: GraphQueryOptions): Promise<Edge[]> {
     return this._index.getEdgesFrom(sourceId, options);
   }
 
-  /**
-   * Gets all edges pointing to a node (incoming edges).
-   * @param targetId - Id of the target node
-   * @param options - Optional query options with edgeType filter and transaction
-   * @returns Array of incoming Edges
-   */
   async getEdgesTo(targetId: string, options?: GraphQueryOptions): Promise<Edge[]> {
     return this._index.getEdgesTo(targetId, options);
   }
 
-  /**
-   * Gets all direct edges between two nodes (in either direction).
-   * Only returns edges where the two nodes are directly connected.
-   * @param sourceId - Id of the first node
-   * @param targetId - Id of the second node
-   * @param options - Optional query options with edgeType filter and transaction
-   * @returns Array of Edges between the nodes
-   */
-  async getDirectEdgesBetween(sourceId: string, targetId: string, options?: GraphQueryOptions): Promise<Edge[]> {
+  async getDirectEdgesBetween(
+    sourceId: string,
+    targetId: string,
+    options?: GraphQueryOptions,
+  ): Promise<Edge[]> {
     return this._index.getDirectEdgesBetween(sourceId, targetId, options);
   }
 
+  // ---------------------------------------------------------------------------
+  // Traversal & Graph Algorithms
+  // ---------------------------------------------------------------------------
 
-  /**
-   * Traverses the graph from source to target using the specified algorithm.
-   * Supports wildcards: '*' or array of ids for source/target to find multiple paths.
-   * @param sourceId - Id of the source node (or '*' for all nodes, or array of ids)
-   * @param targetId - Id of the target node (or '*' for all nodes, or array of ids)
-   * @param options - Traversal options including method, nodeTypes, and edgeTypes filters
-   * @returns Array of paths (each path is array of node ids), or null if no paths found
-   */
   async traverse(
     sourceId: string | string[],
     targetId: string | string[],
-    options: TraversalOptions = {}
+    options: TraversalOptions = {},
   ): Promise<string[][] | null> {
     return this._traversal.traverse(sourceId, targetId, options);
   }
 
-  /**
-   * Check if graph is a Directed Acyclic Graph (no cycles).
-   * @returns true if the graph has no cycles, false otherwise
-   */
   async isDAG(): Promise<boolean> {
     return this._traversal.isDAG();
   }
 
-  /**
-   * Computes a topological ordering of the graph nodes using Kahn's algorithm.
-   * Returns null if the graph is not a DAG (contains cycles).
-   * @returns Array of node ids in topological order, or null if graph has cycles
-   */
   async topologicalSort(): Promise<string[] | null> {
     return this._traversal.topologicalSort();
   }
 
-  /**
-   * Removes all nodes and edges from the graph.
-   * @deprecated Use `CypherEngine.execute('MATCH (n) DETACH DELETE n')` instead.
-   */
   async clear(): Promise<void> {
     return this._index.clear();
   }
 
   // ---------------------------------------------------------------------------
-  // Node property mutations
+  // Property & Label Mutations
   // ---------------------------------------------------------------------------
 
-  /**
-   * Adds a property to a node. Fails if the property key already exists.
-   * @deprecated Use `CypherEngine.execute('MATCH (n) WHERE id(n)=$id SET n.key = $val')` instead.
-   * @param nodeId - The id of the node
-   * @param key - The property key to add
-   * @param value - The property value (must be a primitive)
-   */
-  async addNodeProperty(nodeId: string, key: string, value: unknown, transaction?: GraphTransaction): Promise<void> {
-    return this._index.addNodeProperty(nodeId, key, value, transaction);
+  async setNodeProperties(
+    nodeId: string,
+    properties: Record<string, unknown>,
+    options?: { merge?: boolean; transaction?: GraphTransaction },
+  ): Promise<void> {
+    return this._index.setNodeProperties(nodeId, properties, options);
   }
 
-  /**
-   * Updates an existing property on a node. Fails if the property doesn't exist.
-   * @deprecated Use `CypherEngine.execute('MATCH (n) WHERE id(n)=$id SET n.key = $val')` instead.
-   * @param nodeId - The id of the node
-   * @param key - The property key to update
-   * @param value - The new value (must be a primitive)
-   */
-  async updateNodeProperty(nodeId: string, key: string, value: unknown, transaction?: GraphTransaction): Promise<void> {
-    return this._index.updateNodeProperty(nodeId, key, value, transaction);
+  async unsetNodeProperties(
+    nodeId: string,
+    keys: string[],
+    transaction?: GraphTransaction,
+  ): Promise<void> {
+    return this._index.unsetNodeProperties(nodeId, keys, transaction);
   }
 
-  /**
-   * Deletes a property from a node.
-   * @deprecated Use `CypherEngine.execute('MATCH (n) WHERE id(n)=$id REMOVE n.key')` instead.
-   * @param nodeId - The id of the node
-   * @param key - The property key to delete
-   */
-  async deleteNodeProperty(nodeId: string, key: string, transaction?: GraphTransaction): Promise<void> {
-    return this._index.deleteNodeProperty(nodeId, key, transaction);
-  }
-
-  /**
-   * Clears all properties from a node.
-   * @deprecated Use `CypherEngine.execute('MATCH (n) WHERE id(n)=$id SET n = {}')` instead.
-   * @param nodeId - The id of the node
-   */
-  async clearNodeProperties(nodeId: string, transaction?: GraphTransaction): Promise<void> {
-    return this._index.clearNodeProperties(nodeId, transaction);
-  }
-
-  /**
-   * Removes labels from a node.
-   * @deprecated Use `CypherEngine.execute('MATCH (n) WHERE id(n)=$id REMOVE n:Label')` instead.
-   * @param nodeId - The id of the node
-   * @param labels - The labels to remove
-   * @param transaction - Optional transaction to use for this operation
-   */
-  async removeNodeLabels(nodeId: string, labels: string[], transaction?: GraphTransaction): Promise<void> {
+  async removeNodeLabels(
+    nodeId: string,
+    labels: string[],
+    transaction?: GraphTransaction,
+  ): Promise<void> {
     return this._index.removeNodeLabels(nodeId, labels, transaction);
   }
 
+  async setEdgeProperties(
+    edgeId: string,
+    properties: Record<string, unknown>,
+    options?: { merge?: boolean; transaction?: GraphTransaction },
+  ): Promise<void> {
+    return this._index.setEdgeProperties(edgeId, properties, options);
+  }
+
+  async unsetEdgeProperties(
+    edgeId: string,
+    keys: string[],
+    transaction?: GraphTransaction,
+  ): Promise<void> {
+    return this._index.unsetEdgeProperties(edgeId, keys, transaction);
+  }
+
   // ---------------------------------------------------------------------------
-  // Edge property mutations
+  // Index Management
   // ---------------------------------------------------------------------------
 
-  /**
-   * Adds a property to an edge. Fails if the property key already exists.
-   * @deprecated Use `CypherEngine.execute('MATCH ()-[r]->() WHERE id(r)=$id SET r.key = $val')` instead.
-   * @param edgeId - The id of the edge
-   * @param key - The property key to add
-   * @param value - The property value (must be a primitive)
-   */
-  async addEdgeProperty(edgeId: string, key: string, value: unknown, transaction?: GraphTransaction): Promise<void> {
-    return this._index.addEdgeProperty(edgeId, key, value, transaction);
+  async createIndex(
+    name: string,
+    target: 'node' | 'edge',
+    propertyKeys: string[],
+    options?: CreateIndexOptions,
+  ): Promise<void> {
+    return this._index.createIndex(name, target, propertyKeys, options);
   }
 
-  /**
-   * Updates an existing property on an edge. Fails if the property doesn't exist.
-   * @deprecated Use `CypherEngine.execute('MATCH ()-[r]->() WHERE id(r)=$id SET r.key = $val')` instead.
-   * @param edgeId - The id of the edge
-   * @param key - The property key to update
-   * @param value - The new value (must be a primitive)
-   */
-  async updateEdgeProperty(edgeId: string, key: string, value: unknown, transaction?: GraphTransaction): Promise<void> {
-    return this._index.updateEdgeProperty(edgeId, key, value, transaction);
+  async hasIndex(
+    target: 'node' | 'edge',
+    propertyKeys: string[],
+    labelOrType?: string,
+  ): Promise<boolean> {
+    return this._index.hasIndex(target, propertyKeys, labelOrType);
   }
 
-  /**
-   * Deletes a property from an edge.
-   * @deprecated Use `CypherEngine.execute('MATCH ()-[r]->() WHERE id(r)=$id REMOVE r.key')` instead.
-   * @param edgeId - The id of the edge
-   * @param key - The property key to delete
-   */
-  async deleteEdgeProperty(edgeId: string, key: string, transaction?: GraphTransaction): Promise<void> {
-    return this._index.deleteEdgeProperty(edgeId, key, transaction);
-  }
-
-  /**
-   * Clears all properties from an edge.
-   * @deprecated Use `CypherEngine.execute('MATCH ()-[r]->() WHERE id(r)=$id SET r = {}')` instead.
-   * @param edgeId - The id of the edge
-   */
-  async clearEdgeProperties(edgeId: string, transaction?: GraphTransaction): Promise<void> {
-    return this._index.clearEdgeProperties(edgeId, transaction);
-  }
-
-  /**
-   * Creates an index on one or more node or edge properties.
-   * Supports both simple indexes (single property) and compound indexes (multiple properties).
-   * @deprecated Use `CypherEngine.execute('CREATE INDEX name FOR (n:Label) ON (n.prop)')` instead.
-   * @param name - Unique name for the index
-   * @param target - Either 'node' or 'edge'
-   * @param propertyKeys - Array of property names to index
-   */
-  async createIndex(name: string, target: 'node' | 'edge', propertyKeys: string[]): Promise<void> {
-    return this._index.createIndex(name, target, propertyKeys);
-  }
-
-  /**
-   * Checks if an index exists that covers the given property keys.
-   * For compound indexes, returns true if ALL provided propertyKeys are covered
-   * by the same index (the index may have additional properties).
-   *
-   * @param target - Either 'node' or 'edge'
-   * @param propertyKeys - Array of property names to check
-   */
-  async hasIndex(target: 'node' | 'edge', propertyKeys: string[]): Promise<boolean> {
-    return this._index.hasIndex(target, propertyKeys);
-  }
-
-  /**
-   * Retrieves an index by its name.
-   *
-   * @param name - The name of the index to retrieve
-   * @returns The index metadata if found, undefined otherwise
-   */
-  async getIndex(name: string): Promise<{ name: string; target: 'node' | 'edge'; propertyKeys: string[] } | undefined> {
+  async getIndex(name: string): Promise<IndexMetadata | undefined> {
     return this._index.getIndex(name);
   }
 
-  /**
-   * Deletes an index by its name.
-   * @deprecated Use `CypherEngine.execute('DROP INDEX name')` instead.
-   * @param name - The name of the index to delete
-   * @throws Error if the index does not exist
-   */
   async deleteIndex(name: string): Promise<void> {
     return this._index.deleteIndex(name);
   }
 
-  /**
-   * Retrieves all indexes.
-   *
-   * @returns An array of all index metadata
-   */
-  async getIndexes(): Promise<{ name: string; target: 'node' | 'edge'; propertyKeys: string[] }[]> {
+  async getIndexes(): Promise<IndexMetadata[]> {
     return this._index.getIndexes();
   }
 
   // ---------------------------------------------------------------------------
-  // Aggregation
+  // Aggregations
   // ---------------------------------------------------------------------------
 
-  /**
-   * Aggregates a numeric property across nodes matching the query options.
-   * @param key - The property key to aggregate
-   * @param options - Optional query options for filtering
-   * @returns AggregateResult with count, sum, avg, min, max
-   */
-  async aggregateNodeProperty(key: string, options?: GraphQueryOptions): Promise<AggregateResult> {
+  async aggregateNodeProperty(
+    key: string,
+    options?: GraphQueryOptions,
+  ): Promise<AggregateResult> {
     return this._index.aggregateNodeProperty(key, options);
   }
 
-  /**
-   * Aggregates a numeric property across edges matching the query options.
-   * @param key - The property key to aggregate
-   * @param options - Optional query options for filtering
-   * @returns AggregateResult with count, sum, avg, min, max
-   */
-  async aggregateEdgeProperty(key: string, options?: GraphQueryOptions): Promise<AggregateResult> {
+  async aggregateEdgeProperty(
+    key: string,
+    options?: GraphQueryOptions,
+  ): Promise<AggregateResult> {
     return this._index.aggregateEdgeProperty(key, options);
   }
 
   // ---------------------------------------------------------------------------
-  // Data portability — export / import
+  // Data Portability — export / import
   // ---------------------------------------------------------------------------
 
-  /**
-   * Exports the entire graph as a portable JSON object.
-   *
-   * The returned `GraphData` value can be persisted, transmitted, or used to
-   * seed another graph instance via `importJSON()`, regardless of the backing
-   * storage provider in use.
-   *
-   * @returns GraphData snapshot of the current graph state
-   */
   async exportJSON(): Promise<GraphData> {
     return this._adminOps.exportJSON();
   }
 
-  /**
-   * Creates a new Graph instance populated from a portable JSON object.
-   *
-   * Works with any IStorageProvider — data is written through the provider's
-   * own insert methods so file-backed or remote providers are populated
-   * correctly.
-   *
-   * @param data - GraphData to load
-   * @param storageProvider - Optional storage provider (defaults to InMemoryStorageProvider)
-   * @returns A new Graph instance with all nodes and edges from the data
-   */
   static async importJSON(data: GraphData, storageProvider?: IStorageProvider): Promise<Graph> {
     const graph = new Graph(storageProvider);
     await graph._adminOps.importJSON(data);

@@ -13,6 +13,7 @@
 import { describe, expect, it, beforeAll, beforeEach, afterEach, jest } from '@jest/globals';
 import { Graph } from '../../src/Graph';
 import { CypherEngine, CypherNotSupportedError, CypherRuntimeError, CypherSemanticError, PlanFormat } from '../../src/cypher';
+import { PlanCache } from '../../src/cypher/PlanCache';
 import { Edge, Node } from '../../src';
 
 /** Build a social graph using Cypher CREATE queries. */
@@ -1528,6 +1529,505 @@ describe('CypherEngine Integration', () => {
       expect(result.rows[0].anyRes).toBe(true);
       expect(result.rows[0].noneRes).toBe(true);
       expect(result.rows[0].singleRes).toBe(true);
+    });
+  });
+
+  describe('Graph.query() and Graph.querySync() execution', () => {
+    it('executes reads, writes, multi-hop paths, OPTIONAL MATCH, MERGE, WITH, and UNION', async () => {
+      const graph = new Graph();
+
+      const createRes = graph.querySync(`
+        CREATE (a:Person { name: 'Alice', dept: 'Eng', score: 90 }),
+               (b:Person { name: 'Bob', dept: 'Eng', score: 75 }),
+               (c:Person { name: 'Carol', dept: 'Sales', score: 60 }),
+               (d:Person { name: 'Dave', dept: 'Sales', score: 40 }),
+               (a)-[:KNOWS { weight: 1 }]->(b),
+               (b)-[:KNOWS { weight: 2 }]->(c),
+               (c)-[:KNOWS { weight: 3 }]->(d)
+        RETURN a.name AS root
+      `);
+      expect(createRes.summary.nodesCreated).toBe(4);
+      expect(createRes.summary.edgesCreated).toBe(3);
+      expect(createRes.rows).toEqual([{ root: 'Alice' }]);
+
+      // Fused NodeScan -> Filter -> Aggregate columnar execution (sync & async parity)
+      const aggSync = graph.querySync(`
+        MATCH (n:Person)
+        WHERE n.score > 50
+        RETURN n.dept AS dept, count(*) AS cnt, avg(n.score) AS avgScore
+        ORDER BY dept ASC
+      `);
+      const aggAsync = await graph.query(`
+        MATCH (n:Person)
+        WHERE n.score > 50
+        RETURN n.dept AS dept, count(*) AS cnt, avg(n.score) AS avgScore
+        ORDER BY dept ASC
+      `);
+      expect(aggSync.rows).toEqual([
+        { dept: 'Eng', cnt: 2, avgScore: 82.5 },
+        { dept: 'Sales', cnt: 1, avgScore: 60 },
+      ]);
+      expect(aggAsync.rows).toEqual(aggSync.rows);
+
+      // Variable-length path with CSR+Delta RingQueue BFS
+      const hopRes = graph.querySync(`
+        MATCH (a:Person { name: 'Alice' })-[:KNOWS*1..3]->(reach:Person)
+        RETURN reach.name AS target
+        ORDER BY target ASC
+      `);
+      expect(hopRes.rows.map((r) => r.target)).toEqual(['Bob', 'Carol', 'Dave']);
+
+      // OPTIONAL MATCH + WITH + MERGE + UNION
+      const optRes = graph.querySync(`
+        MATCH (p:Person { name: 'Dave' })
+        OPTIONAL MATCH (p)-[:KNOWS]->(m:Person)
+        RETURN p.name AS name, m AS missing
+      `);
+      expect(optRes.rows).toEqual([{ name: 'Dave', missing: null }]);
+
+      const mergeRes = graph.querySync(`
+        MERGE (p:Person { name: 'Alice' })
+        ON MATCH SET p.score = 95
+        RETURN p.score AS score
+      `);
+      expect(mergeRes.rows).toEqual([{ score: 95 }]);
+
+      const unionRes = graph.querySync(`
+        MATCH (p:Person) WHERE p.dept = 'Eng' RETURN p.name AS name
+        UNION
+        MATCH (p:Person) WHERE p.score > 90 RETURN p.name AS name
+      `);
+      expect(unionRes.rows.map((r) => r.name).sort()).toEqual(['Alice', 'Bob']);
+
+      const withRes = graph.querySync(`
+        MATCH (p:Person)
+        WITH p.dept AS dept, count(*) AS c
+        WHERE c >= 2
+        RETURN dept, c
+        ORDER BY dept ASC
+      `);
+      expect(withRes.rows).toEqual([
+        { dept: 'Eng', c: 2 },
+        { dept: 'Sales', c: 2 },
+      ]);
+    });
+
+    it('forwards query options when params is undefined and preserves $transaction / $executionPlan parameters', async () => {
+      const g = new Graph();
+      const tx = g.createTransaction();
+      await tx.begin();
+      await g.addNode('Person', { name: 'TxOnly' }, tx);
+
+      expect(
+        g.querySync('MATCH (n:Person) RETURN n.name AS name', undefined, { transaction: tx }).rows,
+      ).toEqual([{ name: 'TxOnly' }]);
+      expect(
+        (await g.query('MATCH (n:Person) RETURN n.name AS name', undefined, { transaction: tx })).rows,
+      ).toEqual([{ name: 'TxOnly' }]);
+      await tx.rollback();
+
+      expect(g.querySync('RETURN $transaction AS t', { transaction: 'tx-123' }).rows).toEqual([
+        { t: 'tx-123' },
+      ]);
+      expect(
+        (await g.query('RETURN $executionPlan AS p', { executionPlan: 'raw' })).rows,
+      ).toEqual([{ p: 'raw' }]);
+    });
+
+    it('evaluates regex, string predicates, list predicates, CASE, list comprehensions, and arithmetic precedence via sync kernel', async () => {
+      const graph = new Graph();
+      const a = await graph.addNode('N', { name: 'Alice' });
+      const b = await graph.addNode('N', { name: 'Bob' });
+      await graph.addEdge(a.id, b.id, 'GO', { weight: 1, tag: 'v1' });
+      await graph.setNodeProperties(a.id, { name: 'Alice2' });
+
+      const engine = new CypherEngine(graph);
+      const exprRes = engine.executeSync(`
+        MATCH (n:N)-[r:GO]->(m:N)
+        WITH n, r, [10, 20, 30] AS tags
+        WHERE n.name =~ 'Ali.*'
+          AND n.name STARTS WITH 'Al'
+          AND n.name ENDS WITH 'ce2'
+          AND n.name CONTAINS 'lic'
+          AND ALL(x IN tags WHERE x >= 10)
+          AND ANY(x IN tags WHERE x = 20)
+          AND NONE(x IN tags WHERE x > 100)
+          AND SINGLE(x IN tags WHERE x = 30)
+        RETURN
+          CASE n.name WHEN 'Alice2' THEN 'match' ELSE 'miss' END AS c1,
+          [x IN tags WHERE x > 10 | x * 2] AS doubled,
+          labels(n) AS lbls,
+          type(r) AS relType,
+          size(tags) AS tagLen,
+          2 + 3 * 4 - 5 % 2 ^ 2 AS calc
+      `);
+      expect(exprRes.rows).toEqual([
+        {
+          c1: 'match',
+          doubled: [40, 60],
+          lbls: ['N'],
+          relType: 'GO',
+          tagLen: 3,
+          calc: 13,
+        },
+      ]);
+    });
+  });
+
+  describe('PlanCache & index epoch invalidation', () => {
+    it('caches compiled plans and automatically invalidates on CREATE/DROP INDEX', async () => {
+      const graph = new Graph();
+      const engine = new CypherEngine(graph);
+
+      await graph.addNodes([
+        { labels: 'Person', properties: { name: 'Alice', age: 25 } },
+        { labels: 'Person', properties: { name: 'Bob', age: 35 } },
+        { labels: 'Person', properties: { name: 'Carol', age: 45 } },
+        { labels: 'Company', properties: { name: 'Acme', age: 40 } },
+      ]);
+
+      const query = 'MATCH (n:Person) WHERE n.age >= 30 AND n.age < 50 RETURN n.name AS name ORDER BY name ASC';
+      const initialEpoch = graph.indexEpoch;
+
+      const r1 = engine.executeSync(query);
+      expect(r1.rows).toEqual([{ name: 'Bob' }, { name: 'Carol' }]);
+      expect(engine._getPlanCacheSize()).toBe(1);
+
+      // Re-running uses cached plan cleanly
+      const r2 = engine.executeSync(query);
+      expect(r2.rows).toEqual([{ name: 'Bob' }, { name: 'Carol' }]);
+      expect(engine._getPlanCacheSize()).toBe(1);
+
+      // Scoped Cypher index advances indexEpoch and invalidates stale cached plan
+      const idxRes = engine.executeSync('CREATE INDEX idx_person_age FOR (n:Person) ON (n.age)');
+      expect(idxRes.summary.indexesCreated).toBe(1);
+      expect(graph.indexEpoch).toBeGreaterThan(initialEpoch);
+      expect(await graph.hasIndex('node', ['age'], 'Person')).toBe(true);
+
+      const r3 = engine.executeSync(query);
+      expect(r3.rows).toEqual([{ name: 'Bob' }, { name: 'Carol' }]);
+
+      const epochBeforeDrop = graph.indexEpoch;
+      const dropRes = engine.executeSync('DROP INDEX idx_person_age');
+      expect(dropRes.summary.indexesDeleted).toBe(1);
+      expect(graph.indexEpoch).toBeGreaterThan(epochBeforeDrop);
+      expect(await graph.hasIndex('node', ['age'], 'Person')).toBe(false);
+    });
+
+    it('supports maxSize=0 disablement and LRU eviction', () => {
+      const disabled = new PlanCache(0);
+      const dummyEntry = {
+        plan: { steps: [] },
+        meta: {
+          slotTable: {} as never,
+          hasWrites: false,
+          compiledExprs: new WeakMap(),
+          subPlanMetas: new WeakMap(),
+        },
+        paramNames: [],
+        indexEpoch: 0,
+      };
+      disabled.set('q1', dummyEntry);
+      expect(disabled.get('q1', 0)).toBeUndefined();
+
+      const lru = new PlanCache(2);
+      lru.set('q1', dummyEntry);
+      lru.set('q2', dummyEntry);
+      expect(lru.get('q1', 0)).toBeDefined(); // refreshes q1 -> q2 is LRU
+      lru.set('q3', dummyEntry); // evicts q2
+      expect(lru.get('q1', 0)).toBeDefined();
+      expect(lru.get('q2', 0)).toBeUndefined();
+      expect(lru.get('q3', 0)).toBeDefined();
+      lru.clear();
+      expect(lru.size).toBe(0);
+    });
+  });
+
+  describe('Cypher write atomicity & explicit GraphTransaction execution', () => {
+    it('rolls back earlier CREATE/SET mutations if a later step in the same Cypher query fails', async () => {
+      const graph = new Graph();
+      await graph.addNode('Seed', { count: 10 });
+
+      expect(() =>
+        graph.querySync(`
+          CREATE (temp:Temp { flag: true })
+          WITH temp
+          MATCH (s:Seed)
+          SET s.count = s.count / 0
+          RETURN temp
+        `),
+      ).toThrow(/Division by zero/);
+
+      expect(await graph.getNodeCount()).toBe(1);
+      expect(await graph.getNodes({ filter: { types: ['Temp'] } })).toHaveLength(0);
+      const seeds = await graph.getNodes({ filter: { types: ['Seed'] } });
+      expect(seeds[0].properties.count).toBe(10);
+    });
+
+    it('rolls back newly created nodes when a later non-detached DELETE fails', async () => {
+      const graph = new Graph();
+      const a = await graph.addNode('Hub', { name: 'A' });
+      const b = await graph.addNode('Spoke', { name: 'B' });
+      await graph.addEdge(a.id, b.id, 'CONNECTED');
+
+      expect(() =>
+        graph.querySync(`
+          CREATE (orphan:Orphan { name: 'ShouldRollback' })
+          WITH orphan
+          MATCH (h:Hub)
+          DELETE h
+        `),
+      ).toThrow(/incident edges/);
+
+      expect(await graph.getNodeCount()).toBe(2);
+      expect(await graph.getNodes({ filter: { types: ['Orphan'] } })).toHaveLength(0);
+    });
+
+    it('restores nodes, edges, properties, and labels on mid-query undo checkpoint rollback', async () => {
+      const graph = new Graph();
+      const alice = await graph.addNode(['Person', 'Employee'], { name: 'Alice', age: 30 });
+      const bob = await graph.addNode('Person', { name: 'Bob', age: 40 });
+      const rel = await graph.addEdge(alice.id, bob.id, 'KNOWS', { weight: 5 });
+
+      expect(() =>
+        graph.querySync(`
+          MATCH (a:Person { name: 'Alice' })-[r:KNOWS]->(b:Person { name: 'Bob' })
+          CREATE (c:Temp { x: 1 })
+          SET a.age = 31, r.weight = 99
+          DETACH DELETE b
+          REMOVE a:Employee
+          WITH a
+          SET a.fail = a.age / 0
+        `),
+      ).toThrow(/Division by zero/);
+
+      const restoredAlice = await graph.getNode(alice.id);
+      const restoredBob = await graph.getNode(bob.id);
+      const restoredRel = await graph.getEdge(rel.id);
+
+      expect(await graph.getNodeCount()).toBe(2);
+      expect(await graph.getEdgeCount()).toBe(1);
+      expect(restoredAlice?.properties.age).toBe(30);
+      expect(restoredAlice?.labels).toEqual(['Person', 'Employee']);
+      expect(restoredBob?.properties.name).toBe('Bob');
+      expect(restoredRel?.properties.weight).toBe(5);
+    });
+
+    it('executes Cypher CRUD, VerifyNode, multi-hop BFS/DFS, and aggregations inside an explicit GraphTransaction', async () => {
+      const graph = new Graph();
+      const seeded = await graph.addNode(['Person', 'Temp'], { name: 'Alice', age: 30, tag: 'seed' });
+
+      const tx = graph.createTransaction();
+      await tx.begin();
+      expect(tx.isActive()).toBe(true);
+
+      // Create connected subgraph inside explicit transaction
+      graph.querySync(
+        `
+          MATCH (a:Person { name: 'Alice' })
+          CREATE (b:Person { name: 'Bob', age: 25 }),
+                 (c:Person { name: 'Carol', age: 35 }),
+                 (a)-[:KNOWS { weight: 2 }]->(b),
+                 (b)-[:KNOWS { weight: 4 }]->(c)
+        `,
+        {},
+        { transaction: tx },
+      );
+
+      // Single-hop + VerifyNode with label and inline property inside tx
+      const singleHop = graph.querySync(
+        `
+          MATCH (a:Person { name: 'Alice' })-[r:KNOWS]->(b:Person { name: 'Bob' })
+          RETURN b.name AS name, r.weight AS weight
+        `,
+        {},
+        { transaction: tx },
+      );
+      expect(singleHop.rows).toEqual([{ name: 'Bob', weight: 2 }]);
+
+      // VerifyNode + complex OR/AND filter inside tx
+      const filteredVerify = graph.querySync(
+        `
+          MATCH (a:Person)-[:KNOWS]->(b:Person)
+          WHERE b.age >= 25 AND (b.name = 'Bob' OR b.name = 'Carol')
+          RETURN b.name AS name
+          ORDER BY name ASC
+        `,
+        {},
+        { transaction: tx },
+      );
+      expect(filteredVerify.rows).toEqual([{ name: 'Bob' }, { name: 'Carol' }]);
+
+      // NodeSeek (id) + multi-hop BFS inside tx
+      const bfsTx = graph.querySync(
+        `
+          MATCH (a:Person) WHERE id(a) = $aid
+          MATCH (a)-[:KNOWS*1..2]->(b:Person)
+          RETURN DISTINCT b.name AS friend
+          ORDER BY friend ASC
+        `,
+        { aid: seeded.id },
+        { transaction: tx },
+      );
+      expect(bfsTx.rows).toEqual([{ friend: 'Bob' }, { friend: 'Carol' }]);
+
+      // Multi-hop DFS LIMIT 1 inside tx
+      const dfsTx = graph.querySync(
+        `
+          MATCH p = (a:Person { name: 'Alice' })-[:KNOWS*1..2]->(b:Person)
+          RETURN nodes(p) AS ns
+          LIMIT 1
+        `,
+        {},
+        { transaction: tx },
+      );
+      expect((dfsTx.rows[0].ns as unknown[]).length).toBeGreaterThanOrEqual(2);
+
+      // Storage-level & DISTINCT node/edge aggregates inside tx
+      const nodeAggTx = graph.querySync(
+        `
+          MATCH (n:Person)
+          RETURN count(n) AS cnt,
+                 count(DISTINCT n.age) AS dc,
+                 sum(n.age) AS s,
+                 avg(n.age) AS a,
+                 min(n.age) AS mn,
+                 max(n.age) AS mx,
+                 collect(n.name) AS names
+        `,
+        {},
+        { transaction: tx },
+      );
+      expect(nodeAggTx.rows[0].cnt).toBe(3);
+      expect(nodeAggTx.rows[0].dc).toBe(3);
+      expect(nodeAggTx.rows[0].s).toBe(90);
+
+      const edgeAggTx = graph.querySync(
+        `
+          MATCH ()-[r:KNOWS]->()
+          RETURN count(r) AS rc, count(DISTINCT r.weight) AS dr, sum(r.weight) AS sw, avg(r.weight) AS aw, min(r.weight) AS minW, max(r.weight) AS maxW
+        `,
+        {},
+        { transaction: tx },
+      );
+      expect(edgeAggTx.rows[0]).toEqual({ rc: 2, dr: 2, sw: 6, aw: 3, minW: 2, maxW: 4 });
+
+      // SET map (=), SET +=, REMOVE label & property, DETACH DELETE inside tx
+      graph.querySync(
+        `
+          MATCH (a:Person { name: 'Alice' })
+          SET a = { name: 'Alice', age: 31 }
+        `,
+        {},
+        { transaction: tx },
+      );
+      graph.querySync(
+        `
+          MATCH (a:Person { name: 'Alice' })
+          SET a += { city: 'NYC', extra: 'drop' }
+          REMOVE a:Temp, a.extra
+        `,
+        {},
+        { transaction: tx },
+      );
+      graph.querySync(
+        `
+          CREATE (d:Dead { n: 1 })
+          WITH d
+          DETACH DELETE d
+        `,
+        {},
+        { transaction: tx },
+      );
+
+      // VerifyNodeStep with operators + AND/OR inside active tx
+      const allOpsQuery = `
+        MATCH (a:Person { name: 'Alice' })-[:KNOWS]->(b:Person)
+        WITH b
+        MATCH (b:Person)
+        WHERE b.age <> 99 AND b.age > 20 AND b.age < 50 AND b.age >= 25 AND b.age <= 35
+          AND b.name CONTAINS 'o' AND b.name STARTS WITH 'B' AND b.name ENDS WITH 'b'
+          AND b.name IN ['Bob', 'Carol'] AND b.name NOT IN ['Zed']
+          AND b.missing IS NULL AND b.name IS NOT NULL
+          AND (b.age = 25 OR b.age = 99)
+        RETURN b.name AS name
+      `;
+      const insideVerify = graph.querySync(allOpsQuery, {}, { transaction: tx });
+      expect(insideVerify.rows).toEqual([{ name: 'Bob' }]);
+
+      // Chained single-hop path in tx + VerifyNode label miss inside & outside tx
+      const chainedPathTx = graph.querySync(
+        `
+          MATCH p = (a:Person { name: 'Alice' })-[:KNOWS]->(b:Person)-[:KNOWS]->(c:Person)
+          RETURN size(nodes(p)) AS len
+        `,
+        {},
+        { transaction: tx },
+      );
+      expect(chainedPathTx.rows).toEqual([{ len: 3 }]);
+      expect(
+        graph.querySync(
+          `MATCH (a:Person { name: 'Alice' })-[:KNOWS]->(b:OtherLabel) RETURN b.name AS name`,
+          {},
+          { transaction: tx },
+        ).rows,
+      ).toEqual([]);
+      expect(await graph.getNodeCount()).toBe(1);
+      await tx.commit();
+
+      expect(await graph.getNodeCount()).toBe(3);
+      const committedAlice = await graph.getNode(seeded.id);
+      expect(committedAlice?.properties).toEqual({ name: 'Alice', age: 31, city: 'NYC' });
+      expect(committedAlice?.labels).toEqual(['Person']);
+
+      // VerifyNodeStep outside tx
+      const outsideVerify = await graph.query(allOpsQuery);
+      expect(outsideVerify.rows).toEqual([{ name: 'Bob' }]);
+
+      // WITH * and WITH DISTINCT variable projection
+      const distinctStar = graph.querySync('MATCH (p:Person) WITH * RETURN DISTINCT p.name AS name');
+      expect(distinctStar.rows.length).toBe(3);
+      const distinctVar = graph.querySync('MATCH (p:Person) WITH DISTINCT p RETURN p.name AS name');
+      expect(distinctVar.rows.length).toBe(3);
+
+      // Sync DELETE (edge & non-detach node), edge SET = / +=, and edge REMOVE prop
+      const edgeCrud = graph.querySync(`
+        MATCH (a:Person { name: 'Alice' })-[r:KNOWS]->(b:Person)
+        CREATE (z:Isolated { v: 1 })
+        SET r = { weight: 10, note: 'hi' }, r += { extra: true }
+        REMOVE r.extra
+        RETURN r.weight AS w, r.note AS note
+      `);
+      expect(edgeCrud.rows).toEqual([{ w: 10, note: 'hi' }]);
+      graph.querySync('MATCH (z:Isolated) DELETE z');
+      graph.querySync("MATCH (a:Person { name: 'Alice' }), (b:Person { name: 'Bob' }) CREATE (a)-[:TMP]->(b)");
+      graph.querySync('MATCH ()-[tmp:TMP]->() DELETE tmp');
+
+      // getNodesByIds with duplicate & missing IDs
+      const byIds = await graph.getNodesByIds([seeded.id, seeded.id, 'missing-node-id']);
+      expect(byIds.size).toBe(1);
+
+      // Transaction rollback discards staged node/edge/label/property mutations
+      const txRollback = graph.createTransaction();
+      await txRollback.begin();
+      const tmp = await graph.addNode(['Temp', 'Extra'], { v: 1 }, txRollback);
+      await graph.addEdge(seeded.id, tmp.id, 'KNOWS', { weight: 1 }, txRollback);
+      await graph.setNodeProperties(seeded.id, { age: 99 }, { transaction: txRollback });
+      await graph.removeNodeLabels(tmp.id, ['Extra'], txRollback);
+      await graph.removeNode(tmp.id, true, txRollback);
+      await txRollback.rollback();
+      expect((await graph.getNode(seeded.id))?.properties.age).toBe(31);
+      expect(await graph.getNodeCount()).toBe(3);
+
+      const tx2 = graph.createTransaction();
+      await tx2.begin();
+      await graph.query(
+        `CREATE (e:Temp { v: 1 }) SET e += { k: 2 } WITH e DETACH DELETE e`,
+        {},
+        { transaction: tx2 },
+      );
+      await tx2.commit();
+      expect(await graph.getNodeCount()).toBe(3);
     });
   });
 });

@@ -1,6 +1,6 @@
 {
   "name": "@grafio/browser",
-  "version": "7.15.2",
+  "version": "8.0.0",
   "publishConfig": {
     "access": "public"
   },
@@ -24,7 +24,7 @@
     "build": "node scripts/build.js",
     "build:types": "tsc --emitDeclarationOnly",
     "build:all": "npm run build && npm run build:types",
-    "clean": "rimraf dist"
+    "clean": "rimraf dist types"
   },
   "keywords": [
     "graph",
@@ -47,9 +47,8 @@
   "devDependencies": {
     "esbuild": "^0.25.0",
     "rimraf": "^5.0.0",
-    "typescript": "~5.6.2"
+    "typescript": "^7.0.2"
   },
-  "peerDependencies": {},
   "browserslist": [
     ">0.5%",
     "not dead",

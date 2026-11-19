@@ -147,4 +147,21 @@ describe('graph edge cases', () => {
 
     expect(warmed).toBe(true);
   });
+
+  it('returns self-loop edges once and applies orderBy and limit in getDirectEdgesBetween', async () => {
+    const graph = new Graph();
+    const a = await graph.addNode('N', {});
+    await graph.addEdge(a.id, a.id, 'LOOP', { w: 20 });
+    await graph.addEdge(a.id, a.id, 'LOOP', { w: 10 });
+
+    const all = await graph.getDirectEdgesBetween(a.id, a.id);
+    expect(all).toHaveLength(2);
+
+    const limited = await graph.getDirectEdgesBetween(a.id, a.id, {
+      orderBy: { field: 'w', direction: 'asc' },
+      limit: 1,
+    });
+    expect(limited).toHaveLength(1);
+    expect(limited[0].properties.w).toBe(10);
+  });
 });

@@ -14,11 +14,12 @@ npm install grafio
 import { InMemoryGraphFactory } from 'grafio';
 import { CypherEngine } from 'grafio/cypher';
 
-// Create graph via factory (supports caching when GraphManager is initialized)
+// Create graph via factory
 const factory = new InMemoryGraphFactory();
 const graph = factory.forGraph('default');
 
-// Create Cypher engine
+// Run Cypher directly on Graph (`graph.query()` / `graph.querySync()`)
+// or instantiate `new CypherEngine(graph, { planCacheSize })`
 const engine = new CypherEngine(graph);
 
 // Build graph
@@ -54,7 +55,7 @@ const allNodes = await engine.execute('MATCH (n) RETURN n');
 
 ## Key Concepts
 
-- **All methods are async** — use `await` with every call
+- **Async & sync APIs** — `await graph.query(...)` works on every backend, while `graph.querySync(...)` provides a zero-microtask fast path in memory
 - **graphId partitioning** — multiple isolated graphs in one instance
 - **Pluggable storage** — swap backends without changing code
 

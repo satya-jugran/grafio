@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, jest } from '@jest/globals';
+import { describe, expect, it, beforeEach } from '@jest/globals';
 import type { NodeData, EdgeData } from '../../../src/types';
 import { CacheManager } from '../../../src/storage/cache/CacheManager';
 import { CacheConfig } from '../../../src/storage/cache/CacheConfig';
@@ -80,7 +80,7 @@ describe('CacheManager', () => {
   describe('graphId registration and metadata', () => {
     it('should register graphId on first setNode', async () => {
       const manager = new CacheManager(defaultConfig);
-      await manager.setNode('graph-a', 'node-1', { id: 'node-1', type: 'Test', properties: {} });
+      await manager.setNode('graph-a', 'node-1', { id: 'node-1', labels: ['Test'], properties: {} });
 
       const stats = await manager.getStats();
       expect(stats.totalGraphIds).toBe(1);
@@ -96,8 +96,8 @@ describe('CacheManager', () => {
 
     it('should track per-graphId node and edge counts', async () => {
       const manager = new CacheManager(defaultConfig);
-      await manager.setNode('graph-a', 'node-1', { id: 'node-1', type: 'Test', properties: {} });
-      await manager.setNode('graph-a', 'node-2', { id: 'node-2', type: 'Test', properties: {} });
+      await manager.setNode('graph-a', 'node-1', { id: 'node-1', labels: ['Test'], properties: {} });
+      await manager.setNode('graph-a', 'node-2', { id: 'node-2', labels: ['Test'], properties: {} });
       await manager.setEdge('graph-a', 'edge-1', { id: 'edge-1', type: 'Test', sourceId: 'n1', targetId: 'n2', properties: {} });
 
       const stats = await manager.getStats();
@@ -109,10 +109,10 @@ describe('CacheManager', () => {
   describe('invalidateAllForGraph()', () => {
     it('should remove all nodes and edges for a specific graphId', async () => {
       const manager = new CacheManager(defaultConfig);
-      await manager.setNode('graph-a', 'node-1', { id: 'node-1', type: 'Test', properties: {} });
-      await manager.setNode('graph-a', 'node-2', { id: 'node-2', type: 'Test', properties: {} });
+      await manager.setNode('graph-a', 'node-1', { id: 'node-1', labels: ['Test'], properties: {} });
+      await manager.setNode('graph-a', 'node-2', { id: 'node-2', labels: ['Test'], properties: {} });
       await manager.setEdge('graph-a', 'edge-1', { id: 'edge-1', type: 'Test', sourceId: 'n1', targetId: 'n2', properties: {} });
-      await manager.setNode('graph-b', 'node-3', { id: 'node-3', type: 'Test', properties: {} });
+      await manager.setNode('graph-b', 'node-3', { id: 'node-3', labels: ['Test'], properties: {} });
 
       await manager.invalidateAllForGraph('graph-a');
 
@@ -138,13 +138,13 @@ describe('CacheManager', () => {
       const manager = new CacheManager(config);
       
       // Register graph-a with a node
-      await manager.setNode('graph-a', 'node-1', { id: 'node-1', type: 'Test', properties: {} });
+      await manager.setNode('graph-a', 'node-1', { id: 'node-1', labels: ['Test'], properties: {} });
       
       // Wait for graph-a to expire
       await new Promise(resolve => setTimeout(resolve, 300));
       
       // Register graph-b (this triggers _evictExpiredGraphId for graph-a)
-      await manager.setNode('graph-b', 'node-2', { id: 'node-2', type: 'Test', properties: {} });
+      await manager.setNode('graph-b', 'node-2', { id: 'node-2', labels: ['Test'], properties: {} });
       
       // graph-a entries should be evicted (cache cleared)
       const nodeA = await manager.getNode('graph-a', 'node-1');
@@ -161,7 +161,7 @@ describe('CacheManager', () => {
         graphIdTtlMs: 150,
       };
       const manager = new CacheManager(config);
-      await manager.setNode('graph-a', 'node-1', { id: 'node-1', type: 'Test', properties: {} });
+      await manager.setNode('graph-a', 'node-1', { id: 'node-1', labels: ['Test'], properties: {} });
 
       // Wait 80ms then touch to refresh TTL
       await new Promise(resolve => setTimeout(resolve, 80));
@@ -171,7 +171,7 @@ describe('CacheManager', () => {
       await new Promise(resolve => setTimeout(resolve, 80));
 
       // Set new node — graph-a should still be alive since TTL was refreshed
-      await manager.setNode('graph-b', 'node-2', { id: 'node-2', type: 'Test', properties: {} });
+      await manager.setNode('graph-b', 'node-2', { id: 'node-2', labels: ['Test'], properties: {} });
 
       const nodeA = await manager.getNode('graph-a', 'node-1');
       expect(nodeA).not.toBeUndefined();
@@ -187,15 +187,15 @@ describe('CacheManager', () => {
       const manager = new CacheManager(config);
 
       // Fill up graph-a with 2 nodes
-      await manager.setNode('graph-a', 'node-1', { id: 'node-1', type: 'Test', properties: {} });
-      await manager.setNode('graph-a', 'node-2', { id: 'node-2', type: 'Test', properties: {} });
+      await manager.setNode('graph-a', 'node-1', { id: 'node-1', labels: ['Test'], properties: {} });
+      await manager.setNode('graph-a', 'node-2', { id: 'node-2', labels: ['Test'], properties: {} });
 
       // Touch graph-b nodes to make them more recently used
-      await manager.setNode('graph-b', 'node-3', { id: 'node-3', type: 'Test', properties: {} });
+      await manager.setNode('graph-b', 'node-3', { id: 'node-3', labels: ['Test'], properties: {} });
       await manager.getNode('graph-b', 'node-3'); // Access to update LRU
 
       // Adding 4th node should evict from graph-a (LRU)
-      await manager.setNode('graph-c', 'node-4', { id: 'node-4', type: 'Test', properties: {} });
+      await manager.setNode('graph-c', 'node-4', { id: 'node-4', labels: ['Test'], properties: {} });
 
       // graph-a entries should be gone
       const nodeA1 = await manager.getNode('graph-a', 'node-1');
@@ -224,8 +224,8 @@ describe('CacheManager', () => {
   describe('invalidateNode() / invalidateEdge()', () => {
     it('should remove specific node and decrement graphId count', async () => {
       const manager = new CacheManager(defaultConfig);
-      await manager.setNode('graph-a', 'node-1', { id: 'node-1', type: 'Test', properties: {} });
-      await manager.setNode('graph-a', 'node-2', { id: 'node-2', type: 'Test', properties: {} });
+      await manager.setNode('graph-a', 'node-1', { id: 'node-1', labels: ['Test'], properties: {} });
+      await manager.setNode('graph-a', 'node-2', { id: 'node-2', labels: ['Test'], properties: {} });
 
       await manager.invalidateNode('graph-a', 'node-1');
 
@@ -250,7 +250,7 @@ describe('CacheManager', () => {
   describe('invalidateAll()', () => {
     it('should clear all caches and reset stats', async () => {
       const manager = new CacheManager(defaultConfig);
-      await manager.setNode('graph-a', 'node-1', { id: 'node-1', type: 'Test', properties: {} });
+      await manager.setNode('graph-a', 'node-1', { id: 'node-1', labels: ['Test'], properties: {} });
       await manager.setEdge('graph-a', 'edge-1', { id: 'edge-1', type: 'Test', sourceId: 'n1', targetId: 'n2', properties: {} });
 
       await manager.invalidateAll();
@@ -265,7 +265,7 @@ describe('CacheManager', () => {
   describe('getNode() branches', () => {
     it('should increment hitCount on cache hit', async () => {
       const manager = new CacheManager(defaultConfig);
-      await manager.setNode('graph-a', 'node-1', { id: 'node-1', type: 'Test', properties: {} });
+      await manager.setNode('graph-a', 'node-1', { id: 'node-1', labels: ['Test'], properties: {} });
 
       await manager.getNode('graph-a', 'node-1');
 
@@ -367,7 +367,7 @@ describe('CacheManager', () => {
   describe('getStats()', () => {
     it('should track hit/miss counts', async () => {
       const manager = new CacheManager(defaultConfig);
-      await manager.setNode('graph-a', 'node-1', { id: 'node-1', type: 'Test', properties: {} });
+      await manager.setNode('graph-a', 'node-1', { id: 'node-1', labels: ['Test'], properties: {} });
 
       // Cache hit
       await manager.getNode('graph-a', 'node-1');
@@ -381,7 +381,7 @@ describe('CacheManager', () => {
 
     it('should calculate hit rate correctly', async () => {
       const manager = new CacheManager(defaultConfig);
-      await manager.setNode('graph-a', 'node-1', { id: 'node-1', type: 'Test', properties: {} });
+      await manager.setNode('graph-a', 'node-1', { id: 'node-1', labels: ['Test'], properties: {} });
 
       await manager.getNode('graph-a', 'node-1');
       await manager.getNode('graph-a', 'node-1');
@@ -395,9 +395,9 @@ describe('CacheManager', () => {
   describe('getAllNodes()', () => {
     it('should return all nodes for a graphId', async () => {
       const manager = new CacheManager(defaultConfig);
-      await manager.setNode('graph-a', 'node-1', { id: 'node-1', type: 'Test', properties: {} });
-      await manager.setNode('graph-a', 'node-2', { id: 'node-2', type: 'Test', properties: {} });
-      await manager.setNode('graph-b', 'node-3', { id: 'node-3', type: 'Test', properties: {} });
+      await manager.setNode('graph-a', 'node-1', { id: 'node-1', labels: ['Test'], properties: {} });
+      await manager.setNode('graph-a', 'node-2', { id: 'node-2', labels: ['Test'], properties: {} });
+      await manager.setNode('graph-b', 'node-3', { id: 'node-3', labels: ['Test'], properties: {} });
 
       const nodes = await manager.getAllNodes('graph-a');
 
@@ -407,9 +407,9 @@ describe('CacheManager', () => {
 
     it('should return limited results when limit is specified', async () => {
       const manager = new CacheManager(defaultConfig);
-      await manager.setNode('graph-a', 'node-1', { id: 'node-1', type: 'Test', properties: {} });
-      await manager.setNode('graph-a', 'node-2', { id: 'node-2', type: 'Test', properties: {} });
-      await manager.setNode('graph-a', 'node-3', { id: 'node-3', type: 'Test', properties: {} });
+      await manager.setNode('graph-a', 'node-1', { id: 'node-1', labels: ['Test'], properties: {} });
+      await manager.setNode('graph-a', 'node-2', { id: 'node-2', labels: ['Test'], properties: {} });
+      await manager.setNode('graph-a', 'node-3', { id: 'node-3', labels: ['Test'], properties: {} });
 
       const nodes = await manager.getAllNodes('graph-a', 2);
 
@@ -460,8 +460,8 @@ describe('CacheManager', () => {
   describe('totalCount()', () => {
     it('should return correct node count', async () => {
       const manager = new CacheManager(defaultConfig);
-      await manager.setNode('graph-a', 'node-1', { id: 'node-1', type: 'Test', properties: {} });
-      await manager.setNode('graph-a', 'node-2', { id: 'node-2', type: 'Test', properties: {} });
+      await manager.setNode('graph-a', 'node-1', { id: 'node-1', labels: ['Test'], properties: {} });
+      await manager.setNode('graph-a', 'node-2', { id: 'node-2', labels: ['Test'], properties: {} });
 
       const count = await manager.totalCount('graph-a', 'node');
 

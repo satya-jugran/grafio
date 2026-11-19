@@ -12,7 +12,7 @@ function calcIterations(
   factor: number,
   isLarge: boolean,
   _largeThreshold: number,
-  largeMultiplier = 0.2
+  largeMultiplier = 1
 ): number {
   const adjusted = isLarge
     ? Math.floor(baseIterations * largeMultiplier)
@@ -38,7 +38,6 @@ function pickId(meta: GraphMeta, offset: number): string {
 export function buildCommonScenariosCypher(
   nodeCount: number,
   factor: number,
-  maxDegreeOfParallelism: number = 1
 ): BenchmarkScenario[] {
   const isLarge = nodeCount >= (50_000 * factor);
   return [
@@ -107,7 +106,7 @@ export function buildCommonScenariosCypher(
       category: 'Read',
       name: 'Get Node by id (parameterised)',
       setup: (meta: GraphMeta) => {
-        const engine = new CypherEngine(meta.graph, { maxDegreeOfParallelism });
+        const engine = new CypherEngine(meta.graph);
         (meta as GraphMeta & { _engine?: CypherEngine })._engine = engine;
       },
       run: async (graph: any, meta: any) => {
@@ -123,7 +122,7 @@ export function buildCommonScenariosCypher(
       category: 'Read',
       name: 'Get nodes by id',
       setup: (meta: GraphMeta) => {
-        const engine = new CypherEngine(meta.graph, { maxDegreeOfParallelism });
+        const engine = new CypherEngine(meta.graph);
         (meta as GraphMeta & { _engine?: CypherEngine })._engine = engine;
       },
       run: async (graph: any, meta: any) => {
@@ -139,7 +138,7 @@ export function buildCommonScenariosCypher(
       category: 'Read',
       name: 'Get nodes by type',
       setup: (meta: GraphMeta) => {
-        const engine = new CypherEngine(meta.graph, { maxDegreeOfParallelism });
+        const engine = new CypherEngine(meta.graph);
         (meta as GraphMeta & { _engine?: CypherEngine })._engine = engine;
       },
       run: async (graph: any, meta: any) => {
@@ -154,7 +153,7 @@ export function buildCommonScenariosCypher(
       category: 'Read',
       name: 'Get nodes by property',
       setup: (meta: GraphMeta) => {
-        const engine = new CypherEngine(meta.graph, { maxDegreeOfParallelism });
+        const engine = new CypherEngine(meta.graph);
         (meta as GraphMeta & { _engine?: CypherEngine })._engine = engine;
       },
       run: async (graph: any, meta: any) => {
@@ -169,7 +168,7 @@ export function buildCommonScenariosCypher(
       category: 'Read',
       name: 'Get all Nodes',
       setup: (meta: GraphMeta) => {
-        const engine = new CypherEngine(meta.graph, { maxDegreeOfParallelism });
+        const engine = new CypherEngine(meta.graph);
         (meta as GraphMeta & { _engine?: CypherEngine })._engine = engine;
       },
       run: async (graph: any, meta: any) => {
@@ -184,7 +183,7 @@ export function buildCommonScenariosCypher(
       category: 'Navigation',
       name: 'Get Edges from node by id',
       setup: (meta: GraphMeta) => {
-        const engine = new CypherEngine(meta.graph, { maxDegreeOfParallelism });
+        const engine = new CypherEngine(meta.graph);
         (meta as GraphMeta & { _engine?: CypherEngine })._engine = engine;
       },
       run: async (graph: any, meta: any) => {
@@ -200,7 +199,7 @@ export function buildCommonScenariosCypher(
       category: 'Navigation',
       name: 'Get Edges to node by id',
       setup: (meta: GraphMeta) => {
-        const engine = new CypherEngine(meta.graph, { maxDegreeOfParallelism });
+        const engine = new CypherEngine(meta.graph);
         (meta as GraphMeta & { _engine?: CypherEngine })._engine = engine;
       },
       run: async (graph: any, meta: any) => {
@@ -216,7 +215,7 @@ export function buildCommonScenariosCypher(
       category: 'Navigation',
       name: 'Get edges between nodes by ids',
       setup: (meta: GraphMeta) => {
-        const engine = new CypherEngine(meta.graph, { maxDegreeOfParallelism });
+        const engine = new CypherEngine(meta.graph);
         (meta as GraphMeta & { _engine?: CypherEngine })._engine = engine;
       },
       run: async (graph: any, meta: any) => {
@@ -235,7 +234,7 @@ export function buildCommonScenariosCypher(
       category: 'Traversal',
       name: 'Traversal var-length (1..5)',
       setup: (meta: GraphMeta) => {
-        const engine = new CypherEngine(meta.graph, { maxDegreeOfParallelism });
+        const engine = new CypherEngine(meta.graph);
         (meta as GraphMeta & { _engine?: CypherEngine })._engine = engine;
       },
       run: async (graph: any, meta: any) => {
@@ -254,7 +253,7 @@ export function buildCommonScenariosCypher(
       category: 'Traversal',
       name: 'Traversal with types',
       setup: (meta: GraphMeta) => {
-        const engine = new CypherEngine(meta.graph, { maxDegreeOfParallelism });
+        const engine = new CypherEngine(meta.graph);
         (meta as GraphMeta & { _engine?: CypherEngine })._engine = engine;
       },
       run: async (graph: any, meta: any) => {
@@ -273,7 +272,7 @@ export function buildCommonScenariosCypher(
       category: 'Traversal',
       name: 'Traversal wildcard with types',
       setup: (meta: GraphMeta) => {
-        const engine = new CypherEngine(meta.graph, { maxDegreeOfParallelism });
+        const engine = new CypherEngine(meta.graph);
         (meta as GraphMeta & { _engine?: CypherEngine })._engine = engine;
       },
       run: async (graph: any, meta: any) => {
@@ -292,7 +291,7 @@ export function buildCommonScenariosCypher(
       category: 'Aggregation',
       name: 'Aggregate score/amount by type',
       setup: (meta: GraphMeta) => {
-        const engine = new CypherEngine(meta.graph, { maxDegreeOfParallelism });
+        const engine = new CypherEngine(meta.graph);
         (meta as GraphMeta & { _engine?: CypherEngine })._engine = engine;
       },
       run: async (graph: any, meta: any) => {
@@ -317,7 +316,7 @@ export function buildCommonScenariosCypher(
       category: 'Aggregation',
       name: 'Aggregate across two joins',
       setup: (meta: GraphMeta) => {
-        const engine = new CypherEngine(meta.graph, { maxDegreeOfParallelism });
+        const engine = new CypherEngine(meta.graph);
         (meta as GraphMeta & { _engine?: CypherEngine })._engine = engine;
       },
       run: async (graph: any, meta: any) => {

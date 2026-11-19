@@ -8,6 +8,7 @@ const DIST = path.join(DIR, 'dist');
 const COMMON = {
   entryPoints: [SRC],
   bundle: true,
+  external: ['three', '3d-force-graph', 'three-spritetext', 'force-graph'],
   sourcemap: true,
   target: ['es2020'],
   logLevel: 'info',

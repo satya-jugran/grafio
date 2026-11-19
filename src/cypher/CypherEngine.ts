@@ -1,19 +1,10 @@
 /**
  * Public facade for the Cypher query execution layer.
  *
- * The only class consumers instantiate. Orchestrates the full pipeline:
- * {@link Lexer} → {@link Parser} → {@link Semantic} → {@link Planner} → {@link Executor}.
- *
- * ### Validation gate
- * After tokenisation, the engine scans for unsupported constructs and throws
- * {@link CypherNotSupportedError}. This keeps unsupported syntax from reaching
- * the planner while allowing the implemented read, write, aggregation, and
- * query-pipeline features to share one public API.
- *
- * ### Transaction support
- * Transactions can be passed via {@link CypherQueryOptions.transaction}.
- * When provided, all graph operations within the query execution will use
- * that transaction, enabling consistent reads within a transaction context.
+ * Orchestrates the full pipeline:
+ * {@link Lexer} → {@link Parser} → {@link Semantic} → {@link Planner} → {@link Executor},
+ * accelerated on v8 with an LRU {@link PlanCache} keyed by query string and `indexEpoch`,
+ * plus synchronous execution via {@link executeSync} on `InMemoryStorageProvider`.
  *
  * @module cypher/CypherEngine
  */
@@ -27,36 +18,30 @@ import { Semantic } from './Semantic';
 import { Planner } from './Planner';
 import { Executor } from './executor/Executor';
 import { CypherResult } from './Result';
-import { CypherNotSupportedError, UnboundParameterError } from './errors';
+import { CypherNotSupportedError, CypherRuntimeError, UnboundParameterError } from './errors';
 import { PlanFormatter, PlanFormat } from './plan/PlanFormatter';
-import { QueryAst } from './ast/AstNode';
+import { getOrBuildCompiledPlanMeta } from './plan/CompiledPlanMeta';
+import { PlanCache, type CachedPlanEntry } from './PlanCache';
+import type { Statement } from './ast/AstNode';
 
 /**
  * Options for configuring the {@link CypherEngine} instance itself.
- *
- * These are set once at construction time and apply to all queries
- * executed through the engine.
  */
 export interface CypherEngineOptions {
   /**
-   * Maximum number of row chunks to process concurrently.
-   *
-   * Default: `1` (serial execution). Values greater than `1` enable
-   * parallel row processing for NodeScan, NodeSeek, EdgeExpand,
-   * Filter, and Project steps.
+   * Maximum number of compiled query plans retained in the LRU cache.
+   * Default: `512`. Pass `0` to disable plan caching.
    */
-  maxDegreeOfParallelism?: number;
+  planCacheSize?: number;
 }
 
 /**
  * Options for controlling per-query execution behavior.
- *
- * Passed to {@link CypherEngine.execute} to influence a single query.
  */
 export interface CypherQueryOptions {
   /**
    * If provided, the query will be executed within this transaction,
-   * enabling consistent reads within a transaction context.
+   * enabling consistent reads and deferred commits within a transaction context.
    */
   transaction?: GraphTransaction;
 
@@ -69,40 +54,17 @@ export interface CypherQueryOptions {
   };
 }
 
-// ── Gated token kinds (not yet supported in the public API) ───────
-
-/**
- * Token kinds that are deliberately gated in the current version.
- *
- * When a query contains any of these tokens, {@link CypherEngine} throws
- * {@link CypherNotSupportedError} before parsing, providing a clear error
- * message to the consumer.
- */
-const GATED_TOKENS: ReadonlySet<TokenKind> = new Set([
-  // Other unsupported clauses
-]);
-
-// ── CypherEngine ──────────────────────────────────────────────────
+const GATED_TOKENS: ReadonlySet<TokenKind> = new Set([]);
+const OPTION_KEYS: ReadonlyArray<keyof CypherQueryOptions> = ['transaction', 'executionPlan'];
 
 /**
  * Main entry point for executing Cypher queries against a {@link Graph}.
- *
- * ```typescript
- * import { Graph } from 'grafio';
- * import { CypherEngine } from 'grafio/cypher';
- *
- * const graph = new Graph();
- * const engine = new CypherEngine(graph);
- *
- * const result = await engine.execute(
- *   'MATCH (p:Person) WHERE p.name = $name RETURN p',
- *   { name: 'Alice' }
- * );
- * ```
  */
 export class CypherEngine {
   private readonly _graph: Graph;
-  private readonly _maxDegreeOfParallelism: number;
+  private readonly _planCache: PlanCache;
+  private readonly _planner: Planner;
+  private readonly _executor: Executor;
 
   /**
    * @param graph   - The Graph instance to query against.
@@ -110,74 +72,133 @@ export class CypherEngine {
    */
   constructor(graph: Graph, options?: CypherEngineOptions) {
     this._graph = graph;
-    this._maxDegreeOfParallelism = Math.max(1, options?.maxDegreeOfParallelism ?? 1);
+    this._planCache = new PlanCache(options?.planCacheSize ?? 512);
+    this._planner = new Planner(graph);
+    this._executor = new Executor(graph);
   }
 
-  public async execute(query: string, options?: CypherQueryOptions): Promise<CypherResult & { executionPlan?: string }>;
-  public async execute(query: string, params: Record<string, unknown>, options?: CypherQueryOptions): Promise<CypherResult & { executionPlan?: string }>;
+  public async execute(
+    query: string,
+    options?: CypherQueryOptions,
+  ): Promise<CypherResult & { executionPlan?: string }>;
+  public async execute(
+    query: string,
+    params: Record<string, unknown> | undefined,
+    options?: CypherQueryOptions,
+  ): Promise<CypherResult & { executionPlan?: string }>;
 
   /**
-   * Parse, plan, and execute a Cypher query string.
-   *
-   * The engine supports the implemented openCypher read, write, aggregation,
-   * filtering, ordering, pagination, and query-pipeline features.
-   *
-   * @param query  - Cypher query string.
-   * @param params - Named parameter map (`$key` → value).
-   * @returns A {@link CypherResult} containing rows and execution summary.
-   * @throws {CypherSyntaxError}       on tokenisation / parse errors.
-   * @throws {CypherNotSupportedError} on unsupported clauses or constructs.
-   * @throws {CypherSemanticError}     on variable scope violations.
-   * @throws {CypherRuntimeError}      on execution-time errors (unbound parameter, etc.).
+   * Parse, plan, and execute a Cypher query asynchronously.
+   * Automatically runs the zero-microtask kernel pipeline when backed by
+   * `InMemoryStorageProvider`.
    */
   public async execute(
     query: string,
-    params: Record<string, unknown> | CypherQueryOptions,
+    params?: Record<string, unknown> | CypherQueryOptions,
     options?: CypherQueryOptions,
   ): Promise<CypherResult & { executionPlan?: string }> {
-
-    // Handle overloaded signature where options may be passed as the second argument
-    let _params: Record<string, unknown> = {};
-    let _options: CypherQueryOptions | undefined = options;
-    let _CypherQueryOptionsKeys: (keyof CypherQueryOptions)[] = ['transaction', 'executionPlan'];
-    if (typeof params === 'object' && !Array.isArray(params) && !_CypherQueryOptionsKeys.some(key => key in params)) {
-      _params = params as Record<string, unknown>;
-      _options = options;
-    } else if (typeof params === 'object' && !Array.isArray(params) && _CypherQueryOptionsKeys.some(key => key in params)) {
-      _params = {};
-      _options = params as CypherQueryOptions;
+    if (this._graph._getSyncKernel()) {
+      return this._executeSyncInternal(query, params, options);
     }
 
+    const { resolvedParams, resolvedOptions } = this._resolveParamsAndOptions(params, options);
+    const epoch = this._graph.indexEpoch;
+    let entry = this._planCache.get(query, epoch);
 
-    // ── 1. Tokenise ───────────────────────────────────────────────
-    const lexer = new Lexer(query);
-    const tokens = lexer.tokenise();
+    if (!entry) {
+      const tokens = new Lexer(query).tokenise();
+      this._validateTokens(tokens);
+      const rawAst = new Parser(tokens).parse();
+      new Semantic().analyseStatement(rawAst);
+      const plan = await this._planner.plan(rawAst);
+      const meta = getOrBuildCompiledPlanMeta(plan);
+      const paramNames = this._collectParameterNames(rawAst);
+      entry = { plan, meta, paramNames, indexEpoch: epoch };
+      this._planCache.set(query, entry);
+    }
 
-    // ── 2. Validation gate: reject unsupported clauses ────────────
-    this._validateTokens(tokens);
+    const result = await this._executor.execute(
+      entry.plan,
+      resolvedParams,
+      resolvedOptions?.transaction,
+      entry.meta,
+    );
 
-    // ── 3. Parse ──────────────────────────────────────────────────
-    const parser = new Parser(tokens);
-    const rawAst = parser.parse();
-
-    // ── 4. Semantic analysis ──────────────────────────────────────
-    const semantic = new Semantic();
-    semantic.analyseStatement(rawAst);
-
-    // ── 5. Plan ───────────────────────────────────────────────────
-    const planner = new Planner(this._graph);
-    const plan = await planner.plan(rawAst);
-
-    // ── 6. Execute ────────────────────────────────────────────────
-    const executor = new Executor(this._graph, this._maxDegreeOfParallelism);
-    const result = await executor.execute(plan, _params, _options?.transaction);
-
-    // ── 7. Format execution plan if requested ───────────────────
-    const planFormat = _options?.executionPlan?.format;
+    const planFormat = resolvedOptions?.executionPlan?.format;
     if (planFormat && result.summary.planExecutionStats) {
       const formatter = new PlanFormatter();
       const resultWithPlan = result as CypherResult & { executionPlan?: string };
-      resultWithPlan.executionPlan = formatter.format(plan, planFormat, result.summary.planExecutionStats, _params);
+      resultWithPlan.executionPlan = formatter.format(
+        entry.plan,
+        planFormat,
+        result.summary.planExecutionStats,
+        resolvedParams,
+      );
+      return resultWithPlan;
+    }
+
+    return result;
+  }
+
+  public executeSync(
+    query: string,
+    options?: CypherQueryOptions,
+  ): CypherResult & { executionPlan?: string };
+  public executeSync(
+    query: string,
+    params: Record<string, unknown> | undefined,
+    options?: CypherQueryOptions,
+  ): CypherResult & { executionPlan?: string };
+
+  /**
+   * Parse, plan, and execute a Cypher query synchronously against
+   * an `InMemoryStorageProvider` graph.
+   */
+  public executeSync(
+    query: string,
+    params?: Record<string, unknown> | CypherQueryOptions,
+    options?: CypherQueryOptions,
+  ): CypherResult & { executionPlan?: string } {
+    return this._executeSyncInternal(query, params, options);
+  }
+
+  private _executeSyncInternal(
+    query: string,
+    params?: Record<string, unknown> | CypherQueryOptions,
+    options?: CypherQueryOptions,
+  ): CypherResult & { executionPlan?: string } {
+    if (!this._graph._getSyncKernel()) {
+      throw new CypherRuntimeError(
+        'executeSync requires a Graph backed by an in-memory storage kernel',
+      );
+    }
+
+    const { resolvedParams, resolvedOptions } = this._resolveParamsAndOptions(params, options);
+    const epoch = this._graph.indexEpoch;
+    let entry = this._planCache.get(query, epoch);
+
+    if (!entry) {
+      entry = this._compileSync(query, epoch);
+      this._planCache.set(query, entry);
+    }
+
+    const result = this._executor.executeSync(
+      entry.plan,
+      resolvedParams,
+      resolvedOptions?.transaction,
+      entry.meta,
+    );
+
+    const planFormat = resolvedOptions?.executionPlan?.format;
+    if (planFormat && result.summary.planExecutionStats) {
+      const formatter = new PlanFormatter();
+      const resultWithPlan = result as CypherResult & { executionPlan?: string };
+      resultWithPlan.executionPlan = formatter.format(
+        entry.plan,
+        planFormat,
+        result.summary.planExecutionStats,
+        resolvedParams,
+      );
       return resultWithPlan;
     }
 
@@ -186,59 +207,114 @@ export class CypherEngine {
 
   /**
    * Returns the execution plan for a Cypher query without executing it.
-   *
-   * This method parses and plans the query (same steps 1-5 as {@link execute})
-   * but returns the formatted plan instead of executing it. Useful for
-   * debugging, optimization analysis, and query understanding.
-   *
-   * @param query  - Cypher query string.
-   * @param params - Named parameter map (`$key` → value).
-   * @param format - Output format: 'json' | 'text' | 'mermaid' (default: 'json').
-   * @returns A formatted string representation of the query execution plan.
-   * @throws {CypherSyntaxError}       on tokenisation / parse errors.
-   * @throws {CypherNotSupportedError} on unsupported clauses (UNWIND, etc.).
-   * @throws {CypherSemanticError}     on variable scope violations.
    */
   public async getQueryPlan(
     query: string,
     params: Record<string, unknown> = {},
     format: PlanFormat = 'json',
   ): Promise<string> {
-    // ── 1. Tokenise ───────────────────────────────────────────────
-    const lexer = new Lexer(query);
-    const tokens = lexer.tokenise();
+    const epoch = this._graph.indexEpoch;
+    let entry = this._planCache.get(query, epoch);
 
-    // ── 2. Validation gate: reject unsupported clauses ───────────
-    this._validateTokens(tokens);
+    if (!entry) {
+      if (this._graph._getSyncKernel()) {
+        entry = this._compileSync(query, epoch);
+      } else {
+        const tokens = new Lexer(query).tokenise();
+        this._validateTokens(tokens);
+        const rawAst = new Parser(tokens).parse();
+        new Semantic().analyseStatement(rawAst);
+        const plan = await this._planner.plan(rawAst);
+        const meta = getOrBuildCompiledPlanMeta(plan);
+        const paramNames = this._collectParameterNames(rawAst);
+        entry = { plan, meta, paramNames, indexEpoch: epoch };
+      }
+      this._planCache.set(query, entry);
+    }
 
-    // ── 3. Parse ──────────────────────────────────────────────────
-    const parser = new Parser(tokens);
-    const rawAst = parser.parse();
+    for (let i = 0; i < entry.paramNames.length; i++) {
+      const name = entry.paramNames[i];
+      if (!(name in params)) {
+        throw new UnboundParameterError(name);
+      }
+    }
 
-    // ── 4. Semantic analysis ──────────────────────────────────────
-    const semantic = new Semantic();
-    semantic.analyseStatement(rawAst);
-
-    // ── 5. Plan ───────────────────────────────────────────────────
-    const planner = new Planner(this._graph);
-    const plan = await planner.plan(rawAst);
-
-    // ── 6. Validate parameters ──────────────────────────────────────
-    this._validateParameters(rawAst, params);
-
-    // ── 7. Format ─────────────────────────────────────────────────
-    const formatter = new PlanFormatter();
-    return formatter.format(plan, format, undefined, params);
+    return new PlanFormatter().format(entry.plan, format, undefined, params);
   }
 
-  /**
-   * Scan the token stream for unsupported clauses and throw
-   * {@link CypherNotSupportedError} if any are found.
-   *
-   * This gate is intentionally placed after tokenisation but before
-   * parsing so that the parser never encounters unsupported syntax
-   * in production, while remaining internally permissive.
-   */
+  /** @internal Clears cached plans on demand. */
+  public _clearPlanCache(): void {
+    this._planCache.clear();
+  }
+
+  /** @internal Current cached plan count. */
+  public _getPlanCacheSize(): number {
+    return this._planCache.size;
+  }
+
+  private _compileSync(query: string, indexEpoch: number): CachedPlanEntry {
+    const tokens = new Lexer(query).tokenise();
+    this._validateTokens(tokens);
+    const rawAst = new Parser(tokens).parse();
+    new Semantic().analyseStatement(rawAst);
+    const plan = this._planner.planSync(rawAst);
+    const meta = getOrBuildCompiledPlanMeta(plan);
+    const paramNames = this._collectParameterNames(rawAst);
+    return { plan, meta, paramNames, indexEpoch };
+  }
+
+  private _resolveParamsAndOptions(
+    paramsOrOptions?: Record<string, unknown> | CypherQueryOptions,
+    options?: CypherQueryOptions,
+  ): { resolvedParams: Record<string, unknown>; resolvedOptions?: CypherQueryOptions } {
+    if (options !== undefined) {
+      return {
+        resolvedParams: (paramsOrOptions ?? {}) as Record<string, unknown>,
+        resolvedOptions: options,
+      };
+    }
+    if (
+      paramsOrOptions &&
+      typeof paramsOrOptions === 'object' &&
+      !Array.isArray(paramsOrOptions) &&
+      this._isQueryOptionsObject(paramsOrOptions)
+    ) {
+      return {
+        resolvedParams: {},
+        resolvedOptions: paramsOrOptions as CypherQueryOptions,
+      };
+    }
+    return {
+      resolvedParams: (paramsOrOptions ?? {}) as Record<string, unknown>,
+      resolvedOptions: undefined,
+    };
+  }
+
+  private _isQueryOptionsObject(obj: object): boolean {
+    const rec = obj as Record<string, unknown>;
+    const keys = Object.keys(rec);
+    if (keys.length === 0) return false;
+    for (let i = 0; i < keys.length; i++) {
+      if (!OPTION_KEYS.includes(keys[i] as keyof CypherQueryOptions)) {
+        return false;
+      }
+    }
+    if ('transaction' in rec) {
+      if (rec.transaction !== undefined && !(rec.transaction instanceof GraphTransaction)) {
+        return false;
+      }
+    }
+    if ('executionPlan' in rec) {
+      const ep = rec.executionPlan;
+      if (ep !== undefined) {
+        if (typeof ep !== 'object' || ep === null || Array.isArray(ep)) return false;
+        const fmt = (ep as { format?: unknown }).format;
+        if (fmt !== 'json' && fmt !== 'text' && fmt !== 'mermaid') return false;
+      }
+    }
+    return true;
+  }
+
   private _validateTokens(tokens: Token[]): void {
     for (const token of tokens) {
       if (GATED_TOKENS.has(token.kind)) {
@@ -249,23 +325,7 @@ export class CypherEngine {
     }
   }
 
-  /**
-   * Walk the AST and validate that all Parameter references have corresponding
-   * entries in the params map. Throws UnboundParameterError if any are missing.
-   */
-  private _validateParameters(ast: import('./ast/AstNode').Statement, params: Record<string, unknown>): void {
-    const paramNames = this._collectParameterNames(ast);
-    for (const name of paramNames) {
-      if (!(name in params)) {
-        throw new UnboundParameterError(name);
-      }
-    }
-  }
-
-  /**
-   * Recursively collect all parameter names referenced in an AST.
-   */
-  private _collectParameterNames(ast: import('./ast/AstNode').Statement): string[] {
+  private _collectParameterNames(ast: Statement): string[] {
     const names: string[] = [];
     const walk = (node: unknown): void => {
       if (!node || typeof node !== 'object') return;

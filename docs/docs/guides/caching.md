@@ -1,13 +1,15 @@
 # Caching
 
-Improve read performance with Grafio's pluggable caching layer.
+Improve read performance for remote or async storage providers with Grafio's pluggable caching layer.
+
+> **In-Memory Note:** `InMemoryGraphFactory` and `new Graph()` bind directly to `InMemoryStorageProvider`, whose Structure-of-Arrays (SoA) and Hybrid CSR storage already executes synchronously in memory without `CachedStorageProvider` wrapping.
 
 ## Overview
 
 ```mermaid
 flowchart LR
     A["Graph API"] --> B["Cache (LRU/LFU)"]
-    B --> C["Storage Provider"]
+    B --> C["Remote Storage Provider"]
     C --> B
     B --> A
     
@@ -19,22 +21,33 @@ flowchart LR
 ## Quick Start
 
 ```typescript
-import { GraphManager, InMemoryGraphFactory } from 'grafio';
+import {
+  Graph,
+  GraphManager,
+  CachedStorageProvider,
+  type CacheConfig,
+} from 'grafio';
+
+const cacheConfig: CacheConfig = {
+  maxNodesCount: 1000,
+  maxEdgesCount: 2000,
+  cacheStore: 'in-memory',
+  evictionStrategy: 'LRU',
+  preloadStrategy: 'none',
+};
 
 // 1. Initialize GraphManager with cache config
-GraphManager.init({
-  cache: {
-    maxNodesCount: 1000,
-    maxEdgesCount: 2000,
-    cacheStore: 'in-memory',
-    evictionStrategy: 'LRU',
-    preloadStrategy: 'none',
-  }
-});
+GraphManager.init({ cache: cacheConfig });
+const cacheManager = GraphManager.getInstance().getCacheManager()!;
 
-// 2. Create graph via factory
-const factory = new InMemoryGraphFactory();
-const graph = factory.forGraph('default');
+// 2. Wrap a remote/async storage provider (e.g., MongoStorageProvider from grafio-mongo)
+const cachedProvider = new CachedStorageProvider(
+  remoteProvider,
+  'default',
+  cacheManager,
+  cacheConfig,
+);
+const graph = new Graph(cachedProvider);
 ```
 
 ## Cache Configuration
@@ -69,11 +82,13 @@ const graph = factory.forGraph('default');
 ## Using Redis Cache
 
 ```typescript
-import { GraphManager, RedisCache } from 'grafio/cache';
+import { GraphManager } from 'grafio';
+import { RedisCache } from 'grafio/cache';
 
 GraphManager.init({
   cache: {
     cacheStore: 'redis',
+    redisUrl: 'redis://localhost:6379',
     maxNodesCount: 5000,
     maxEdgesCount: 10000,
     evictionStrategy: 'LRU',
@@ -85,28 +100,20 @@ GraphManager.init({
 
 ## Cache Statistics
 
-Monitor cache performance:
+Monitor cache performance via `CacheManager.getStats()`:
 
 ```typescript
-const stats = CacheManager.getStats(graphId);
-// stats.hits, stats.misses, stats.size, etc.
-```
-
-## CacheManager API
-
-```typescript
-import { CacheManager, CacheStats } from 'grafio';
-
-const stats: CacheStats = CacheManager.getStats(graphId);
-console.log(`Hits: ${stats.hits}, Misses: ${stats.misses}`);
-console.log(`Hit rate: ${stats.hitRate}%`);
-console.log(`Nodes: ${stats.nodesCount}, Edges: ${stats.edgesCount}`);
+const cacheManager = GraphManager.getInstance().getCacheManager()!;
+const stats = cacheManager.getStats();
+console.log(`Hits: ${stats.hitCount}, Misses: ${stats.missCount}`);
+console.log(`Hit rate: ${(stats.hitRate * 100).toFixed(2)}%`);
+console.log(`Nodes: ${stats.totalNodes}, Edges: ${stats.totalEdges}`);
 ```
 
 ## Performance Tips
 
 1. **Set appropriate limits** — don't cache more than you need
-2. **Use preload** — if startup time isn't critical, preload on warmCache()
+2. **Use preload** — if startup time isn't critical, call `await graph.warmCache()`
 3. **Choose right eviction** — LRU for temporal patterns, LFU for frequency
 4. **Monitor hit rate** — aim for >80% hit rate
 

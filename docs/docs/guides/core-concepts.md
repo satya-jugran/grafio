@@ -70,8 +70,8 @@ Nodes are categorized by labels (e.g., `Person`, `Course`, `Author`). A node can
 
 ### Node Properties
 
-- `id` — unique identifier (auto-generated UUID)
-- `type` — the type label (e.g., 'Person', 'Course')
+- `id` — unique identifier (defaults to compact `@n<slot>:<gen>` on `InMemoryStorageProvider`, or UUID with `idStrategy: 'uuid'`)
+- `labels` — array of node labels (e.g., `['Person']`, `['Person', 'Employee']`)
 - `properties` — key-value pairs (primitives only)
 
 ### Supported Property Types
@@ -105,7 +105,7 @@ Grafio uses TypeScript's type system for compile-time safety. All nodes and edge
 
 ## Immutability
 
-Node and edge properties are **deep-frozen** to prevent accidental mutation. Once a node or edge is created, its properties cannot be modified.
+Materialized `Node` and `Edge` properties are **deep-frozen** snapshots so callers cannot accidentally mutate internal engine state in place; update properties via `graph.setNodeProperties()` / `graph.setEdgeProperties()` or Cypher `SET`.
 
 ## Next Steps
 

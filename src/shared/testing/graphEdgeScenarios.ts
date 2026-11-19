@@ -1,4 +1,4 @@
-import { beforeEach, describe, it, expect } from '@jest/globals';
+import { afterAll, beforeAll, beforeEach, describe, it, expect } from '@jest/globals';
 import { Graph, Node } from '../../index';
 import type { IStorageProvider } from '../../index';
 import { NodeNotFoundError } from '../../errors';
