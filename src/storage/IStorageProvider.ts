@@ -174,6 +174,36 @@ export function isSyncGraphKernel(
 }
 
 /**
+ * Specification of a single aggregate expression for {@link GroupedAggregateRequest}.
+ */
+export interface GroupedAggregateSpec {
+  alias: string;
+  fn: 'COUNT' | 'SUM' | 'AVG' | 'MIN' | 'MAX';
+  /** Property key on the entity, or undefined for `COUNT(*)` / `COUNT(entity)`. */
+  propertyKey?: string;
+  distinct?: boolean;
+}
+
+/**
+ * Request descriptor for storage-level grouped aggregation pushdown.
+ */
+export interface GroupedAggregateRequest {
+  target: 'node' | 'edge';
+  groupByKeys: string[];
+  aggregates: GroupedAggregateSpec[];
+  options?: StorageQueryOptions;
+}
+
+/**
+ * One grouped aggregate output row matching `groupByKeys` positional values
+ * and `aggregates` alias results.
+ */
+export interface GroupedAggregateRow {
+  groupValues: unknown[];
+  aggValues: Record<string, unknown>;
+}
+
+/**
  * Contract that every v8 storage backend must fulfill.
  */
 export interface IStorageProvider {
@@ -219,6 +249,7 @@ export interface IStorageProvider {
   insertEdge(edge: EdgeData, transaction?: ITransactionHandle): Promise<void>;
   insertEdges(edges: readonly EdgeData[], transaction?: ITransactionHandle): Promise<void>;
   deleteEdge(id: string, transaction?: ITransactionHandle): Promise<void>;
+  deleteEdges?(ids: readonly string[], transaction?: ITransactionHandle): Promise<void>;
 
   // ---------------------------------------------------------------------------
   // Edge queries
@@ -240,6 +271,37 @@ export interface IStorageProvider {
     nodeId: string,
     options?: StorageQueryOptions,
   ): Promise<ReadonlyEdgeData[]>;
+  getEdgesBySources?(
+    nodeIds: readonly string[],
+    options?: StorageQueryOptions,
+  ): Promise<Map<string, ReadonlyEdgeData[]>>;
+  getEdgesByTargets?(
+    nodeIds: readonly string[],
+    options?: StorageQueryOptions,
+  ): Promise<Map<string, ReadonlyEdgeData[]>>;
+
+  // ---------------------------------------------------------------------------
+  // Optional pushdown capabilities
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Optional storage-level grouped aggregation pushdown.
+   * Returns `null` when the provider/wrapper delegates fallback to in-process execution.
+   */
+  aggregateGrouped?(
+    request: GroupedAggregateRequest,
+  ): Promise<GroupedAggregateRow[] | null>;
+
+  /**
+   * Optional storage-level unweighted shortest-path traversal (`BFS` with wildcard nodes).
+   * Returns `string[]` when found, `null` when endpoints are missing/unreachable,
+   * or `undefined` when the provider declines and callers should fall back to iterative BFS.
+   */
+  traverseShortestPath?(
+    sourceId: string,
+    targetId: string,
+    edgeTypes?: readonly string[],
+  ): Promise<string[] | null | undefined>;
 
   // ---------------------------------------------------------------------------
   // Property and Label mutations

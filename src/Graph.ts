@@ -53,6 +53,11 @@ export class Graph {
     return this._index._getSyncKernel();
   }
 
+  /** @internal Exposes the underlying storage provider for internal query execution fast paths. */
+  _getStore(): IStorageProvider {
+    return this._index._getStore();
+  }
+
   /** Monotonic schema/index epoch counter from the backing storage provider. */
   get indexEpoch(): number {
     return this._index.indexEpoch;
@@ -255,6 +260,24 @@ export class Graph {
 
   async getEdgesTo(targetId: string, options?: GraphQueryOptions): Promise<Edge[]> {
     return this._index.getEdgesTo(targetId, options);
+  }
+
+  /** @internal Skips endpoint hasNode check for callers holding a validated Node. */
+  async _getAdjacentEdges(
+    direction: 'out' | 'in',
+    nodeId: string,
+    options?: GraphQueryOptions,
+  ): Promise<Edge[]> {
+    return this._index._getAdjacentEdges(direction, nodeId, options);
+  }
+
+  /** @internal Batch adjacency lookup across multiple node IDs. */
+  async _getAdjacentEdgesBatch(
+    direction: 'out' | 'in',
+    nodeIds: readonly string[],
+    options?: GraphQueryOptions,
+  ): Promise<Map<string, Edge[]>> {
+    return this._index._getAdjacentEdgesBatch(direction, nodeIds, options);
   }
 
   async getDirectEdgesBetween(

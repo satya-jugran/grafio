@@ -264,7 +264,42 @@ export class Executor {
     let rows: Row[] = [meta.slotTable.createEmptyRow()];
 
     try {
-      for (const step of plan.steps) {
+      const steps = plan.steps;
+      for (let i = 0; i < steps.length; i++) {
+        const step = steps[i];
+
+        if (rows.length === 1 && step.kind === 'NodeScanStep') {
+          const nextStep = steps[i + 1];
+          if (
+            nextStep?.kind === 'AggregateStep' &&
+            this._canFuseScanAggregate(step as NodeScanStep, nextStep as AggregateStep)
+          ) {
+            const fusedStart = Date.now();
+            const fusedRows = await this._aggregateExecutor.tryExecuteFusedNodeAggregateAsync(
+              step as NodeScanStep,
+              nextStep as AggregateStep,
+              params,
+              meta,
+              effectiveTx,
+            );
+            if (fusedRows !== null) {
+              rows = fusedRows;
+              const fusedTime = Date.now() - fusedStart;
+              stepStats.push(
+                { stepKind: step.kind, timeMs: 0, percentageOfTotal: 0, rowsOut: rows.length },
+                {
+                  stepKind: nextStep.kind,
+                  timeMs: fusedTime,
+                  percentageOfTotal: 0,
+                  rowsOut: rows.length,
+                },
+              );
+              i += 1;
+              continue;
+            }
+          }
+        }
+
         const stepStart = Date.now();
         rows = await this._executeStepAsync(step, rows, params, meta, counters, effectiveTx);
         const stepTime = Date.now() - stepStart;

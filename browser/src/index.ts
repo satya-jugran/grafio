@@ -32,6 +32,9 @@ export {
   type CacheWarmableStorageProvider,
   type IndexMetadata,
   type CreateIndexOptions,
+  type GroupedAggregateSpec,
+  type GroupedAggregateRequest,
+  type GroupedAggregateRow,
 } from '../../src/storage/IStorageProvider';
 export { InMemoryStorageProvider } from '../../src/storage/InMemoryStorageProvider';
 export type { InMemoryStorageProviderOptions } from '../../src/storage/InMemoryStorageProvider';

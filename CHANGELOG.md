@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [8.1.0] - 2026-11-20
+
+### Performance & Async Storage Capabilities
+
+- **Optional Batch & Pushdown `IStorageProvider` Contracts:** Added optional `getEdgesBySources`, `getEdgesByTargets`, `deleteEdges`, `aggregateGrouped` (along with exported `GroupedAggregateSpec`, `GroupedAggregateRequest`, and `GroupedAggregateRow` types), and `traverseShortestPath` methods across `grafio` and `@grafio/browser`.
+- **Cached Storage Batching (`CachedStorageProvider`):** Partitioned batch adjacency queries (`getEdgesBySources` / `getEdgesByTargets`) across cache hits and missing node IDs in a single underlying batch call, added batch cache invalidation via `deleteEdges`, and wrapped `aggregateGrouped` / `traverseShortestPath` with safe `null` / `undefined` wrapper fallbacks when wrapping providers without pushdown support.
+- **Batched Async Cypher Expansion (`ReadStepExecutors`):** Collapsed `O(N)` per-row `getEdgesFrom` + `getNodesByIds` round-trips in async single-hop `EdgeExpandStep` into constant-RTT batched lookups, and converted multi-hop BFS into level-synchronous batched execution across all rows (`<= 2 * maxHops` round-trips) while preserving openCypher per-path trail semantics and row ordering.
+- **Fused Async NodeScan + Aggregate (`AggregateStepExecutor` / `Executor`):** Added execution-time fusion for async `NodeScanStep -> AggregateStep`, routing filtered `COUNT(*)` / `COUNT(var)` directly to `getNodeCount` and single-step grouped/filtered multi-aggregates to `store.aggregateGrouped`.
+- **Graph Mutation & Shortest-Path Efficiency (`GraphIndex` / `GraphTraversal`):** Collapsed `GraphIndex.addEdge` endpoint checks via `Promise.all` (relying on `insertEdge` ID uniqueness), deduplicated self-loop edges on `removeNode` using batched `deleteEdges`, added `@internal` direct adjacency helpers on `Graph` / `GraphIndex`, delegated unrestricted BFS `Graph.traverse` to `traverseShortestPath`, and batched fallback BFS levels through `getEdgesBySources` + `getNodesByIds`.
+
 ## [8.0.0] - 2026-11-18
 
 ### Breaking Changes & Architectural Contracts

@@ -1,9 +1,16 @@
-import { describe, expect, it, beforeEach, afterEach } from '@jest/globals';
+import { describe, expect, it, beforeEach, afterEach, jest } from '@jest/globals';
 import { Graph } from '../../src/Graph';
 import { InMemoryStorageProvider } from '../../src/storage/InMemoryStorageProvider';
 import { CachedStorageProvider } from '../../src/storage/CachedStorageProvider';
 import { CacheManager } from '../../src/storage/cache/CacheManager';
 import type { CacheConfig } from '../../src/storage/cache/CacheConfig';
+import type {
+  GroupedAggregateRequest,
+  GroupedAggregateRow,
+  IStorageProvider,
+  StorageQueryOptions,
+} from '../../src/storage/IStorageProvider';
+import type { ReadonlyEdgeData } from '../../src/types';
 import { CypherEngine } from '../../src/cypher';
 import { NodeHasEdgesError } from '../../src/errors';
 
@@ -353,5 +360,248 @@ describe('Async Storage Provider Integration', () => {
     await expectFailedTx((tx) => graph.removeNodeLabels('missing', ['Person'], tx));
     await expectFailedTx((tx) => graph.setEdgeProperties('missing', { a: 1 }, { transaction: tx }));
     await expectFailedTx((tx) => graph.unsetEdgeProperties('missing', ['a'], tx));
+  });
+
+  it('deduplicates self-loop edges on removeNode without cascade overcounting', async () => {
+    const a = await graph.addNode('Person', { name: 'Self' });
+    const b = await graph.addNode('Person', { name: 'Other' });
+    await graph.addEdge(a.id, a.id, 'LOOP');
+
+    await expect(graph.removeNode(a.id, false)).rejects.toMatchObject({
+      name: 'NodeHasEdgesError',
+      message: expect.stringContaining('1 incident edge(s)'),
+    });
+    const deletedOnlyLoop = await graph.removeNode(a.id, true);
+    expect(deletedOnlyLoop).toEqual({ result: true, cascadeDeletedEdgesCount: 1 });
+
+    const c = await graph.addNode('Person', { name: 'Mix' });
+    await graph.addEdge(c.id, c.id, 'LOOP');
+    await graph.addEdge(c.id, b.id, 'KNOWS');
+    const deletedMix = await graph.removeNode(c.id, true);
+    expect(deletedMix).toEqual({ result: true, cascadeDeletedEdgesCount: 2 });
+  });
+
+  it('batches async EdgeExpandStep single-hop & multi-hop traversals while preserving trail semantics', async () => {
+    const nA = await graph.addNode(['City', 'Hub'], { name: 'A' });
+    const nB = await graph.addNode(['City', 'Hub'], { name: 'B' });
+    const nC = await graph.addNode(['City', 'Hub'], { name: 'C' });
+    const nD = await graph.addNode(['City', 'Dest'], { name: 'D' });
+    const nE = await graph.addNode(['City', 'Dest'], { name: 'E' });
+    // Two routes A->B->D and A->C->D, plus parallel B->D edge -> 3 trails total to D; plus B->E for disjoint targets
+    await graph.addEdge(nA.id, nB.id, 'ROAD');
+    await graph.addEdge(nA.id, nC.id, 'ROAD');
+    await graph.addEdge(nB.id, nD.id, 'ROAD');
+    await graph.addEdge(nB.id, nD.id, 'ROAD');
+    await graph.addEdge(nC.id, nD.id, 'ROAD');
+    await graph.addEdge(nB.id, nE.id, 'ROAD');
+
+    const bySourcesSpy = jest.spyOn(cached, 'getEdgesBySources');
+    const nodesByIdsSpy = jest.spyOn(cached, 'getNodesByIds');
+
+    // Disjoint-target single-hop expansion batches edges AND missing target nodes in 1 call each
+    const disjointHop = await graph.query(`
+      MATCH (s:Hub)-[:ROAD]->(t:Dest)
+      RETURN s.name AS s, t.name AS t
+      ORDER BY s ASC, t ASC
+    `);
+    expect(disjointHop.rows).toHaveLength(4);
+    expect(bySourcesSpy).toHaveBeenCalledTimes(1);
+    expect(nodesByIdsSpy).toHaveBeenCalledTimes(1);
+
+    bySourcesSpy.mockClear();
+    nodesByIdsSpy.mockClear();
+
+    // Multi-hop *1..3 must preserve all distinct edge trails to D (both with and without path variable)
+    const multiHopWithPath = await graph.query(`
+      MATCH p = (a:City { name: 'A' })-[:ROAD*1..3]->(d:City { name: 'D' })
+      RETURN p, d.name AS name
+    `);
+    expect(multiHopWithPath.rows).toHaveLength(3);
+    // 2 hops => [Node, Edge, Node, Edge, Node] (length 5)
+    expect(multiHopWithPath.rows.every((r) => Array.isArray(r.p) && r.p.length === 5 && r.name === 'D')).toBe(true);
+    // Hop 0 fetches [A] via getEdgesBySource; hop 1 batches [B, C] via getEdgesBySources (<= 1 batch call)
+    expect(bySourcesSpy.mock.calls.length).toBeLessThanOrEqual(2);
+
+    const multiHopNoPath = await graph.query(`
+      MATCH (a:City { name: 'A' })-[:ROAD*1..3]->(d:City { name: 'D' })
+      RETURN d.name AS name
+    `);
+    expect(multiHopNoPath.rows).toEqual([{ name: 'D' }, { name: 'D' }, { name: 'D' }]);
+  });
+
+  it('fuses async NodeScanStep -> AggregateStep for filtered COUNT, grouped pushdown, and shortest path delegation', async () => {
+    await graph.addNode('Person', { name: 'Alice', city: 'NYC', age: 30, score: 10 });
+    await graph.addNode('Person', { name: 'Bob', city: 'NYC', age: 20, score: 20 });
+    await graph.addNode('Person', { name: 'Carol', city: 'SF', age: 40 }); // score undefined
+
+    const countSpy = jest.spyOn(cached, 'getNodeCount');
+    const getNodesSpy = jest.spyOn(cached, 'getNodes');
+
+    const filteredCount = await graph.query(
+      'MATCH (p:Person) WHERE p.age >= $minAge RETURN count(p) AS cnt',
+      { minAge: 25 },
+    );
+    expect(filteredCount.rows).toEqual([{ cnt: 2 }]);
+    expect(countSpy).toHaveBeenCalledTimes(1);
+    expect(getNodesSpy).not.toHaveBeenCalled();
+
+    // Build custom async provider supporting aggregateGrouped and traverseShortestPath
+    const base = new InMemoryStorageProvider();
+    const gA = await base.insertNode({ id: 'nA', labels: ['Person'], properties: { city: 'NYC', age: 30, score: 10 } });
+    void gA;
+    await base.insertNode({ id: 'nB', labels: ['Person', 'Vip'], properties: { city: 'NYC', age: 25, score: 30 } });
+    await base.insertNode({ id: 'nC', labels: ['Person'], properties: { city: 'SF', age: 40 } });
+    await base.insertEdge({ id: 'eAB', sourceId: 'nA', targetId: 'nB', type: 'KNOWS', properties: {} });
+    await base.insertEdge({ id: 'eBC', sourceId: 'nB', targetId: 'nC', type: 'KNOWS', properties: {} });
+
+    const aggregateGroupedSpy = jest.fn(
+      async (req: GroupedAggregateRequest): Promise<GroupedAggregateRow[] | null> => {
+        if (req.options?.filter?.properties?.[0]?.value === 'FORCE_FALLBACK') {
+          return null;
+        }
+        const nodes = await base.getNodes(req.options);
+        const groups = new Map<string, { groupValues: unknown[]; items: typeof nodes }>();
+        for (const n of nodes) {
+          const vals = req.groupByKeys.map((k) => n.properties[k]);
+          const key = JSON.stringify(vals.map((v) => (v === undefined ? '__UNDEF__' : v)));
+          let entry = groups.get(key);
+          if (!entry) {
+            entry = { groupValues: vals, items: [] };
+            groups.set(key, entry);
+          }
+          entry.items.push(n);
+        }
+        const out: GroupedAggregateRow[] = [];
+        for (const entry of groups.values()) {
+          const aggValues: Record<string, unknown> = {};
+          for (const spec of req.aggregates) {
+            const nums = spec.propertyKey
+              ? entry.items
+                  .map((it) => it.properties[spec.propertyKey!])
+                  .filter((v): v is number => typeof v === 'number' && !Number.isNaN(v))
+              : [];
+            if (spec.fn === 'COUNT') {
+              aggValues[spec.alias] = spec.propertyKey
+                ? entry.items.filter((it) => it.properties[spec.propertyKey!] != null).length
+                : entry.items.length;
+            } else if (spec.fn === 'SUM') {
+              aggValues[spec.alias] = nums.reduce((a, b) => a + b, 0);
+            } else if (spec.fn === 'AVG') {
+              aggValues[spec.alias] = nums.length === 0 ? 0 : nums.reduce((a, b) => a + b, 0) / nums.length;
+            } else if (spec.fn === 'MIN') {
+              aggValues[spec.alias] = nums.length === 0 ? null : Math.min(...nums);
+            } else if (spec.fn === 'MAX') {
+              aggValues[spec.alias] = nums.length === 0 ? null : Math.max(...nums);
+            }
+          }
+          out.push({ groupValues: entry.groupValues, aggValues });
+        }
+        return out;
+      },
+    );
+
+    const traverseShortestPathSpy = jest.fn(
+      async (sourceId: string, targetId: string, _edgeTypes?: readonly string[]) => {
+        if (sourceId === 'nB' && targetId === 'nC') return undefined; // Exercise fallback
+        if (sourceId === 'nA' && targetId === 'nC') return ['nA', 'nB', 'nC'];
+        return null;
+      },
+    );
+
+    const customStore: IStorageProvider = {
+      get indexEpoch() { return base.indexEpoch; },
+      clear: () => base.clear(),
+      insertNode: (n, tx) => base.insertNode(n, tx),
+      insertNodes: (n, tx) => base.insertNodes(n, tx),
+      deleteNode: (id, tx) => base.deleteNode(id, tx),
+      hasNode: (id, tx) => base.hasNode(id, tx),
+      getNode: (id, tx) => base.getNode(id, tx),
+      getNodesByIds: (ids, tx) => base.getNodesByIds(ids, tx),
+      getNodeCount: (opts) => base.getNodeCount(opts),
+      aggregateNodeProperty: (k, opts) => base.aggregateNodeProperty(k, opts),
+      getNodes: (opts) => base.getNodes(opts),
+      insertEdge: (e, tx) => base.insertEdge(e, tx),
+      insertEdges: (e, tx) => base.insertEdges(e, tx),
+      deleteEdge: (id, tx) => base.deleteEdge(id, tx),
+      hasEdge: (id, tx) => base.hasEdge(id, tx),
+      getEdge: (id, tx) => base.getEdge(id, tx),
+      getEdgeCount: (opts) => base.getEdgeCount(opts),
+      aggregateEdgeProperty: (k, opts) => base.aggregateEdgeProperty(k, opts),
+      getEdges: (opts) => base.getEdges(opts),
+      getEdgesBySource: (id, opts) => base.getEdgesBySource(id, opts),
+      getEdgesByTarget: (id, opts) => base.getEdgesByTarget(id, opts),
+      getEdgesBySources: async (ids: readonly string[], opts?: StorageQueryOptions) => {
+        const m = new Map<string, ReadonlyEdgeData[]>();
+        for (const id of ids) m.set(id, await base.getEdgesBySource(id, opts));
+        return m;
+      },
+      removeNodeLabels: (id, labels, tx) => base.removeNodeLabels(id, labels, tx),
+      patchProperties: (t, id, p, tx) => base.patchProperties(t, id, p, tx),
+      createIndex: (n, t, k, o) => base.createIndex(n, t, k, o),
+      hasIndex: (t, k, l) => base.hasIndex(t, k, l),
+      getIndex: (n) => base.getIndex(n),
+      deleteIndex: (n) => base.deleteIndex(n),
+      getIndexes: () => base.getIndexes(),
+      exportJSON: () => base.exportJSON(),
+      importJSON: (d) => base.importJSON(d),
+      supportsTransactions: () => base.supportsTransactions(),
+      beginTransaction: () => base.beginTransaction(),
+      commitTransaction: (h) => base.commitTransaction(h),
+      rollbackTransaction: (h) => base.rollbackTransaction(h),
+      aggregateGrouped: aggregateGroupedSpy,
+      traverseShortestPath: traverseShortestPathSpy,
+    };
+
+    const customGraph = new Graph(customStore);
+    const baseGetNodesSpy = jest.spyOn(base, 'getNodes');
+
+    const grouped = await customGraph.query(`
+      MATCH (p:Person)
+      RETURN p.city AS city, count(p) AS cnt, count(p.score) AS scoreCnt,
+             sum(p.score) AS total, avg(p.score) AS mean, min(p.score) AS mn, max(p.score) AS mx
+      ORDER BY city ASC
+    `);
+    expect(grouped.rows).toEqual([
+      { city: 'NYC', cnt: 2, scoreCnt: 2, total: 40, mean: 20, mn: 10, mx: 30 },
+      { city: 'SF', cnt: 1, scoreCnt: 0, total: 0, mean: 0, mn: null, mx: null },
+    ]);
+    expect(aggregateGroupedSpy).toHaveBeenCalledTimes(1);
+
+    // Filtered empty ungrouped aggregate returns 1 openCypher default row
+    const emptyUngrouped = await customGraph.query(`
+      MATCH (p:Person)
+      WHERE p.age > 999
+      RETURN sum(p.score) AS s, avg(p.score) AS a, min(p.score) AS mn, max(p.score) AS mx
+    `);
+    expect(emptyUngrouped.rows).toEqual([{ s: 0, a: 0, mn: null, mx: null }]);
+
+    // Filtered empty grouped aggregate returns 0 rows
+    const emptyGrouped = await customGraph.query(`
+      MATCH (p:Person)
+      WHERE p.age > 999
+      RETURN p.city AS city, count(p) AS c
+    `);
+    expect(emptyGrouped.rows).toEqual([]);
+
+    // Returns null -> gracefully falls back to base.getNodes
+    baseGetNodesSpy.mockClear();
+    const fallbackRes = await customGraph.query(`
+      MATCH (p:Person)
+      WHERE p.city = 'FORCE_FALLBACK'
+      RETURN p.city AS city, sum(p.score) AS s
+    `);
+    expect(fallbackRes.rows).toEqual([]);
+    expect(baseGetNodesSpy).toHaveBeenCalled();
+
+    // Shortest path pushdown + undefined fallback + nodeTypes label filtering
+    expect(await customGraph.traverse('nA', 'nC', { method: 'bfs' })).toEqual([['nA', 'nB', 'nC']]);
+    expect(traverseShortestPathSpy).toHaveBeenCalledTimes(1);
+
+    expect(await customGraph.traverse('nB', 'nC', { method: 'bfs' })).toEqual([['nB', 'nC']]);
+    expect(traverseShortestPathSpy).toHaveBeenCalledTimes(2);
+
+    // nodeTypes restricts labels -> bypasses wildcard traverseShortestPath
+    expect(await customGraph.traverse('nA', 'nC', { method: 'bfs', nodeTypes: ['Vip'] })).toBeNull();
+    expect(traverseShortestPathSpy).toHaveBeenCalledTimes(2);
   });
 });

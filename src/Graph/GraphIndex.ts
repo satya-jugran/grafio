@@ -2,7 +2,6 @@ import { Node } from '../Node';
 import { Edge } from '../Edge';
 import {
   NodeAlreadyExistsError,
-  EdgeAlreadyExistsError,
   NodeNotFoundError,
   InvalidPropertyError,
   NodeHasEdgesError,
@@ -16,7 +15,7 @@ import {
   type ISyncGraphKernel,
   type StorageQueryOptions,
 } from '../storage/IStorageProvider';
-import type { AggregateResult, PropertyPatch } from '../types';
+import type { AggregateResult, PropertyPatch, ReadonlyEdgeData } from '../types';
 import type { GraphQueryOptions } from './GraphQueryOptions';
 import { InMemoryStorageProvider } from '../storage/InMemoryStorageProvider';
 import { GraphTransaction } from './GraphTransaction';
@@ -272,18 +271,35 @@ export class GraphIndex {
     try {
       if (!(await this._store.hasNode(id, handle))) return { result: false };
 
-      const [outgoing, incoming] = await Promise.all([
-        this._store.getEdgesBySource(id, { transaction: handle }),
-        this._store.getEdgesByTarget(id, { transaction: handle }),
-      ]);
+      const [outgoing, incoming] = handle
+        ? [
+            await this._store.getEdgesBySource(id, { transaction: handle }),
+            await this._store.getEdgesByTarget(id, { transaction: handle }),
+          ]
+        : await Promise.all([
+            this._store.getEdgesBySource(id, { transaction: handle }),
+            this._store.getEdgesByTarget(id, { transaction: handle }),
+          ]);
+
+      // Deduplicate self-loops (sourceId === targetId) so cascade delete and incident counts stay exact.
+      const uniqueEdges = new Map<string, (typeof outgoing)[number]>();
+      for (const edge of outgoing) uniqueEdges.set(edge.id, edge);
+      for (const edge of incoming) uniqueEdges.set(edge.id, edge);
 
       if (cascade) {
-        for (const edge of [...outgoing, ...incoming]) {
-          await this._store.deleteEdge(edge.id, handle);
+        const edgeIds = Array.from(uniqueEdges.keys());
+        if (edgeIds.length > 0) {
+          if (this._store.deleteEdges) {
+            await this._store.deleteEdges(edgeIds, handle);
+          } else {
+            for (const edgeId of edgeIds) {
+              await this._store.deleteEdge(edgeId, handle);
+            }
+          }
         }
-        cascadeDeletedEdgesCount = outgoing.length + incoming.length;
+        cascadeDeletedEdgesCount = edgeIds.length;
       } else {
-        const incidentCount = outgoing.length + incoming.length;
+        const incidentCount = uniqueEdges.size;
         if (incidentCount > 0) {
           throw new NodeHasEdgesError(id, incidentCount);
         }
@@ -329,12 +345,24 @@ export class GraphIndex {
     const now = Date.now();
     const edge = new Edge(sourceId, targetId, type, properties, id, now, now);
     try {
-      const sourceExists = await this._store.hasNode(sourceId, handle);
-      const targetExists = await this._store.hasNode(targetId, handle);
+      let sourceExists: boolean;
+      let targetExists: boolean;
+      if (sourceId === targetId) {
+        sourceExists = await this._store.hasNode(sourceId, handle);
+        targetExists = sourceExists;
+      } else if (handle) {
+        sourceExists = await this._store.hasNode(sourceId, handle);
+        targetExists = await this._store.hasNode(targetId, handle);
+      } else {
+        [sourceExists, targetExists] = await Promise.all([
+          this._store.hasNode(sourceId),
+          this._store.hasNode(targetId),
+        ]);
+      }
       if (!sourceExists) throw new NodeNotFoundError(sourceId);
       if (!targetExists) throw new NodeNotFoundError(targetId);
 
-      if (await this._store.hasEdge(edge.id, handle)) throw new EdgeAlreadyExistsError(edge.id);
+      // Rely on storage insertEdge uniqueness enforcement to save 1 redundant hasEdge RTT.
       await this._store.insertEdge(edge.toJSON(), handle);
     } catch (error) {
       transaction?.markFailed();
@@ -435,17 +463,7 @@ export class GraphIndex {
     }
     if (!(await this._store.hasNode(sourceId, handle))) throw new NodeNotFoundError(sourceId);
     const data = await this._store.getEdgesBySource(sourceId, this._toStorageOptions(options));
-    return data.map((d) =>
-      Edge._fromFrozen(
-        d.id,
-        d.sourceId,
-        d.targetId,
-        d.type,
-        d.properties,
-        d.createdOn ?? Date.now(),
-        d.updatedOn ?? Date.now(),
-      ),
-    );
+    return data.map((d) => this._toEdge(d));
   }
 
   async getEdgesTo(targetId: string, options?: GraphQueryOptions): Promise<Edge[]> {
@@ -461,16 +479,95 @@ export class GraphIndex {
     }
     if (!(await this._store.hasNode(targetId, handle))) throw new NodeNotFoundError(targetId);
     const data = await this._store.getEdgesByTarget(targetId, this._toStorageOptions(options));
-    return data.map((d) =>
-      Edge._fromFrozen(
-        d.id,
-        d.sourceId,
-        d.targetId,
-        d.type,
-        d.properties,
-        d.createdOn ?? Date.now(),
-        d.updatedOn ?? Date.now(),
-      ),
+    return data.map((d) => this._toEdge(d));
+  }
+
+  /** @internal Skips endpoint hasNode validation for callers holding an already-bound Node. */
+  async _getAdjacentEdges(
+    direction: 'out' | 'in',
+    nodeId: string,
+    options?: GraphQueryOptions,
+  ): Promise<Edge[]> {
+    const storageOpts = this._toStorageOptions(options);
+    if (this._kernel) {
+      return direction === 'out'
+        ? this._kernel.getEdgesBySourceSync(nodeId, storageOpts)
+        : this._kernel.getEdgesByTargetSync(nodeId, storageOpts);
+    }
+    const data = direction === 'out'
+      ? await this._store.getEdgesBySource(nodeId, storageOpts)
+      : await this._store.getEdgesByTarget(nodeId, storageOpts);
+    return data.map((d) => this._toEdge(d));
+  }
+
+  /** @internal Batches adjacency edge fetches across multiple node IDs in one storage round-trip when supported. */
+  async _getAdjacentEdgesBatch(
+    direction: 'out' | 'in',
+    nodeIds: readonly string[],
+    options?: GraphQueryOptions,
+  ): Promise<Map<string, Edge[]>> {
+    const uniqueIds = Array.from(new Set(nodeIds));
+    const result = new Map<string, Edge[]>();
+    if (uniqueIds.length === 0) return result;
+
+    const storageOpts = this._toStorageOptions(options);
+    if (this._kernel) {
+      for (const id of uniqueIds) {
+        result.set(
+          id,
+          direction === 'out'
+            ? this._kernel.getEdgesBySourceSync(id, storageOpts)
+            : this._kernel.getEdgesByTargetSync(id, storageOpts),
+        );
+      }
+      return result;
+    }
+
+    if (direction === 'out' && this._store.getEdgesBySources) {
+      const map = await this._store.getEdgesBySources(uniqueIds, storageOpts);
+      for (const id of uniqueIds) {
+        result.set(id, (map.get(id) ?? []).map((d) => this._toEdge(d)));
+      }
+      return result;
+    }
+    if (direction === 'in' && this._store.getEdgesByTargets) {
+      const map = await this._store.getEdgesByTargets(uniqueIds, storageOpts);
+      for (const id of uniqueIds) {
+        result.set(id, (map.get(id) ?? []).map((d) => this._toEdge(d)));
+      }
+      return result;
+    }
+
+    if (storageOpts?.transaction) {
+      for (const id of uniqueIds) {
+        const data = direction === 'out'
+          ? await this._store.getEdgesBySource(id, storageOpts)
+          : await this._store.getEdgesByTarget(id, storageOpts);
+        result.set(id, data.map((d) => this._toEdge(d)));
+      }
+      return result;
+    }
+
+    const entries = await Promise.all(
+      uniqueIds.map(async (id): Promise<[string, Edge[]]> => {
+        const data = direction === 'out'
+          ? await this._store.getEdgesBySource(id, storageOpts)
+          : await this._store.getEdgesByTarget(id, storageOpts);
+        return [id, data.map((d) => this._toEdge(d))];
+      }),
+    );
+    return new Map(entries);
+  }
+
+  private _toEdge(d: ReadonlyEdgeData): Edge {
+    return Edge._fromFrozen(
+      d.id,
+      d.sourceId,
+      d.targetId,
+      d.type,
+      d.properties,
+      d.createdOn ?? Date.now(),
+      d.updatedOn ?? Date.now(),
     );
   }
 

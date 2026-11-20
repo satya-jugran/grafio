@@ -3,7 +3,7 @@ import type { NodeData, EdgeData } from '../../src/types';
 import { CachedStorageProvider } from '../../src/storage/CachedStorageProvider';
 import { CacheManager } from '../../src/storage/cache/CacheManager';
 import { CacheConfig } from '../../src/storage/cache/CacheConfig';
-import { ITransactionHandle } from '../../src/storage/IStorageProvider';
+import { IStorageProvider, ITransactionHandle } from '../../src/storage/IStorageProvider';
 import { InMemoryStorageProvider } from '../../src';
 import { Graph } from '../../src/Graph';
 
@@ -1091,6 +1091,143 @@ describe('CachedStorageProvider', () => {
       expect((await graph.getNode('n1'))?.properties.v).toBe(1);
       expect((await cached.getEdgesBySource('n1')).map((e) => e.id)).toEqual(['e1']);
       await cm.invalidateAll();
+    });
+  });
+
+  describe('Batch and pushdown capabilities', () => {
+    it('batches getEdgesBySources and getEdgesByTargets across cache hits and misses', async () => {
+      const base = new InMemoryStorageProvider();
+      await base.insertNode({ id: 'n1', labels: ['N'], properties: {} });
+      await base.insertNode({ id: 'n2', labels: ['N'], properties: {} });
+      await base.insertNode({ id: 'n3', labels: ['N'], properties: {} });
+      await base.insertEdge({ id: 'e1', sourceId: 'n1', targetId: 'n2', type: 'KNOWS', properties: { w: 2 } });
+      await base.insertEdge({ id: 'e2', sourceId: 'n1', targetId: 'n3', type: 'LIKES', properties: { w: 1 } });
+      await base.insertEdge({ id: 'e3', sourceId: 'n2', targetId: 'n3', type: 'KNOWS', properties: { w: 5 } });
+
+      const getBySourcesSpy = jest.fn(async (nodeIds: readonly string[], options?: any) => {
+        const out = new Map<string, EdgeData[]>();
+        for (const id of nodeIds) {
+          out.set(id, (await base.getEdgesBySource(id, options)) as EdgeData[]);
+        }
+        return out;
+      });
+      const getByTargetsSpy = jest.fn(async (nodeIds: readonly string[], options?: any) => {
+        const out = new Map<string, EdgeData[]>();
+        for (const id of nodeIds) {
+          out.set(id, (await base.getEdgesByTarget(id, options)) as EdgeData[]);
+        }
+        return out;
+      });
+
+      const underlying = Object.assign(Object.create(Object.getPrototypeOf(base)), base, {
+        getEdgesBySources: getBySourcesSpy,
+        getEdgesByTargets: getByTargetsSpy,
+      }) as IStorageProvider;
+
+      const cm = new CacheManager(defaultConfig);
+      const cached = new CachedStorageProvider(underlying, 'batch-test', cm, defaultConfig);
+
+      expect((await cached.getEdgesBySources([])).size).toBe(0);
+
+      // Warm n1 only; n2 misses and triggers a single batch fetch for ['n2']
+      await cached.getEdgesBySource('n1');
+      const srcMap = await cached.getEdgesBySources(['n1', 'n2', 'n1']);
+      expect(srcMap.get('n1')?.map((e) => e.id).sort()).toEqual(['e1', 'e2']);
+      expect(srcMap.get('n2')?.map((e) => e.id)).toEqual(['e3']);
+      expect(getBySourcesSpy).toHaveBeenCalledTimes(1);
+      expect(getBySourcesSpy.mock.calls[0]?.[0]).toEqual(['n2']);
+
+      // Filtered/sorted cached read hits memory without hitting underlying again
+      const filtered = await cached.getEdgesBySources(['n1'], {
+        filter: { types: ['KNOWS', 'LIKES'] },
+        orderBy: { field: 'w', direction: 'asc' },
+        limit: 1,
+      });
+      expect(filtered.get('n1')?.map((e) => e.id)).toEqual(['e2']);
+      expect(getBySourcesSpy).toHaveBeenCalledTimes(1);
+
+      // Warm n2 target; n3 misses
+      await cached.getEdgesByTarget('n2');
+      const tgtMap = await cached.getEdgesByTargets(['n2', 'n3']);
+      expect(tgtMap.get('n2')?.map((e) => e.id)).toEqual(['e1']);
+      expect(tgtMap.get('n3')?.map((e) => e.id).sort()).toEqual(['e2', 'e3']);
+      expect(getByTargetsSpy).toHaveBeenCalledTimes(1);
+      expect(getByTargetsSpy.mock.calls[0]?.[0]).toEqual(['n3']);
+
+      // Transaction bypass routes straight to underlying batch method
+      const txn = await cached.beginTransaction();
+      await cached.getEdgesBySources(['n1'], { transaction: txn });
+      expect(getBySourcesSpy).toHaveBeenCalledTimes(2);
+      await cached.rollbackTransaction(txn);
+
+      await cm.invalidateAll();
+    });
+
+    it('falls back to single adjacency queries and handles deleteEdges, aggregateGrouped, and traverseShortestPath', async () => {
+      await provider.insertNode({ id: 'n1', labels: ['N'], properties: {} });
+      await provider.insertNode({ id: 'n2', labels: ['N'], properties: {} });
+      await provider.insertEdge({ id: 'e1', sourceId: 'n1', targetId: 'n2', type: 'T', properties: {} });
+      await provider.insertEdge({ id: 'e2', sourceId: 'n2', targetId: 'n1', type: 'T', properties: {} });
+
+      // InMemoryStorageProvider lacks optional Tier 2 methods
+      const srcFallback = await provider.getEdgesBySources(['n1', 'n2']);
+      const tgtFallback = await provider.getEdgesByTargets(['n1', 'n2']);
+      expect(srcFallback.get('n1')?.map((e) => e.id)).toEqual(['e1']);
+      expect(tgtFallback.get('n1')?.map((e) => e.id)).toEqual(['e2']);
+      expect(
+        await provider.aggregateGrouped({
+          target: 'node',
+          groupByKeys: ['city'],
+          aggregates: [{ alias: 'c', fn: 'COUNT' }],
+        }),
+      ).toBeNull();
+      expect(await provider.traverseShortestPath('n1', 'n2')).toBeUndefined();
+
+      // deleteEdges invalidates cache + adjacency index cleanly (and skips invalidation inside txn)
+      await provider.deleteEdges([]);
+      const tx = await provider.beginTransaction();
+      await provider.deleteEdges(['e1'], tx);
+      expect(await cacheManager.getEdge('graph-test', 'e1')).toBeDefined();
+      await provider.rollbackTransaction(tx);
+
+      await provider.deleteEdges(['e1', 'e2']);
+      expect(await mockProvider.hasEdge('e1')).toBe(false);
+      expect(await mockProvider.hasEdge('e2')).toBe(false);
+      expect(await cacheManager.getEdgeIdsByAdjacencyIndex('graph-test', 'source', 'n1')).not.toContain('e1');
+      expect(await cacheManager.getEdgeIdsByAdjacencyIndex('graph-test', 'target', 'n1')).not.toContain('e2');
+
+      // Delegates deleteEdges, aggregateGrouped, traverseShortestPath when underlying implements them
+      const deleteEdgesSpy = jest.fn(async (ids: readonly string[]) => {
+        for (const id of ids) await mockProvider.deleteEdge(id);
+      });
+      const aggSpy = jest.fn(async () => [{ groupValues: ['NYC'], aggValues: { c: 3 } }]);
+      const travSpy = jest.fn(async () => ['n1', 'n2']);
+      const delegatingUnderlying: IStorageProvider = Object.assign(
+        Object.create(Object.getPrototypeOf(mockProvider)),
+        mockProvider,
+        {
+          deleteEdges: deleteEdgesSpy,
+          aggregateGrouped: aggSpy,
+          traverseShortestPath: travSpy,
+        },
+      );
+      const delegating = new CachedStorageProvider(
+        delegatingUnderlying,
+        'delegate-test',
+        cacheManager,
+        defaultConfig,
+      );
+      await delegating.insertEdge({ id: 'e3', sourceId: 'n1', targetId: 'n2', type: 'T', properties: {} });
+      await delegating.deleteEdges(['e3']);
+      expect(deleteEdgesSpy).toHaveBeenCalledWith(['e3'], undefined);
+      expect(
+        await delegating.aggregateGrouped({
+          target: 'node',
+          groupByKeys: ['city'],
+          aggregates: [{ alias: 'c', fn: 'COUNT' }],
+        }),
+      ).toEqual([{ groupValues: ['NYC'], aggValues: { c: 3 } }]);
+      expect(await delegating.traverseShortestPath('n1', 'n2', ['T'])).toEqual(['n1', 'n2']);
     });
   });
 });

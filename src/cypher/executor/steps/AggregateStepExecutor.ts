@@ -12,12 +12,13 @@
 
 import { Graph } from '../../../Graph';
 import { GraphTransaction } from '../../../Graph/GraphTransaction';
-import type { ISyncGraphKernel } from '../../../storage/IStorageProvider';
+import type { GroupedAggregateSpec, ISyncGraphKernel } from '../../../storage/IStorageProvider';
 import {
   AggregateStep,
   AggregateSpec,
   FilterStep,
   NodeScanStep,
+  PropertyFilter,
 } from '../../plan/QueryPlan';
 import type { GraphQueryOptions } from '../../../Graph/GraphQueryOptions';
 import { Expression } from '../../ast/AstNode';
@@ -87,6 +88,130 @@ export class AggregateStepExecutor {
     return this._executeAggregateInProcess(step, rows, params, meta, kernel);
   }
 
+  private _buildScanFilter(
+    scanStep: NodeScanStep,
+    params: Record<string, unknown>,
+  ): NonNullable<GraphQueryOptions['filter']> {
+    const filter: NonNullable<GraphQueryOptions['filter']> = {};
+    if (scanStep.types?.length) {
+      filter.types = scanStep.types;
+    } else if (scanStep.label) {
+      filter.types = [scanStep.label];
+    }
+    if (scanStep.propertyFilters?.length) {
+      filter.properties = scanStep.propertyFilters.map((f) =>
+        this._resolveFilterParams(f, params),
+      );
+    }
+    return filter;
+  }
+
+  /**
+   * Attempts fused async execution for `NodeScanStep -> AggregateStep` without
+   * streaming raw node documents across storage boundaries. Returns `null` when
+   * the plan requires regular step-by-step evaluation.
+   */
+  async tryExecuteFusedNodeAggregateAsync(
+    scanStep: NodeScanStep,
+    aggStep: AggregateStep,
+    params: Record<string, unknown>,
+    meta: CompiledPlanMeta,
+    transaction?: GraphTransaction,
+  ): Promise<Row[] | null> {
+    if (aggStep.sourceEntity === 'edge') return null;
+    if (aggStep.sourceVariable && aggStep.sourceVariable !== scanStep.variable) return null;
+
+    const filter = this._buildScanFilter(scanStep, params);
+    const storageFilter = Object.keys(filter).length > 0 ? filter : undefined;
+
+    // Pillar 3: Filtered/unfiltered pure COUNT(*) / COUNT(scanVar)
+    if (
+      aggStep.groupBy.length === 0 &&
+      aggStep.aggregates.length > 0 &&
+      aggStep.aggregates.every(
+        (spec) =>
+          spec.function === 'COUNT' &&
+          !spec.distinct &&
+          ((spec.expression.kind === 'Literal' && spec.expression.value === '*') ||
+            (spec.expression.kind === 'Identifier' && spec.expression.name === scanStep.variable)),
+      )
+    ) {
+      const nodeCount = await this._graph.getNodeCount(
+        storageFilter || transaction ? { filter: storageFilter, transaction } : undefined,
+      );
+      const resultRow = meta.slotTable.createEmptyRow();
+      for (const spec of aggStep.aggregates) {
+        resultRow[meta.slotTable.getOrAdd(spec.alias)] = nodeCount;
+      }
+      return [resultRow];
+    }
+
+    // Pillar 4: Storage-level grouped/filtered multi-aggregate pushdown
+    const store = this._graph._getStore();
+    if (typeof store.aggregateGrouped !== 'function') return null;
+
+    const groupByKeys: string[] = [];
+    for (const g of aggStep.groupBy) {
+      const propKey = this._extractPropertyKey(g, scanStep.variable);
+      if (propKey === null) return null;
+      groupByKeys.push(propKey);
+    }
+
+    const aggregates: GroupedAggregateSpec[] = [];
+    for (const spec of aggStep.aggregates) {
+      if (spec.function === 'COLLECT' || spec.distinct) return null;
+      if (spec.function === 'COUNT') {
+        const isEntityOrStar =
+          (spec.expression.kind === 'Literal' && spec.expression.value === '*') ||
+          (spec.expression.kind === 'Identifier' && spec.expression.name === scanStep.variable);
+        if (isEntityOrStar) {
+          aggregates.push({ alias: spec.alias, fn: 'COUNT' });
+          continue;
+        }
+      }
+      const propKey = this._extractPropertyKey(spec.expression, scanStep.variable);
+      if (propKey === null) return null;
+      aggregates.push({
+        alias: spec.alias,
+        fn: spec.function,
+        propertyKey: propKey,
+      });
+    }
+
+    const groupedRows = await store.aggregateGrouped({
+      target: 'node',
+      groupByKeys,
+      aggregates,
+      options: storageFilter || transaction
+        ? { filter: storageFilter, transaction: transaction?._getHandle() }
+        : undefined,
+    });
+    if (groupedRows === null) return null;
+
+    const aggSlots = aggStep.aggregates.map((spec) => meta.slotTable.getOrAdd(spec.alias));
+
+    if (groupByKeys.length === 0 && groupedRows.length === 0) {
+      const emptyRow = meta.slotTable.createEmptyRow();
+      for (let a = 0; a < aggSlots.length; a++) {
+        emptyRow[aggSlots[a]!] = this._extractAggField({ count: 0 }, aggStep.aggregates[a]!.function);
+      }
+      return [emptyRow];
+    }
+
+    const groupSlots = aggStep.groupByAliases.map((a) => meta.slotTable.getOrAdd(a));
+    return groupedRows.map((gRow) => {
+      const outRow = meta.slotTable.createEmptyRow();
+      for (let g = 0; g < groupSlots.length; g++) {
+        outRow[groupSlots[g]!] = gRow.groupValues[g];
+      }
+      for (let a = 0; a < aggSlots.length; a++) {
+        const spec = aggStep.aggregates[a]!;
+        outRow[aggSlots[a]!] = gRow.aggValues[spec.alias];
+      }
+      return outRow;
+    });
+  }
+
   /**
    * Fused single-pass columnar execution for `NodeScanStep -> FilterStep? -> AggregateStep`
    * on synchronous in-memory graphs with no active transactions.
@@ -100,17 +225,7 @@ export class AggregateStepExecutor {
     params: Record<string, unknown>,
     meta: CompiledPlanMeta,
   ): Row[] {
-    const filter: NonNullable<GraphQueryOptions['filter']> = {};
-    if (scanStep.types?.length) {
-      filter.types = scanStep.types;
-    } else if (scanStep.label) {
-      filter.types = [scanStep.label];
-    }
-    if (scanStep.propertyFilters?.length) {
-      filter.properties = scanStep.propertyFilters.map((f) =>
-        this._resolveFilterParams(f, params),
-      );
-    }
+    const filter = this._buildScanFilter(scanStep, params);
 
     const slots = kernel.queryNodeSlotsSync(
       Object.keys(filter).length > 0 ? { filter } : undefined,
@@ -180,10 +295,10 @@ export class AggregateStepExecutor {
   }
 
   private _resolveFilterParams(
-    f: import('../../plan/QueryPlan').PropertyFilter,
+    f: PropertyFilter,
     params: Record<string, unknown>,
-  ): import('../../plan/QueryPlan').PropertyFilter {
-    const resolved: import('../../plan/QueryPlan').PropertyFilter = {};
+  ): PropertyFilter {
+    const resolved: PropertyFilter = {};
     if (f.key !== undefined) resolved.key = f.key;
     if (f.op !== undefined) resolved.op = f.op;
     if (f.AND) resolved.AND = f.AND.map((c) => this._resolveFilterParams(c, params));

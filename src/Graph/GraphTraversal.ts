@@ -1,4 +1,5 @@
 import { isSyncGraphKernel, type IStorageProvider, type ISyncGraphKernel } from '../storage/IStorageProvider';
+import type { ReadonlyEdgeData } from '../types';
 import type { TraversalOptions } from './TraversalOptions';
 import { TraversalLimitExceededError } from '../errors';
 import { Uint32RingQueue } from '../cypher/executor/RingQueue';
@@ -17,6 +18,23 @@ export class GraphTraversal {
     this._kernel = isSyncGraphKernel(_store) ? _store : null;
   }
 
+  private async _getEdgesBySourcesBatch(
+    nodeIds: readonly string[],
+    edgeTypeFilter?: string[],
+  ): Promise<Map<string, ReadonlyEdgeData[]>> {
+    const queryOptions = edgeTypeFilter ? { filter: { types: edgeTypeFilter } } : undefined;
+    if (this._store.getEdgesBySources) {
+      return this._store.getEdgesBySources(nodeIds, queryOptions);
+    }
+    const entries = await Promise.all(
+      nodeIds.map(async (id): Promise<[string, ReadonlyEdgeData[]]> => [
+        id,
+        await this._store.getEdgesBySource(id, queryOptions),
+      ]),
+    );
+    return new Map(entries);
+  }
+
   private async _getTraversableChildren(
     nodeId: string,
     nodeTypes: string[] = ['*'],
@@ -28,12 +46,16 @@ export class GraphTraversal {
       nodeId,
       edgeTypeFilter ? { filter: { types: edgeTypeFilter } } : undefined,
     );
+    if (outEdges.length === 0) return [];
+
+    const uniqueTargetIds = Array.from(new Set(outEdges.map((edge) => edge.targetId)));
+    const targetNodeMap = await this._store.getNodesByIds(uniqueTargetIds);
+    const shouldFilterNode = nodeTypes.length > 0 && !nodeTypes.includes('*');
     const children: string[] = [];
 
     for (const edge of outEdges) {
-      const targetNode = await this._store.getNode(edge.targetId);
+      const targetNode = targetNodeMap.get(edge.targetId);
       if (!targetNode) continue;
-      const shouldFilterNode = nodeTypes.length > 0 && !nodeTypes.includes('*');
       if (shouldFilterNode && !targetNode.labels.some((l) => nodeTypes.includes(l))) {
         continue;
       }
@@ -108,12 +130,32 @@ export class GraphTraversal {
     return allPaths.length > 0 ? allPaths : null;
   }
 
+  private _reconstructPath(parent: Map<string, string | null>, targetId: string): string[] {
+    const path: string[] = [];
+    let node: string | null = targetId;
+    while (node !== null) {
+      path.push(node);
+      node = parent.get(node) ?? null;
+    }
+    return path.reverse();
+  }
+
   private async _traverseSingle(
     sourceId: string,
     targetId: string,
     options: TraversalOptions,
   ): Promise<string[] | null> {
     const { method = 'bfs', nodeTypes = ['*'], edgeTypes = ['*'] } = options;
+    const shouldFilterNode = nodeTypes.length > 0 && !nodeTypes.includes('*');
+    const edgeTypeFilter =
+      edgeTypes.length > 0 && !edgeTypes.includes('*') ? edgeTypes : undefined;
+
+    if (method === 'bfs' && !shouldFilterNode && typeof this._store.traverseShortestPath === 'function') {
+      const pushed = await this._store.traverseShortestPath(sourceId, targetId, edgeTypeFilter);
+      if (pushed !== undefined) {
+        return pushed;
+      }
+    }
 
     const [sourceExists, targetExists] = await Promise.all([
       this._store.hasNode(sourceId),
@@ -124,19 +166,56 @@ export class GraphTraversal {
 
     const visited = new Set<string>([sourceId]);
     const parent = new Map<string, string | null>([[sourceId, null]]);
-    const frontier: string[] = [sourceId];
-    let queueIndex = 0;
 
-    while (method === 'bfs' ? queueIndex < frontier.length : frontier.length > 0) {
-      const current = method === 'bfs' ? frontier[queueIndex++] : frontier.pop()!;
-      if (current === targetId) {
-        const path: string[] = [];
-        let node: string | null = targetId;
-        while (node !== null) {
-          path.push(node);
-          node = parent.get(node) ?? null;
+    if (method === 'bfs') {
+      let currentLevel: string[] = [sourceId];
+      while (currentLevel.length > 0) {
+        const edgesBySource = await this._getEdgesBySourcesBatch(currentLevel, edgeTypeFilter);
+        const nextUnvisitedIds: string[] = [];
+        const seenInNext = new Set<string>();
+        const candidateLinks: Array<{ parentId: string; childId: string }> = [];
+
+        for (const current of currentLevel) {
+          const edges = edgesBySource.get(current) ?? [];
+          for (const edge of edges) {
+            const childId = edge.targetId;
+            if (visited.has(childId)) continue;
+            candidateLinks.push({ parentId: current, childId });
+            if (!seenInNext.has(childId)) {
+              seenInNext.add(childId);
+              nextUnvisitedIds.push(childId);
+            }
+          }
         }
-        return path.reverse();
+
+        if (nextUnvisitedIds.length === 0) break;
+
+        const fetchedNodes = await this._store.getNodesByIds(nextUnvisitedIds);
+        const nextLevel: string[] = [];
+        for (const { parentId, childId } of candidateLinks) {
+          if (visited.has(childId)) continue;
+          const targetNode = fetchedNodes.get(childId);
+          if (!targetNode) continue;
+          if (shouldFilterNode && !targetNode.labels.some((l) => nodeTypes.includes(l))) {
+            continue;
+          }
+          visited.add(childId);
+          parent.set(childId, parentId);
+          if (childId === targetId) {
+            return this._reconstructPath(parent, targetId);
+          }
+          nextLevel.push(childId);
+        }
+        currentLevel = nextLevel;
+      }
+      return null;
+    }
+
+    const frontier: string[] = [sourceId];
+    while (frontier.length > 0) {
+      const current = frontier.pop()!;
+      if (current === targetId) {
+        return this._reconstructPath(parent, targetId);
       }
 
       const children = await this._getTraversableChildren(current, nodeTypes, edgeTypes);

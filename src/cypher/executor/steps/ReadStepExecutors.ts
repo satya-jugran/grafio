@@ -474,196 +474,371 @@ export class ReadStepExecutor {
     slotTable: VarSlotTable,
     transaction?: GraphTransaction,
   ): Promise<Row[]> {
+    if (rows.length === 0) return [];
+
     const srcSlotVar = slotTable.getOrAdd(step.source);
     const tgtSlotVar = slotTable.getOrAdd(step.target);
     const edgeSlotVar = step.edgeVar ? slotTable.getOrAdd(step.edgeVar) : -1;
     const pathSlotVar = step.pathVar ? slotTable.getOrAdd(step.pathVar) : -1;
 
-    const result: Row[] = [];
-    for (const row of rows) {
+    const boundRows: Array<{ row: Row; sourceNode: Node }> = [];
+    const nodeCache = new Map<string, Node>();
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
       const rawSrc = row[srcSlotVar];
       if (rawSrc === UNBOUND || !rawSrc) continue;
       const sourceNode = rawSrc as Node;
-
-      const expanded = step.strategy === 'single-hop'
-        ? await this._expandSingleHopAsync(
-            step,
-            row,
-            sourceNode,
-            tgtSlotVar,
-            edgeSlotVar,
-            pathSlotVar,
-            transaction,
-          )
-        : await this._expandMultiHopAsync(
-            step,
-            row,
-            sourceNode,
-            tgtSlotVar,
-            edgeSlotVar,
-            pathSlotVar,
-            transaction,
-          );
-      for (let i = 0; i < expanded.length; i++) {
-        result.push(expanded[i]);
-      }
+      boundRows.push({ row, sourceNode });
+      nodeCache.set(sourceNode.id, sourceNode);
     }
-    return result;
+    if (boundRows.length === 0) return [];
+
+    const edgeOptions: GraphQueryOptions = step.types.length > 0
+      ? { filter: { types: step.types }, transaction }
+      : { transaction };
+
+    const adjCache = new Map<string, readonly Edge[]>();
+    if (step.strategy === 'single-hop') {
+      return this._expandSingleHopBatchAsync(
+        step,
+        boundRows,
+        edgeOptions,
+        adjCache,
+        nodeCache,
+        tgtSlotVar,
+        edgeSlotVar,
+        pathSlotVar,
+        transaction,
+      );
+    }
+    return this._expandMultiHopBatchAsync(
+      step,
+      boundRows,
+      edgeOptions,
+      adjCache,
+      nodeCache,
+      tgtSlotVar,
+      edgeSlotVar,
+      pathSlotVar,
+      transaction,
+    );
   }
 
-  private async _expandSingleHopAsync(
+  private async _loadEdgesAndTargetsBatch(
+    nodeIds: readonly string[],
     step: EdgeExpandStep,
-    row: Row,
-    sourceNode: Node,
-    tgtSlotVar: number,
-    edgeSlotVar: number,
-    pathSlotVar: number,
+    edgeOptions: GraphQueryOptions,
+    adjCache: Map<string, readonly Edge[]>,
+    nodeCache: Map<string, Node>,
     transaction?: GraphTransaction,
-  ): Promise<Row[]> {
-    const filterArg = step.types.length > 0 ? { filter: { types: step.types } } : undefined;
-    const edges =
-      step.direction === 'out'
-        ? await this._graph.getEdgesFrom(sourceNode.id, { ...filterArg, transaction })
-        : await this._graph.getEdgesTo(sourceNode.id, { ...filterArg, transaction });
-
-    const targetIds = edges.map((e) => (step.direction === 'out' ? e.targetId : e.sourceId));
-    const uniqueIds = [...new Set(targetIds)];
-    const nodeMap = await this._graph.getNodesByIds(uniqueIds, transaction);
-
-    const existingRaw = row[tgtSlotVar];
-    const existingTarget = existingRaw !== UNBOUND ? (existingRaw as Node | undefined) : undefined;
-    const result: Row[] = [];
-
-    for (const edge of edges) {
-      const targetId = step.direction === 'out' ? edge.targetId : edge.sourceId;
-      const targetNode = nodeMap.get(targetId);
-      if (!targetNode) continue;
-
-      if (
-        step.targetTypes &&
-        step.targetTypes.length > 0 &&
-        !targetNode.labels.some((l) => step.targetTypes!.includes(l))
-      ) {
-        continue;
+  ): Promise<void> {
+    const missingSourceIds: string[] = [];
+    const seenSources = new Set<string>();
+    for (let i = 0; i < nodeIds.length; i++) {
+      const id = nodeIds[i]!;
+      if (!adjCache.has(id) && !seenSources.has(id)) {
+        seenSources.add(id);
+        missingSourceIds.push(id);
       }
-      if (existingTarget && existingTarget.id !== targetNode.id) continue;
+    }
+    if (missingSourceIds.length === 0) return;
 
-      const newRow = row.slice();
-      if (edgeSlotVar >= 0) newRow[edgeSlotVar] = edge;
-      newRow[tgtSlotVar] = targetNode;
+    if (missingSourceIds.length === 1) {
+      const edges = await this._graph._getAdjacentEdges(step.direction, missingSourceIds[0]!, edgeOptions);
+      adjCache.set(missingSourceIds[0]!, edges);
+    } else {
+      const edgesMap = await this._graph._getAdjacentEdgesBatch(step.direction, missingSourceIds, edgeOptions);
+      for (const id of missingSourceIds) {
+        adjCache.set(id, edgesMap.get(id) ?? []);
+      }
+    }
 
-      if (pathSlotVar >= 0) {
-        const existingPath = newRow[pathSlotVar];
-        if (existingPath !== UNBOUND && Array.isArray(existingPath) && existingPath.length > 0) {
-          newRow[pathSlotVar] = [...existingPath, edge, targetNode];
-        } else {
-          newRow[pathSlotVar] = [sourceNode, edge, targetNode];
+    const missingNodeIds: string[] = [];
+    const seenMissingNodes = new Set<string>();
+    for (const sourceId of missingSourceIds) {
+      const edges = adjCache.get(sourceId)!;
+      for (let i = 0; i < edges.length; i++) {
+        const edge = edges[i]!;
+        const targetId = step.direction === 'out' ? edge.targetId : edge.sourceId;
+        if (!nodeCache.has(targetId) && !seenMissingNodes.has(targetId)) {
+          seenMissingNodes.add(targetId);
+          missingNodeIds.push(targetId);
         }
       }
-      result.push(newRow);
     }
-    return result;
+
+    if (missingNodeIds.length > 0) {
+      const fetchedNodes = await this._graph.getNodesByIds(missingNodeIds, transaction);
+      for (const [id, node] of fetchedNodes) {
+        nodeCache.set(id, node);
+      }
+    }
   }
 
-  private async _expandMultiHopAsync(
+  private async _expandSingleHopBatchAsync(
     step: EdgeExpandStep,
-    row: Row,
-    sourceNode: Node,
+    boundRows: ReadonlyArray<{ row: Row; sourceNode: Node }>,
+    edgeOptions: GraphQueryOptions,
+    adjCache: Map<string, readonly Edge[]>,
+    nodeCache: Map<string, Node>,
     tgtSlotVar: number,
     edgeSlotVar: number,
     pathSlotVar: number,
     transaction?: GraphTransaction,
   ): Promise<Row[]> {
+    await this._loadEdgesAndTargetsBatch(
+      boundRows.map((b) => b.sourceNode.id),
+      step,
+      edgeOptions,
+      adjCache,
+      nodeCache,
+      transaction,
+    );
+
     const result: Row[] = [];
-    const needPath = pathSlotVar >= 0;
-    const isBFS = step.strategy !== 'multi-hop-dfs';
-    const queue = isBFS ? new RingQueue<FrontierNodeItem>() : undefined;
-    const stack: FrontierNodeItem[] = [];
+    for (let i = 0; i < boundRows.length; i++) {
+      const { row, sourceNode } = boundRows[i]!;
+      const edges = adjCache.get(sourceNode.id) ?? [];
+      const existingRaw = row[tgtSlotVar];
+      const existingTarget = existingRaw !== UNBOUND ? (existingRaw as Node | undefined) : undefined;
 
-    const initial: FrontierNodeItem = {
-      node: sourceNode,
-      hops: 0,
-      pathNodes: needPath ? [sourceNode] : undefined,
-      pathEdges: needPath ? [] : undefined,
-    };
-    if (queue) queue.push(initial);
-    else stack.push(initial);
-
-    const existingRaw = row[tgtSlotVar];
-    const existingTarget = existingRaw !== UNBOUND ? (existingRaw as Node | undefined) : undefined;
-
-    while ((queue ? queue.length : stack.length) > 0) {
-      const { node, hops, usedEdgeIds, pathNodes, pathEdges } = queue ? queue.shift()! : stack.pop()!;
-      if (hops >= step.maxHops) continue;
-
-      const filterArg = step.types.length > 0 ? { filter: { types: step.types } } : undefined;
-      const edges =
-        step.direction === 'out'
-          ? await this._graph.getEdgesFrom(node.id, { ...filterArg, transaction })
-          : await this._graph.getEdgesTo(node.id, { ...filterArg, transaction });
-
-      const targetIds = edges.map((e) => (step.direction === 'out' ? e.targetId : e.sourceId));
-      const uniqueIds = [...new Set(targetIds)];
-      const nodeMap = await this._graph.getNodesByIds(uniqueIds, transaction);
-
-      for (const edge of edges) {
-        // Per-path relationship uniqueness (openCypher trail semantics)
-        const edgeUsed = needPath
-          ? (pathEdges !== undefined && pathEdges.some((pe) => pe.id === edge.id))
-          : (usedEdgeIds !== undefined && usedEdgeIds.includes(edge.id));
-        if (edgeUsed) continue;
-
+      for (let eIdx = 0; eIdx < edges.length; eIdx++) {
+        const edge = edges[eIdx]!;
         const targetId = step.direction === 'out' ? edge.targetId : edge.sourceId;
-        const targetNode = nodeMap.get(targetId);
+        const targetNode = nodeCache.get(targetId);
         if (!targetNode) continue;
 
-        const newHops = hops + 1;
-        const matchesTargetLabels =
-          !step.targetTypes ||
-          step.targetTypes.length === 0 ||
-          targetNode.labels.some((l) => step.targetTypes!.includes(l));
-        const canEmit =
-          newHops >= step.minHops &&
-          newHops <= step.maxHops &&
-          matchesTargetLabels &&
-          (!existingTarget || existingTarget.id === targetNode.id);
-        const canExpand = newHops < step.maxHops;
+        if (
+          step.targetTypes &&
+          step.targetTypes.length > 0 &&
+          !targetNode.labels.some((l) => step.targetTypes!.includes(l))
+        ) {
+          continue;
+        }
+        if (existingTarget && existingTarget.id !== targetNode.id) continue;
 
-        const newPathNodes = needPath && (canEmit || canExpand) ? [...(pathNodes ?? []), targetNode] : undefined;
-        const newPathEdges = needPath && (canEmit || canExpand) ? [...(pathEdges ?? []), edge] : undefined;
+        const newRow = row.slice();
+        if (edgeSlotVar >= 0) newRow[edgeSlotVar] = edge;
+        newRow[tgtSlotVar] = targetNode;
 
-        if (canEmit) {
-          const newRow = row.slice();
-          if (edgeSlotVar >= 0) newRow[edgeSlotVar] = edge;
-          newRow[tgtSlotVar] = targetNode;
-          if (needPath && newPathNodes && newPathEdges) {
-            const pathValue: (Node | Edge)[] = [newPathNodes[0]];
-            for (let i = 0; i < newPathEdges.length; i++) {
-              pathValue.push(newPathEdges[i], newPathNodes[i + 1]);
-            }
-            newRow[pathSlotVar] = pathValue;
+        if (pathSlotVar >= 0) {
+          const existingPath = newRow[pathSlotVar];
+          if (existingPath !== UNBOUND && Array.isArray(existingPath) && existingPath.length > 0) {
+            newRow[pathSlotVar] = [...existingPath, edge, targetNode];
+          } else {
+            newRow[pathSlotVar] = [sourceNode, edge, targetNode];
           }
-          result.push(newRow);
         }
-
-        if (canExpand) {
-          const item: FrontierNodeItem = {
-            node: targetNode,
-            hops: newHops,
-            usedEdgeIds: needPath
-              ? undefined
-              : usedEdgeIds
-                ? [...usedEdgeIds, edge.id]
-                : [edge.id],
-            pathNodes: newPathNodes,
-            pathEdges: newPathEdges,
-          };
-          if (queue) queue.push(item);
-          else stack.push(item);
-        }
+        result.push(newRow);
       }
     }
     return result;
+  }
+
+  private async _expandMultiHopBatchAsync(
+    step: EdgeExpandStep,
+    boundRows: ReadonlyArray<{ row: Row; sourceNode: Node }>,
+    edgeOptions: GraphQueryOptions,
+    adjCache: Map<string, readonly Edge[]>,
+    nodeCache: Map<string, Node>,
+    tgtSlotVar: number,
+    edgeSlotVar: number,
+    pathSlotVar: number,
+    transaction?: GraphTransaction,
+  ): Promise<Row[]> {
+    if (step.maxHops <= 0) return [];
+    const needPath = pathSlotVar >= 0;
+
+    if (step.strategy === 'multi-hop-dfs') {
+      await this._loadEdgesAndTargetsBatch(
+        boundRows.map((b) => b.sourceNode.id),
+        step,
+        edgeOptions,
+        adjCache,
+        nodeCache,
+        transaction,
+      );
+      const out: Row[] = [];
+      for (let i = 0; i < boundRows.length; i++) {
+        const { row, sourceNode } = boundRows[i]!;
+        const existingRaw = row[tgtSlotVar];
+        const existingTarget = existingRaw !== UNBOUND ? (existingRaw as Node | undefined) : undefined;
+        const stack: FrontierNodeItem[] = [{
+          node: sourceNode,
+          hops: 0,
+          pathNodes: needPath ? [sourceNode] : undefined,
+          pathEdges: needPath ? [] : undefined,
+        }];
+        while (stack.length > 0) {
+          const item = stack.pop()!;
+          if (item.hops >= step.maxHops) continue;
+          await this._loadEdgesAndTargetsBatch(
+            [item.node.id],
+            step,
+            edgeOptions,
+            adjCache,
+            nodeCache,
+            transaction,
+          );
+          const nextItems: FrontierNodeItem[] = [];
+          this._expandMultiHopItem(
+            step,
+            row,
+            existingTarget,
+            item,
+            adjCache.get(item.node.id) ?? [],
+            nodeCache,
+            tgtSlotVar,
+            edgeSlotVar,
+            pathSlotVar,
+            out,
+            nextItems,
+          );
+          for (let j = 0; j < nextItems.length; j++) {
+            stack.push(nextItems[j]!);
+          }
+        }
+      }
+      return out;
+    }
+
+    // Level-synchronous batched BFS preserves per-row BFS output order while limiting RTTs to <= 2 * maxHops.
+    const resultsByRow: Row[][] = boundRows.map(() => []);
+    let currentLevel = boundRows.map((bound, rowIdx) => {
+      const existingRaw = bound.row[tgtSlotVar];
+      return {
+        rowIdx,
+        row: bound.row,
+        existingTarget: existingRaw !== UNBOUND ? (existingRaw as Node | undefined) : undefined,
+        item: {
+          node: bound.sourceNode,
+          hops: 0,
+          pathNodes: needPath ? [bound.sourceNode] : undefined,
+          pathEdges: needPath ? [] : undefined,
+        } as FrontierNodeItem,
+      };
+    });
+
+    for (let hop = 0; hop < step.maxHops && currentLevel.length > 0; hop++) {
+      await this._loadEdgesAndTargetsBatch(
+        currentLevel.map((entry) => entry.item.node.id),
+        step,
+        edgeOptions,
+        adjCache,
+        nodeCache,
+        transaction,
+      );
+
+      const nextLevel: typeof currentLevel = [];
+      for (let i = 0; i < currentLevel.length; i++) {
+        const entry = currentLevel[i]!;
+        const nextItems: FrontierNodeItem[] = [];
+        this._expandMultiHopItem(
+          step,
+          entry.row,
+          entry.existingTarget,
+          entry.item,
+          adjCache.get(entry.item.node.id) ?? [],
+          nodeCache,
+          tgtSlotVar,
+          edgeSlotVar,
+          pathSlotVar,
+          resultsByRow[entry.rowIdx]!,
+          nextItems,
+        );
+        for (let j = 0; j < nextItems.length; j++) {
+          nextLevel.push({
+            rowIdx: entry.rowIdx,
+            row: entry.row,
+            existingTarget: entry.existingTarget,
+            item: nextItems[j]!,
+          });
+        }
+      }
+      currentLevel = nextLevel;
+    }
+
+    const out: Row[] = [];
+    for (let i = 0; i < resultsByRow.length; i++) {
+      const rowMatches = resultsByRow[i]!;
+      for (let j = 0; j < rowMatches.length; j++) {
+        out.push(rowMatches[j]!);
+      }
+    }
+    return out;
+  }
+
+  private _expandMultiHopItem(
+    step: EdgeExpandStep,
+    row: Row,
+    existingTarget: Node | undefined,
+    item: FrontierNodeItem,
+    edges: readonly Edge[],
+    nodeCache: Map<string, Node>,
+    tgtSlotVar: number,
+    edgeSlotVar: number,
+    pathSlotVar: number,
+    emittedRows: Row[],
+    nextFrontier: FrontierNodeItem[],
+  ): void {
+    const needPath = pathSlotVar >= 0;
+    const { hops, usedEdgeIds, pathNodes, pathEdges } = item;
+
+    for (let i = 0; i < edges.length; i++) {
+      const edge = edges[i]!;
+      // Per-path relationship uniqueness (openCypher trail semantics)
+      const edgeUsed = needPath
+        ? (pathEdges !== undefined && pathEdges.some((pe) => pe.id === edge.id))
+        : (usedEdgeIds !== undefined && usedEdgeIds.includes(edge.id));
+      if (edgeUsed) continue;
+
+      const targetId = step.direction === 'out' ? edge.targetId : edge.sourceId;
+      const targetNode = nodeCache.get(targetId);
+      if (!targetNode) continue;
+
+      const newHops = hops + 1;
+      const matchesTargetLabels =
+        !step.targetTypes ||
+        step.targetTypes.length === 0 ||
+        targetNode.labels.some((l) => step.targetTypes!.includes(l));
+      const canEmit =
+        newHops >= step.minHops &&
+        newHops <= step.maxHops &&
+        matchesTargetLabels &&
+        (!existingTarget || existingTarget.id === targetNode.id);
+      const canExpand = newHops < step.maxHops;
+
+      const newPathNodes = needPath && (canEmit || canExpand) ? [...(pathNodes ?? []), targetNode] : undefined;
+      const newPathEdges = needPath && (canEmit || canExpand) ? [...(pathEdges ?? []), edge] : undefined;
+
+      if (canEmit) {
+        const newRow = row.slice();
+        if (edgeSlotVar >= 0) newRow[edgeSlotVar] = edge;
+        newRow[tgtSlotVar] = targetNode;
+        if (needPath && newPathNodes && newPathEdges) {
+          const pathValue: (Node | Edge)[] = [newPathNodes[0]!];
+          for (let p = 0; p < newPathEdges.length; p++) {
+            pathValue.push(newPathEdges[p]!, newPathNodes[p + 1]!);
+          }
+          newRow[pathSlotVar] = pathValue;
+        }
+        emittedRows.push(newRow);
+      }
+
+      if (canExpand) {
+        nextFrontier.push({
+          node: targetNode,
+          hops: newHops,
+          usedEdgeIds: needPath
+            ? undefined
+            : usedEdgeIds
+              ? [...usedEdgeIds, edge.id]
+              : [edge.id],
+          pathNodes: newPathNodes,
+          pathEdges: newPathEdges,
+        });
+      }
+    }
   }
 
   // ── Sync CSR + Delta EdgeExpand ──────────────────────────────────
