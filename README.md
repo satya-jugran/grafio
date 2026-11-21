@@ -1,5 +1,7 @@
 # Grafio
 
+![Grafio](docs/static/img/grafio-social-card.jpg)
+
 High-performance graph database with **native Cypher support** and **pluggable storage**.
 
 **Full documentation**: [https://satya-jugran.github.io/grafio](https://satya-jugran.github.io/grafio)
