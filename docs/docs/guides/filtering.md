@@ -57,6 +57,22 @@ WHERE NOT p.archived
 WHERE p.age > 18 AND (p.city = 'NYC' OR p.city = 'LA')
 ```
 
+## Label & Relationship-Type Predicates
+
+Test node labels and relationship types directly in `WHERE`, `RETURN`, `CASE`, or comprehensions (`:` = AND, `|` = OR):
+
+```cypher
+-- Disjunctive / negated node labels (pushed into NodeScanStep when possible)
+MATCH (n) WHERE n:Preference OR n:Invariant RETURN n
+MATCH (n) WHERE n:Preference|Invariant AND NOT n:Archived RETURN n
+
+-- Conjunctive multi-label check
+MATCH (n) WHERE n:Rule:Preference RETURN n
+
+-- Relationship type predicates
+MATCH (a)-[r]->(b) WHERE r:KNOWS|TEACHES AND NOT r:CONTAINS RETURN r
+```
+
 ## Creating Indexes
 
 For O(1) property lookups on large datasets:

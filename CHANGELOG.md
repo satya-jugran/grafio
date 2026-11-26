@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [8.2.0] - 2026-11-26
+
+### New Features
+
+- **Postfix Label & Relationship-Type Predicates (`LabelPredicateExpr`):** Added full expression-level support for `:Label` predicates (`n:Label`, `n:A|B`, `n:A:|B`, `n:A|:B`, `n:A:B`, `n:A|B:C`, `NOT n:Archived`, `n:Preference OR n:Invariant`, and relationship-type predicates like `r:CALLS|INSTANTIATES`) across `WHERE`, `RETURN`, `WITH`, `CASE`, and list/pattern comprehensions.
+- **Unified Postfix Expression Parsing (`Parser._parsePostfix`):** Extracted `.prop` property lookup and `:Label` predicate chaining into `_parsePostfix()` so postfix operators compose on any primary expression, with lookahead disambiguation for `|` inside comprehension `WHERE` clauses (`[x IN nodes(p) WHERE x:A|B | x.name]`).
+- **`NodeScanStep` Label Pushdown (`WhereDecomposer` / `PatternPlanner` / `JoinReorderer`):** Single-variable positive label predicates on untyped root `MATCH` node variables (`WHERE n:Person`, `WHERE n:A|B`, `WHERE n:Preference OR n:Invariant`) are pushed directly into `NodeScanStep.types` for O(k) label-index and 64-bit bitmask filtering with zero `FilterStep` overhead, while preserving conjunctive/negated/edge predicates in `FilterStep`.
+- **Specialized Closure Compilation (`ClosureCompiler`):** Compiled `LabelPredicateExpr` into zero-allocation closures supporting both `Node` (`node.labels`) and `Edge` (`edge.type`) entities, returning `false` for `null` / `undefined` / non-entity values.
+
 ## [8.1.0] - 2026-11-20
 
 ### Performance & Async Storage Capabilities

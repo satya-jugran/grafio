@@ -79,6 +79,17 @@ WHERE NOT p.archived
 WHERE (p.age > 18 AND p.city = 'NYC')
 ```
 
+### Label & Relationship-Type Predicates
+
+Filter nodes by label(s) or relationships by type(s) inside `WHERE`, `RETURN`, `CASE`, and comprehensions:
+
+```cypher
+MATCH (n) WHERE n:Preference OR n:Invariant RETURN n
+MATCH (n) WHERE n:Preference|Invariant AND NOT n:Archived RETURN n
+MATCH (n) WHERE n:Rule:Preference RETURN n
+MATCH ()-[r]->() WHERE r:KNOWS|TEACHES AND NOT r:CONTAINS RETURN r
+```
+
 ## RETURN
 
 Specify return columns.
