@@ -588,5 +588,24 @@ describe('PlanFormatter', () => {
         }
       }
     });
+
+    it('formats LabelPredicateExpr in json, text, and mermaid formats', () => {
+      const plan: QueryPlan = {
+        steps: [
+          {
+            kind: 'FilterStep',
+            predicate: {
+              kind: 'LabelPredicate',
+              expression: { kind: 'Identifier', name: 'n' },
+              labels: [['A', 'B'], ['C']],
+            },
+          },
+        ],
+      };
+
+      expect(formatter.format(plan, 'json')).toContain('"kind": "LabelPredicate"');
+      expect(formatter.format(plan, 'text')).toContain('n:A|B:C');
+      expect(formatter.format(plan, 'mermaid')).toContain('n:A|B:C');
+    });
   });
 });

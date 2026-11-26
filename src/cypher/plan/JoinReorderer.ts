@@ -41,19 +41,25 @@ export class JoinReorderer {
     varRegistry: Map<string, VarInfo>,
     perVar: Map<string, PropertyFilter[]>,
     idLookups: Map<string, unknown>,
+    perVarLabels?: Map<string, string[]>,
   ): Promise<MatchPattern[]> {
     const kernel = this._graph?._getSyncKernel();
     if (kernel) {
-      return this.reorderSync(patterns, varRegistry, perVar, idLookups);
+      return this.reorderSync(patterns, varRegistry, perVar, idLookups, perVarLabels);
     }
 
     // Compute selectivities for all root variables
     const selectivity = new Map<string, number>();
     for (const [name, info] of varRegistry) {
       if (info.isRoot) {
+        const pushedLabels = perVarLabels?.get(name);
+        const effectiveInfo =
+          info.labels.length === 0 && pushedLabels?.length
+            ? { ...info, labels: pushedLabels }
+            : info;
         selectivity.set(
           name,
-          await this._estimateSelectivity(info, perVar.get(name) ?? [], idLookups),
+          await this._estimateSelectivity(effectiveInfo, perVar.get(name) ?? [], idLookups),
         );
       }
     }
@@ -71,13 +77,19 @@ export class JoinReorderer {
     varRegistry: Map<string, VarInfo>,
     perVar: Map<string, PropertyFilter[]>,
     idLookups: Map<string, unknown>,
+    perVarLabels?: Map<string, string[]>,
   ): MatchPattern[] {
     const selectivity = new Map<string, number>();
     for (const [name, info] of varRegistry) {
       if (info.isRoot) {
+        const pushedLabels = perVarLabels?.get(name);
+        const effectiveInfo =
+          info.labels.length === 0 && pushedLabels?.length
+            ? { ...info, labels: pushedLabels }
+            : info;
         selectivity.set(
           name,
-          this._estimateSelectivitySync(info, perVar.get(name) ?? [], idLookups),
+          this._estimateSelectivitySync(effectiveInfo, perVar.get(name) ?? [], idLookups),
         );
       }
     }

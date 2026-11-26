@@ -49,6 +49,7 @@ import type { Graph } from '../Graph';
 interface PreparedMatchClause {
   varRegistry: Map<string, VarInfo>;
   perVar: Map<string, PropertyFilter[]>;
+  perVarLabels: Map<string, string[]>;
   crossVar: Expression[];
   idLookups: Map<string, unknown>;
   orderedPatterns: MatchPattern[];
@@ -186,19 +187,21 @@ export class Planner {
   ): Promise<void> {
     if (!out.has(matchClause)) {
       const varRegistry = this._whereDecomposer.collectVariables(matchClause.patterns);
-      const { perVar, crossVar } = matchClause.where
+      const { perVar, perVarLabels, crossVar } = matchClause.where
         ? this._whereDecomposer.decompose(matchClause.where.expression, varRegistry)
-        : { perVar: new Map(), crossVar: [] as Expression[] };
+        : { perVar: new Map(), perVarLabels: new Map(), crossVar: [] as Expression[] };
       const idLookups = this._reorderer.detectIdLookups(crossVar, varRegistry);
       const orderedPatterns = await this._reorderer.reorder(
         matchClause.patterns,
         varRegistry,
         perVar,
         idLookups,
+        perVarLabels,
       );
       out.set(matchClause, {
         varRegistry,
         perVar,
+        perVarLabels,
         crossVar,
         idLookups,
         orderedPatterns,
@@ -232,6 +235,9 @@ export class Planner {
         await this._collectExprMatchesAsync(expr.list, out);
         return;
       case 'IsNull':
+        await this._collectExprMatchesAsync(expr.expression, out);
+        return;
+      case 'LabelPredicate':
         await this._collectExprMatchesAsync(expr.expression, out);
         return;
       case 'List':
@@ -462,6 +468,16 @@ export class Planner {
         return { ...expr, expression: e1, list: e2 };
       }
       case 'IsNull': {
+        const e = this._extractSubqueriesSync(
+          expr.expression,
+          steps,
+          knownVars,
+          patternExprVars,
+          preparedMatches,
+        );
+        return { ...expr, expression: e };
+      }
+      case 'LabelPredicate': {
         const e = this._extractSubqueriesSync(
           expr.expression,
           steps,
@@ -1102,17 +1118,17 @@ export class Planner {
     const varRegistry =
       pre?.varRegistry ?? this._whereDecomposer.collectVariables(matchClause.patterns);
 
-    const { perVar, crossVar } = pre
-      ? { perVar: pre.perVar, crossVar: [...pre.crossVar] }
+    const { perVar, perVarLabels, crossVar } = pre
+      ? { perVar: pre.perVar, perVarLabels: pre.perVarLabels, crossVar: [...pre.crossVar] }
       : matchClause.where
         ? this._whereDecomposer.decompose(matchClause.where.expression, varRegistry)
-        : { perVar: new Map(), crossVar: [] as Expression[] };
+        : { perVar: new Map(), perVarLabels: new Map(), crossVar: [] as Expression[] };
 
     const idLookups = pre?.idLookups ?? this._reorderer.detectIdLookups(crossVar, varRegistry);
 
     const orderedPatterns =
       pre?.orderedPatterns ??
-      this._reorderer.reorderSync(matchClause.patterns, varRegistry, perVar, idLookups);
+      this._reorderer.reorderSync(matchClause.patterns, varRegistry, perVar, idLookups, perVarLabels);
 
     const targetSteps: PlanStep[] = matchClause.optional ? [] : steps;
 
@@ -1126,6 +1142,7 @@ export class Planner {
         idLookups,
         consumed,
         knownVars,
+        perVarLabels,
       );
     }
 

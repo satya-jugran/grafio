@@ -84,6 +84,7 @@ export class ProjectionPlanner {
         case 'PropertyAccess': return { ...e, object: rewrite(e.object) };
         case 'In': return { ...e, expression: rewrite(e.expression), list: rewrite(e.list) };
         case 'IsNull': return { ...e, expression: rewrite(e.expression) };
+        case 'LabelPredicate': return { ...e, expression: rewrite(e.expression) };
         case 'List': return { ...e, elements: e.elements.map(rewrite) };
         case 'Case': return { 
           ...e, 
@@ -152,6 +153,8 @@ export class ProjectionPlanner {
           this._hasAggregateFunction(expr.list)
         );
       case 'IsNull':
+        return this._hasAggregateFunction(expr.expression);
+      case 'LabelPredicate':
         return this._hasAggregateFunction(expr.expression);
       case 'FunctionCall':
         return expr.args.some((arg) => this._hasAggregateFunction(arg));
@@ -327,6 +330,8 @@ export class ProjectionPlanner {
         return this._extractAggregateFunctionCall(expr.operand);
       case 'PropertyAccess':
         return this._extractAggregateFunctionCall(expr.object);
+      case 'LabelPredicate':
+        return this._extractAggregateFunctionCall(expr.expression);
       case 'FunctionCall':
         for (const arg of expr.args) {
           const found = this._extractAggregateFunctionCall(arg);
@@ -410,6 +415,8 @@ export class ProjectionPlanner {
             list: rewrite(e.list),
           };
         case 'IsNull':
+          return { ...e, expression: rewrite(e.expression) };
+        case 'LabelPredicate':
           return { ...e, expression: rewrite(e.expression) };
         case 'List':
           return { ...e, elements: e.elements.map(rewrite) };

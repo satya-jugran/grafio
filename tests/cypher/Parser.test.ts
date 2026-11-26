@@ -853,4 +853,117 @@ describe('Parser', () => {
       expect(matchAt(ast, 0).where!.expression.kind).toBe('Binary');
     });
   });
+
+  // ── Postfix label / relationship-type predicates ───────────────
+  describe('postfix label predicates', () => {
+    it('parses WHERE n:Label', () => {
+      const ast = parse('MATCH (n) WHERE n:Person RETURN n');
+      const expr = matchAt(ast, 0).where!.expression as any;
+      expect(expr.kind).toBe('LabelPredicate');
+      expect(expr.expression).toEqual({ kind: 'Identifier', name: 'n' });
+      expect(expr.labels).toEqual([['Person']]);
+    });
+
+    it('parses WHERE n:A|B, n:A:|B, and n:A|:B as single OR group', () => {
+      for (const query of [
+        'MATCH (n) WHERE n:A|B RETURN n',
+        'MATCH (n) WHERE n:A:|B RETURN n',
+        'MATCH (n) WHERE n:A|:B RETURN n',
+      ]) {
+        const ast = parse(query);
+        const expr = matchAt(ast, 0).where!.expression as any;
+        expect(expr.kind).toBe('LabelPredicate');
+        expect(expr.labels).toEqual([['A', 'B']]);
+      }
+    });
+
+    it('parses WHERE n:A:B and mixed n:A|B:C as CNF groups', () => {
+      const andAst = parse('MATCH (n) WHERE n:A:B RETURN n');
+      expect((matchAt(andAst, 0).where!.expression as any).labels).toEqual([['A'], ['B']]);
+
+      const mixedAst = parse('MATCH (n) WHERE n:A|B:C RETURN n');
+      expect((matchAt(mixedAst, 0).where!.expression as any).labels).toEqual([['A', 'B'], ['C']]);
+    });
+
+    it('parses WHERE n:Preference OR n:Invariant, parenthesized, and NOT n:Archived', () => {
+      const orAst = parse('MATCH (n) WHERE (n:Preference OR n:Invariant) RETURN n');
+      const orExpr = matchAt(orAst, 0).where!.expression as any;
+      expect(orExpr.kind).toBe('Binary');
+      expect(orExpr.op).toBe('OR');
+      expect(orExpr.left.kind).toBe('LabelPredicate');
+      expect(orExpr.right.kind).toBe('LabelPredicate');
+
+      const notAst = parse('MATCH (n) WHERE NOT n:Archived RETURN n');
+      const notExpr = matchAt(notAst, 0).where!.expression as any;
+      expect(notExpr.kind).toBe('Unary');
+      expect(notExpr.op).toBe('NOT');
+      expect(notExpr.operand.kind).toBe('LabelPredicate');
+      expect(notExpr.operand.labels).toEqual([['Archived']]);
+    });
+
+    it('parses relationship type predicates WHERE r:CALLS|INSTANTIATES and NOT r:CONTAINS', () => {
+      const ast = parse('MATCH ()-[r]->() WHERE r:CALLS|INSTANTIATES AND NOT r:CONTAINS RETURN r');
+      const expr = matchAt(ast, 0).where!.expression as any;
+      expect(expr.kind).toBe('Binary');
+      expect(expr.op).toBe('AND');
+      expect(expr.left.kind).toBe('LabelPredicate');
+      expect(expr.left.labels).toEqual([['CALLS', 'INSTANTIATES']]);
+      expect(expr.right.kind).toBe('Unary');
+      expect(expr.right.operand.kind).toBe('LabelPredicate');
+      expect(expr.right.operand.labels).toEqual([['CONTAINS']]);
+    });
+
+    it('parses postfix :Label on parenthesized, property, and CASE expressions', () => {
+      const parenAst = parse('MATCH (a) WHERE (a):Person RETURN a');
+      expect((matchAt(parenAst, 0).where!.expression as any).kind).toBe('LabelPredicate');
+
+      const propAst = parse('RETURN map.node:Person AS ok');
+      const propExpr = propAst.return.items[0].expression as any;
+      expect(propExpr.kind).toBe('LabelPredicate');
+      expect(propExpr.expression.kind).toBe('PropertyAccess');
+
+      const caseAst = parse('MATCH (a), (b) WHERE (CASE WHEN true THEN a ELSE b END):Person RETURN a');
+      const caseExpr = matchAt(caseAst, 0).where!.expression as any;
+      expect(caseExpr.kind).toBe('LabelPredicate');
+      expect(caseExpr.expression.kind).toBe('Case');
+    });
+
+    it('disambiguates | inside list and pattern comprehension WHERE clauses', () => {
+      const singleLabelProj = parse('RETURN [x IN xs WHERE x:Person | x.name] AS names');
+      const lc1 = singleLabelProj.return.items[0].expression as any;
+      expect(lc1.kind).toBe('ListComprehension');
+      expect(lc1.where.kind).toBe('LabelPredicate');
+      expect(lc1.where.labels).toEqual([['Person']]);
+      expect(lc1.projection.kind).toBe('PropertyAccess');
+
+      const orLabelProj = parse('RETURN [x IN xs WHERE x:A|B | x.name] AS names');
+      const lc2 = orLabelProj.return.items[0].expression as any;
+      expect(lc2.where.kind).toBe('LabelPredicate');
+      expect(lc2.where.labels).toEqual([['A', 'B']]);
+      expect(lc2.projection.kind).toBe('PropertyAccess');
+
+      const parenOr = parse('RETURN [x IN xs WHERE (x:A|B)] AS items');
+      const lc3 = parenOr.return.items[0].expression as any;
+      expect(lc3.where.kind).toBe('LabelPredicate');
+      expect(lc3.where.labels).toEqual([['A', 'B']]);
+      expect(lc3.projection).toBeUndefined();
+
+      const patComp = parse('RETURN [(a)-[r]->(b) WHERE b:Person | b.name] AS names');
+      const pc = patComp.return.items[0].expression as any;
+      expect(pc.kind).toBe('PatternComprehension');
+      expect(pc.where.kind).toBe('LabelPredicate');
+      expect(pc.where.labels).toEqual([['Person']]);
+      expect(pc.projection.kind).toBe('PropertyAccess');
+    });
+
+    it('supports keyword-named labels and rejects malformed :Label chains', () => {
+      const kwAst = parse('MATCH (n) WHERE n:Index OR n:Order RETURN n');
+      const expr = matchAt(kwAst, 0).where!.expression as any;
+      expect(expr.left.labels).toEqual([['Index']]);
+      expect(expr.right.labels).toEqual([['Order']]);
+
+      expect(() => parse('MATCH (n) WHERE n: RETURN n')).toThrow(CypherSyntaxError);
+      expect(() => parse('MATCH (n) WHERE n:A| RETURN n')).toThrow(CypherSyntaxError);
+    });
+  });
 });

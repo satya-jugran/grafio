@@ -360,7 +360,8 @@ export type Expression =
   | PatternComprehensionExpr
   | PatternExpr
   | CaseExpr
-  | ListPredicateExpr;
+  | ListPredicateExpr
+  | LabelPredicateExpr;
 
 // -- Literals --
 
@@ -436,6 +437,19 @@ export interface IsNullExpr {
   expression: Expression;
   /** Whether this is `IS NOT NULL`. */
   not: boolean;
+}
+
+export interface LabelPredicateExpr {
+  kind: 'LabelPredicate';
+  /** The expression being tested for node label or edge relationship-type membership. */
+  expression: Expression;
+  /**
+   * Conjunctive list of disjunctive label/type groups (CNF: AND of ORs).
+   * - `n:Label` → `[['Label']]`
+   * - `n:A|B`   → `[['A', 'B']]`
+   * - `n:A:B`   → `[['A'], ['B']]`
+   */
+  labels: string[][];
 }
 
 export interface ExistsSubqueryExpr {

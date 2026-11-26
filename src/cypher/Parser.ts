@@ -35,7 +35,7 @@
  * |     6 | +, -                   | left          |
  * |     7 | *, /                   | left          |
  * |     8 | unary -                | prefix        |
- * |     9 | . (property access), function call | left |
+ * |     9 | . (property access), :Label, function call | left |
  * ```
  *
  * ### Error handling
@@ -87,6 +87,7 @@ import {
   PropertyAccessExpr,
   InExpr,
   IsNullExpr,
+  LabelPredicateExpr,
   ListExpr,
   FunctionCallExpr,
 } from './ast/AstNode';
@@ -148,6 +149,7 @@ const BINARY_PREC: Partial<Record<TokenKind, Prec>> = {
 export class Parser {
   private readonly _tokens: Token[];
   private _pos: number = 0;
+  private _inComprehensionWhere: boolean = false;
 
   constructor(tokens: Token[]) {
     this._tokens = tokens;
@@ -1141,7 +1143,119 @@ export class Parser {
       return { kind: 'Unary', op: '-', operand } as UnaryExpr;
     }
 
-    return this._parsePrimary();
+    return this._parsePostfix();
+  }
+
+  /**
+   * Parse postfix operators (`.prop` property access and `:Label` label/type predicates)
+   * on any primary expression.
+   */
+  private _parsePostfix(): Expression {
+    let expr = this._parsePrimary();
+
+    while (true) {
+      if (this._check(TokenKind.DOT)) {
+        this._advance();
+        const prop = this._consumeIdentifier("Expected property name after '.'").value;
+        expr = { kind: 'PropertyAccess', object: expr, property: prop };
+        continue;
+      }
+
+      if (this._check(TokenKind.COLON)) {
+        expr = this._parseLabelPredicate(expr);
+        continue;
+      }
+
+      break;
+    }
+
+    return expr;
+  }
+
+  /**
+   * Parse a postfix `:Label` / `:A|B` / `:A:B` / `:A:|B` / `:A|:B` label/type
+   * predicate chain into a CNF {@link LabelPredicateExpr}.
+   */
+  private _parseLabelPredicate(expression: Expression): LabelPredicateExpr {
+    this._consume(TokenKind.COLON, "Expected ':'");
+    const firstLabel = this._consumeIdentifier("Expected label name after ':'").value;
+    const groups: string[][] = [[firstLabel]];
+
+    while (true) {
+      if (this._check(TokenKind.COLON) && this._peek(1).kind === TokenKind.PIPE) {
+        this._advance();
+        this._advance();
+        groups[groups.length - 1].push(
+          this._consumeIdentifier("Expected label name after ':|'").value,
+        );
+        continue;
+      }
+
+      if (this._check(TokenKind.PIPE) && this._peek(1).kind === TokenKind.COLON) {
+        this._advance();
+        this._advance();
+        groups[groups.length - 1].push(
+          this._consumeIdentifier("Expected label name after '|:'").value,
+        );
+        continue;
+      }
+
+      if (this._check(TokenKind.PIPE)) {
+        if (this._inComprehensionWhere && !this._hasAnotherPipeBeforeClosingBracket()) {
+          break;
+        }
+        this._advance();
+        groups[groups.length - 1].push(
+          this._consumeIdentifier("Expected label name after '|'").value,
+        );
+        continue;
+      }
+
+      if (this._check(TokenKind.COLON)) {
+        this._advance();
+        groups.push([
+          this._consumeIdentifier("Expected label name after ':'").value,
+        ]);
+        continue;
+      }
+
+      break;
+    }
+
+    return { kind: 'LabelPredicate', expression, labels: groups };
+  }
+
+  /**
+   * Check whether there is another top-level `|` before the closing `]` of the
+   * enclosing list/pattern comprehension. Used to disambiguate `x:A|B | proj`
+   * from `x:A | proj` inside comprehension WHERE clauses.
+   */
+  private _hasAnotherPipeBeforeClosingBracket(): boolean {
+    let depth = 0;
+    for (let offset = 1; ; offset++) {
+      const tok = this._peek(offset);
+      switch (tok.kind) {
+        case TokenKind.EOF:
+          return false;
+        case TokenKind.LPAREN:
+        case TokenKind.LBRACKET:
+        case TokenKind.LBRACE:
+          depth++;
+          break;
+        case TokenKind.RPAREN:
+        case TokenKind.RBRACE:
+          if (depth === 0) return false;
+          depth--;
+          break;
+        case TokenKind.RBRACKET:
+          if (depth === 0) return false;
+          depth--;
+          break;
+        case TokenKind.PIPE:
+          if (depth === 0) return true;
+          break;
+      }
+    }
   }
 
   /** Parse a primary expression (literal, identifier, parameter, parenthesised, function call). */
@@ -1175,29 +1289,34 @@ export class Parser {
 
       case TokenKind.CASE: {
         this._advance(); // consume CASE
-        
-        let expression: import('./ast/AstNode').Expression | undefined;
-        if (!this._check(TokenKind.WHEN)) {
-          expression = this._parseExpression();
+        const prevInCompWhere = this._inComprehensionWhere;
+        this._inComprehensionWhere = false;
+        try {
+          let expression: import('./ast/AstNode').Expression | undefined;
+          if (!this._check(TokenKind.WHEN)) {
+            expression = this._parseExpression();
+          }
+
+          const branches: Array<{ when: import('./ast/AstNode').Expression; then: import('./ast/AstNode').Expression }> = [];
+          do {
+            this._consume(TokenKind.WHEN, "Expected 'WHEN'");
+            const whenExpr = this._parseExpression();
+            this._consume(TokenKind.THEN, "Expected 'THEN'");
+            const thenExpr = this._parseExpression();
+            branches.push({ when: whenExpr, then: thenExpr });
+          } while (this._check(TokenKind.WHEN));
+
+          let elseExpr: import('./ast/AstNode').Expression | undefined;
+          if (this._check(TokenKind.ELSE)) {
+            this._advance();
+            elseExpr = this._parseExpression();
+          }
+
+          this._consume(TokenKind.END, "Expected 'END' to close CASE expression");
+          return { kind: 'Case', expression, branches, else: elseExpr } as import('./ast/AstNode').CaseExpr;
+        } finally {
+          this._inComprehensionWhere = prevInCompWhere;
         }
-
-        const branches: Array<{ when: import('./ast/AstNode').Expression; then: import('./ast/AstNode').Expression }> = [];
-        do {
-          this._consume(TokenKind.WHEN, "Expected 'WHEN'");
-          const whenExpr = this._parseExpression();
-          this._consume(TokenKind.THEN, "Expected 'THEN'");
-          const thenExpr = this._parseExpression();
-          branches.push({ when: whenExpr, then: thenExpr });
-        } while (this._check(TokenKind.WHEN));
-
-        let elseExpr: import('./ast/AstNode').Expression | undefined;
-        if (this._check(TokenKind.ELSE)) {
-          this._advance();
-          elseExpr = this._parseExpression();
-        }
-
-        this._consume(TokenKind.END, "Expected 'END' to close CASE expression");
-        return { kind: 'Case', expression, branches, else: elseExpr } as import('./ast/AstNode').CaseExpr;
       }
 
       case TokenKind.ALL:
@@ -1206,39 +1325,51 @@ export class Parser {
       case TokenKind.SINGLE: {
         const predicateKind = token.kind;
         this._advance(); // consume ALL/ANY/NONE/SINGLE
-        this._consume(TokenKind.LPAREN, `Expected '(' after ${token.value}`);
-        const variable = this._consumeIdentifier("Expected variable name").value;
-        this._consume(TokenKind.IN, "Expected 'IN'");
-        const list = this._parseExpression();
-        this._consume(TokenKind.WHERE, "Expected 'WHERE'");
-        const where = this._parseExpression();
-        this._consume(TokenKind.RPAREN, "Expected ')'");
-        return {
-          kind: 'ListPredicate',
-          predicate: predicateKind === TokenKind.ALL ? 'ALL' : predicateKind === TokenKind.ANY ? 'ANY' : predicateKind === TokenKind.NONE ? 'NONE' : 'SINGLE',
-          variable,
-          list,
-          where
-        } as import('./ast/AstNode').ListPredicateExpr;
+        const prevInCompWhere = this._inComprehensionWhere;
+        this._inComprehensionWhere = false;
+        try {
+          this._consume(TokenKind.LPAREN, `Expected '(' after ${token.value}`);
+          const variable = this._consumeIdentifier("Expected variable name").value;
+          this._consume(TokenKind.IN, "Expected 'IN'");
+          const list = this._parseExpression();
+          this._consume(TokenKind.WHERE, "Expected 'WHERE'");
+          const where = this._parseExpression();
+          this._consume(TokenKind.RPAREN, "Expected ')'");
+          return {
+            kind: 'ListPredicate',
+            predicate: predicateKind === TokenKind.ALL ? 'ALL' : predicateKind === TokenKind.ANY ? 'ANY' : predicateKind === TokenKind.NONE ? 'NONE' : 'SINGLE',
+            variable,
+            list,
+            where
+          } as import('./ast/AstNode').ListPredicateExpr;
+        } finally {
+          this._inComprehensionWhere = prevInCompWhere;
+        }
       }
 
       case TokenKind.EXISTS: {
         this._advance();
-        this._consume(TokenKind.LBRACE, "Expected '{' after EXISTS");
-        
-        let match: import('./ast/AstNode').MatchClause;
-        if (this._check(TokenKind.MATCH)) {
-            match = this._parseMatchClause(false);
-        } else {
-            const pattern = this._parsePatternPath();
-            let where: import('./ast/AstNode').WhereClause | undefined;
-            if (this._check(TokenKind.WHERE)) {
-                where = this._parseWhereClause();
-            }
-            match = { kind: 'Match', optional: false, patterns: [pattern], where };
+        const prevInCompWhere = this._inComprehensionWhere;
+        this._inComprehensionWhere = false;
+        try {
+          this._consume(TokenKind.LBRACE, "Expected '{' after EXISTS");
+          
+          let match: import('./ast/AstNode').MatchClause;
+          if (this._check(TokenKind.MATCH)) {
+              match = this._parseMatchClause(false);
+          } else {
+              const pattern = this._parsePatternPath();
+              let where: import('./ast/AstNode').WhereClause | undefined;
+              if (this._check(TokenKind.WHERE)) {
+                  where = this._parseWhereClause();
+              }
+              match = { kind: 'Match', optional: false, patterns: [pattern], where };
+          }
+          this._consume(TokenKind.RBRACE, "Expected '}' after EXISTS subquery");
+          return { kind: 'ExistsSubquery', match };
+        } finally {
+          this._inComprehensionWhere = prevInCompWhere;
         }
-        this._consume(TokenKind.RBRACE, "Expected '}' after EXISTS subquery");
-        return { kind: 'ExistsSubquery', match };
       }
 
       
@@ -1256,101 +1387,129 @@ export class Parser {
       }
 
       case TokenKind.LPAREN: {
-        const savedPos = this._pos;
+        const prevInCompWhere = this._inComprehensionWhere;
+        this._inComprehensionWhere = false;
         try {
-          const pattern = this._parsePatternPath();
-          const segments = pattern.kind === 'NamedPath' ? pattern.pattern.segments : pattern.segments;
-          // A PatternExpression must have at least one relationship (segments > 1)
-          if (segments.length > 1) {
-            return { kind: 'PatternExpr', pattern };
+          const savedPos = this._pos;
+          try {
+            const pattern = this._parsePatternPath();
+            const segments = pattern.kind === 'NamedPath' ? pattern.pattern.segments : pattern.segments;
+            // A PatternExpression must have at least one relationship (segments > 1)
+            if (segments.length > 1) {
+              return { kind: 'PatternExpr', pattern };
+            }
+          } catch (e) {
+            // Fallback to parenthesized expression
           }
-        } catch (e) {
-          // Fallback to parenthesized expression
-        }
-        this._pos = savedPos;
+          this._pos = savedPos;
 
-        this._advance(); // consume (
-        const expr = this._parseExpression();
-        this._consume(TokenKind.RPAREN, "Expected ')'");
-        return expr;
+          this._advance(); // consume (
+          const expr = this._parseExpression();
+          this._consume(TokenKind.RPAREN, "Expected ')'");
+          return expr;
+        } finally {
+          this._inComprehensionWhere = prevInCompWhere;
+        }
       }
 
       // List literal [expr, expr, ...] or List/Pattern Comprehension
       case TokenKind.LBRACKET: {
-        const savedPos = this._pos;
-        this._advance();
-
-        // Check for list comprehension: [IDENT IN ... ]
-        if (this._isIdentifier(this._peek()) && this._peek(1).kind === TokenKind.IN) {
-          const variable = this._advance().value; // consume IDENT
-          this._advance(); // consume IN
-          const list = this._parseExpression();
-
-          let where: Expression | undefined;
-          if (this._check(TokenKind.WHERE)) {
-            this._advance();
-            where = this._parseExpression();
-          }
-
-          let projection: Expression | undefined;
-          if (this._check(TokenKind.PIPE)) {
-            this._advance();
-            projection = this._parseExpression();
-          }
-
-          this._consume(TokenKind.RBRACKET, "Expected ']' at the end of list comprehension");
-          return { kind: 'ListComprehension', variable, list, where, projection };
-        }
-
-        // Check for pattern comprehension: [ pattern WHERE exp | exp ] or [ pattern | exp ]
-        this._pos = savedPos + 1;
+        const prevInCompWhere = this._inComprehensionWhere;
+        this._inComprehensionWhere = false;
         try {
-          const pattern = this._parsePatternPath();
-          if (this._check(TokenKind.WHERE) || this._check(TokenKind.PIPE)) {
+          const savedPos = this._pos;
+          this._advance();
+
+          // Check for list comprehension: [IDENT IN ... ]
+          if (this._isIdentifier(this._peek()) && this._peek(1).kind === TokenKind.IN) {
+            const variable = this._advance().value; // consume IDENT
+            this._advance(); // consume IN
+            const list = this._parseExpression();
+
             let where: Expression | undefined;
             if (this._check(TokenKind.WHERE)) {
               this._advance();
-              where = this._parseExpression();
+              this._inComprehensionWhere = true;
+              try {
+                where = this._parseExpression();
+              } finally {
+                this._inComprehensionWhere = false;
+              }
             }
-            this._consume(TokenKind.PIPE, "Expected '|' in pattern comprehension");
-            const projection = this._parseExpression();
-            this._consume(TokenKind.RBRACKET, "Expected ']' at the end of pattern comprehension");
-            return { kind: 'PatternComprehension', pattern, where, projection };
+
+            let projection: Expression | undefined;
+            if (this._check(TokenKind.PIPE)) {
+              this._advance();
+              projection = this._parseExpression();
+            }
+
+            this._consume(TokenKind.RBRACKET, "Expected ']' at the end of list comprehension");
+            return { kind: 'ListComprehension', variable, list, where, projection };
           }
-        } catch (e) {
-          // Fallback to standard list literal
+
+          // Check for pattern comprehension: [ pattern WHERE exp | exp ] or [ pattern | exp ]
+          this._pos = savedPos + 1;
+          try {
+            const pattern = this._parsePatternPath();
+            if (this._check(TokenKind.WHERE) || this._check(TokenKind.PIPE)) {
+              let where: Expression | undefined;
+              if (this._check(TokenKind.WHERE)) {
+                this._advance();
+                this._inComprehensionWhere = true;
+                try {
+                  where = this._parseExpression();
+                } finally {
+                  this._inComprehensionWhere = false;
+                }
+              }
+              this._consume(TokenKind.PIPE, "Expected '|' in pattern comprehension");
+              const projection = this._parseExpression();
+              this._consume(TokenKind.RBRACKET, "Expected ']' at the end of pattern comprehension");
+              return { kind: 'PatternComprehension', pattern, where, projection };
+            }
+          } catch (e) {
+            // Fallback to standard list literal
+          }
+
+          this._pos = savedPos + 1;
+
+          // Standard list literal
+          const elements: Expression[] = [];
+
+          if (!this._check(TokenKind.RBRACKET)) {
+            do {
+              elements.push(this._parseExpression());
+            } while (this._check(TokenKind.COMMA) && this._advance());
+          }
+
+          this._consume(TokenKind.RBRACKET, "Expected ']'");
+          return { kind: 'List', elements };
+        } finally {
+          this._inComprehensionWhere = prevInCompWhere;
         }
-
-        this._pos = savedPos + 1;
-
-        // Standard list literal
-        const elements: Expression[] = [];
-
-        if (!this._check(TokenKind.RBRACKET)) {
-          do {
-            elements.push(this._parseExpression());
-          } while (this._check(TokenKind.COMMA) && this._advance());
-        }
-
-        this._consume(TokenKind.RBRACKET, "Expected ']'");
-        return { kind: 'List', elements };
       }
 
       // Map literal { key: expr, ... }
       case TokenKind.LBRACE: {
-        this._advance();
-        const props: Record<string, Expression> = {};
+        const prevInCompWhere = this._inComprehensionWhere;
+        this._inComprehensionWhere = false;
+        try {
+          this._advance();
+          const props: Record<string, Expression> = {};
 
-        if (!this._check(TokenKind.RBRACE)) {
-          do {
-            const key = this._consumeIdentifier('Expected property key').value;
-            this._consume(TokenKind.COLON, "Expected ':' after property key");
-            props[key] = this._parseExpression();
-          } while (this._check(TokenKind.COMMA) && this._advance());
+          if (!this._check(TokenKind.RBRACE)) {
+            do {
+              const key = this._consumeIdentifier('Expected property key').value;
+              this._consume(TokenKind.COLON, "Expected ':' after property key");
+              props[key] = this._parseExpression();
+            } while (this._check(TokenKind.COMMA) && this._advance());
+          }
+
+          this._consume(TokenKind.RBRACE, "Expected '}'");
+          return { kind: 'Map', props };
+        } finally {
+          this._inComprehensionWhere = prevInCompWhere;
         }
-
-        this._consume(TokenKind.RBRACE, "Expected '}'");
-        return { kind: 'Map', props };
       }
 
       default:
@@ -1362,16 +1521,7 @@ export class Parser {
             return this._parseFunctionCall(token.value);
           }
 
-          let expr: Expression = { kind: 'Identifier', name: token.value };
-
-          // Chained property access: ident.prop1.prop2
-          while (this._check(TokenKind.DOT)) {
-            this._advance();
-            const prop = this._advance().value;
-            expr = { kind: 'PropertyAccess', object: expr, property: prop };
-          }
-
-          return expr;
+          return { kind: 'Identifier', name: token.value };
         }
 
         throw new CypherSyntaxError(
@@ -1391,46 +1541,52 @@ export class Parser {
    * @param name The function name (will be uppercased).
    */
   private _parseFunctionCall(name: string): FunctionCallExpr {
-    this._consume(TokenKind.LPAREN, "Expected '(' after function name");
+    const prevInCompWhere = this._inComprehensionWhere;
+    this._inComprehensionWhere = false;
+    try {
+      this._consume(TokenKind.LPAREN, "Expected '(' after function name");
 
-    let distinct = false;
+      let distinct = false;
 
-    // DISTINCT modifier: COUNT(DISTINCT expr), SUM(DISTINCT expr), etc.
-    if (this._check(TokenKind.DISTINCT)) {
-      distinct = true;
-      this._advance();
+      // DISTINCT modifier: COUNT(DISTINCT expr), SUM(DISTINCT expr), etc.
+      if (this._check(TokenKind.DISTINCT)) {
+        distinct = true;
+        this._advance();
+      }
+
+      let args: Expression[];
+
+      // Handle COUNT(*) — the * is a special argument
+      if (this._check(TokenKind.STAR)) {
+        this._advance();
+        // Represent COUNT(*) args with a sentinel value
+        args = [{ kind: 'Literal', value: '*' } as unknown as Expression];
+      } else if (!this._check(TokenKind.RPAREN)) {
+        // Parse comma-separated argument expressions
+        args = [];
+        do {
+          args.push(this._parseExpression());
+        } while (this._check(TokenKind.COMMA) && this._advance());
+      } else {
+        // Zero arguments: e.g., COUNT() — semantically invalid, but parsed
+        args = [];
+      }
+
+      this._consume(TokenKind.RPAREN, "Expected ')' after function arguments");
+
+      const result: FunctionCallExpr = {
+        kind: 'FunctionCall',
+        name: name.toUpperCase(),
+        args,
+      };
+      if (distinct) {
+        result.distinct = true;
+      }
+
+      return result;
+    } finally {
+      this._inComprehensionWhere = prevInCompWhere;
     }
-
-    let args: Expression[];
-
-    // Handle COUNT(*) — the * is a special argument
-    if (this._check(TokenKind.STAR)) {
-      this._advance();
-      // Represent COUNT(*) args with a sentinel value
-      args = [{ kind: 'Literal', value: '*' } as unknown as Expression];
-    } else if (!this._check(TokenKind.RPAREN)) {
-      // Parse comma-separated argument expressions
-      args = [];
-      do {
-        args.push(this._parseExpression());
-      } while (this._check(TokenKind.COMMA) && this._advance());
-    } else {
-      // Zero arguments: e.g., COUNT() — semantically invalid, but parsed
-      args = [];
-    }
-
-    this._consume(TokenKind.RPAREN, "Expected ')' after function arguments");
-
-    const result: FunctionCallExpr = {
-      kind: 'FunctionCall',
-      name: name.toUpperCase(),
-      args,
-    };
-    if (distinct) {
-      result.distinct = true;
-    }
-
-    return result;
   }
 
   /** Parse `IS [NOT] NULL` postfix. */

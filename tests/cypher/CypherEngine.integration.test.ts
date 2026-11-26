@@ -2030,4 +2030,116 @@ describe('CypherEngine Integration', () => {
       expect(await graph.getNodeCount()).toBe(3);
     });
   });
+
+  describe('Postfix Label & Relationship-Type Predicates', () => {
+    let graph: Graph;
+    let engine: CypherEngine;
+
+    beforeAll(async () => {
+      graph = new Graph();
+      engine = new CypherEngine(graph);
+      const n1 = await graph.addNode(['Preference'], { name: 'pref1' });
+      const n2 = await graph.addNode(['Invariant'], { name: 'inv1' });
+      const n3 = await graph.addNode(['Preference', 'Archived'], { name: 'prefArchived' });
+      const n4 = await graph.addNode(['Rule', 'Preference'], { name: 'rulePref' });
+      const n5 = await graph.addNode(['Note'], { name: 'note1' });
+      await graph.addEdge(n1.id, n2.id, 'KNOWS', { w: 1 });
+      await graph.addEdge(n2.id, n4.id, 'TEACHES', { w: 2 });
+      await graph.addEdge(n4.id, n5.id, 'CONTAINS', { w: 3 });
+    });
+
+    it('filters nodes with WHERE n:Preference OR n:Invariant and WHERE n:A|B', async () => {
+      const orRes = engine.executeSync(
+        'MATCH (n) WHERE n:Preference OR n:Invariant RETURN n.name AS name ORDER BY name ASC',
+      );
+      expect(orRes.rows.map((r) => r.name)).toEqual([
+        'inv1',
+        'pref1',
+        'prefArchived',
+        'rulePref',
+      ]);
+
+      const pipeRes = engine.executeSync(
+        'MATCH (n) WHERE n:Preference|Invariant RETURN n.name AS name ORDER BY name ASC',
+      );
+      expect(pipeRes.rows.map((r) => r.name)).toEqual(orRes.rows.map((r) => r.name));
+    });
+
+    it('filters nodes with WHERE NOT n:Archived and conjunctive n:A:B', () => {
+      const notArch = engine.executeSync(
+        'MATCH (n) WHERE (n:Preference OR n:Invariant) AND NOT n:Archived RETURN n.name AS name ORDER BY name ASC',
+      );
+      expect(notArch.rows.map((r) => r.name)).toEqual(['inv1', 'pref1', 'rulePref']);
+
+      const conj = engine.executeSync(
+        'MATCH (n) WHERE n:Rule:Preference RETURN n.name AS name',
+      );
+      expect(conj.rows).toEqual([{ name: 'rulePref' }]);
+    });
+
+    it('filters relationships with WHERE r:KNOWS|TEACHES, NOT r:CONTAINS, and r:A:B', () => {
+      const edgeOr = engine.executeSync(
+        'MATCH (a)-[r]->(b) WHERE r:KNOWS|TEACHES AND NOT r:CONTAINS RETURN type(r) AS t, b.name AS target ORDER BY t ASC',
+      );
+      expect(edgeOr.rows).toEqual([
+        { t: 'KNOWS', target: 'inv1' },
+        { t: 'TEACHES', target: 'rulePref' },
+      ]);
+
+      const edgeImpossibleConj = engine.executeSync(
+        'MATCH ()-[r]->() WHERE r:KNOWS:TEACHES RETURN r',
+      );
+      expect(edgeImpossibleConj.rows).toEqual([]);
+    });
+
+    it('supports label predicates in RETURN, CASE, ALL(), list comprehension, OPTIONAL MATCH null, and fused COUNT', () => {
+      const retAndCase = engine.executeSync(
+        `MATCH (n)
+         WHERE n:Preference OR n:Note
+         RETURN n.name AS name,
+                n:Archived AS isArchived,
+                CASE WHEN n:Rule THEN 'rule' ELSE 'other' END AS kind
+         ORDER BY name ASC`,
+      );
+      expect(retAndCase.rows).toEqual([
+        { name: 'note1', isArchived: false, kind: 'other' },
+        { name: 'pref1', isArchived: false, kind: 'other' },
+        { name: 'prefArchived', isArchived: true, kind: 'other' },
+        { name: 'rulePref', isArchived: false, kind: 'rule' },
+      ]);
+
+      const allPath = engine.executeSync(
+        `MATCH p = (a:Preference { name: 'pref1' })-[*1..2]->(b)
+         RETURN b.name AS target,
+                ALL(r IN relationships(p) WHERE r:KNOWS|TEACHES) AS allValid
+         ORDER BY target ASC`,
+      );
+      expect(allPath.rows).toEqual([
+        { target: 'inv1', allValid: true },
+        { target: 'rulePref', allValid: true },
+      ]);
+
+      const optNull = engine.executeSync(
+        `MATCH (n:Note)
+         OPTIONAL MATCH (n)-[r]->(m)
+         RETURN m:Preference AS hasPrefTarget, r:KNOWS AS hasKnowsEdge`,
+      );
+      expect(optNull.rows).toEqual([{ hasPrefTarget: false, hasKnowsEdge: false }]);
+
+      const fusedCount = engine.executeSync(
+        `MATCH (n:Preference) WHERE NOT n:Archived RETURN COUNT(n) AS cnt`,
+      );
+      expect(fusedCount.rows).toEqual([{ cnt: 2 }]);
+    });
+
+    it('pushes WHERE n:Preference OR n:Invariant into NodeScanStep in getQueryPlan', async () => {
+      const planText = await engine.getQueryPlan(
+        'MATCH (n) WHERE n:Preference OR n:Invariant RETURN n',
+        {},
+        'text',
+      );
+      expect(planText).toContain('NodeScanStep (n:Preference|Invariant)');
+      expect(planText).not.toContain('FilterStep');
+    });
+  });
 });

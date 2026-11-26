@@ -387,4 +387,27 @@ describe('Semantic', () => {
       ).not.toThrow();
     });
   });
+
+  describe('Postfix label predicates', () => {
+    it('rejects undefined variable in WHERE unknown:Label', () => {
+      expect(() => analyse('MATCH (n) WHERE unknown:Person RETURN n')).toThrow(CypherSemanticError);
+    });
+
+    it('accepts node and edge variables in WHERE label/type predicates', () => {
+      expect(() =>
+        analyse('MATCH (a)-[r]->(b) WHERE a:Person AND r:KNOWS|TEACHES AND NOT b:Archived RETURN a, r, b'),
+      ).not.toThrow();
+    });
+
+    it('enforces WITH alias requirement for unaliased label predicates and validates post-agg ORDER BY', () => {
+      expect(() => analyse('MATCH (n) WITH n:Admin RETURN n')).toThrow(CypherSemanticError);
+      expect(() => analyse('MATCH (n) WITH n:Admin AS isAdmin RETURN isAdmin')).not.toThrow();
+      expect(() =>
+        analyse('MATCH (n) RETURN n:Admin AS isAdmin, COUNT(*) AS cnt ORDER BY isAdmin DESC'),
+      ).toThrow(/n:Admin/);
+      expect(() =>
+        analyse('MATCH (n) WITH n:Admin AS isAdmin RETURN isAdmin, COUNT(*) AS cnt ORDER BY isAdmin DESC'),
+      ).not.toThrow();
+    });
+  });
 });

@@ -32,6 +32,8 @@ export interface VarInfo {
 export interface DecomposedWhere {
   /** Per-variable predicates pushable into NodeScanStep. */
   perVar: Map<string, PropertyFilter[]>;
+  /** Per-variable OR-label list pushable into NodeScanStep.types. */
+  perVarLabels: Map<string, string[]>;
   /** Cross-variable expressions retained as FilterStep. */
   crossVar: Expression[];
 }
@@ -109,11 +111,12 @@ export class WhereDecomposer {
     vars: Map<string, VarInfo>,
   ): DecomposedWhere {
     const perVar = new Map<string, PropertyFilter[]>();
+    const perVarLabels = new Map<string, string[]>();
     const crossVar: Expression[] = [];
 
-    this._classify(expr, vars, perVar, crossVar);
+    this._classify(expr, vars, perVar, perVarLabels, crossVar);
 
-    return { perVar, crossVar };
+    return { perVar, perVarLabels, crossVar };
   }
 
   /**
@@ -124,6 +127,7 @@ export class WhereDecomposer {
     expr: Expression,
     vars: Map<string, VarInfo>,
     perVar: Map<string, PropertyFilter[]>,
+    perVarLabels: Map<string, string[]>,
     crossVar: Expression[],
   ): void {
     // ── AND: always split — each operand is classified independently.
@@ -131,8 +135,8 @@ export class WhereDecomposer {
     //     (single variable, but mixed translatable/non-translatable
     //     operands) is decomposed correctly.
     if (expr.kind === 'Binary' && expr.op === 'AND') {
-      this._classify(expr.left, vars, perVar, crossVar);
-      this._classify(expr.right, vars, perVar, crossVar);
+      this._classify(expr.left, vars, perVar, perVarLabels, crossVar);
+      this._classify(expr.right, vars, perVar, perVarLabels, crossVar);
       return;
     }
 
@@ -144,10 +148,25 @@ export class WhereDecomposer {
       return;
     }
 
-    // ── Single variable → try to translate to PropertyFilter ──────
+    // ── Single variable → try label pushdown or PropertyFilter ────
     if (refs.size === 1) {
       const varName = [...refs][0];
       const varInfo = vars.get(varName);
+
+      // Push positive label predicates for untyped root MATCH variables
+      // into NodeScanStep.types (never merge into already-typed vars since
+      // NodeScanStep.types uses OR semantics, not AND).
+      if (varInfo?.isRoot && varInfo.labels.length === 0 && !perVarLabels.has(varName)) {
+        const labelPush = this._extractPushableLabels(expr, varName);
+        if (labelPush) {
+          perVarLabels.set(varName, labelPush.pushed);
+          if (labelPush.residual) {
+            crossVar.push(labelPush.residual);
+          }
+          return;
+        }
+      }
+
       const filter = this._toPropertyFilter(expr);
 
       // Only push predicates for root variables that have their own
@@ -164,6 +183,70 @@ export class WhereDecomposer {
 
     // ── Multiple variables, OR, cross-variable comparisons ────────
     crossVar.push(expr);
+  }
+
+  /**
+   * Extract a pushable OR-label list from a single-variable expression.
+   * Supports `n:A`, `n:A|B`, `n:A OR n:B`, and multi-group `n:A:B` / `n:A|B:C`
+   * (pushing one group into NodeScanStep and returning remaining groups as residual).
+   */
+  private _extractPushableLabels(
+    expr: Expression,
+    varName: string,
+  ): { pushed: string[]; residual?: Expression } | null {
+    const orLabels = this._extractOrLabels(expr, varName);
+    if (orLabels) {
+      return { pushed: orLabels };
+    }
+
+    if (
+      expr.kind === 'LabelPredicate' &&
+      expr.expression.kind === 'Identifier' &&
+      expr.expression.name === varName &&
+      expr.labels.length > 1
+    ) {
+      // Prefer a single-label group so storage can use the O(1) label-set index.
+      let pushIdx = expr.labels.findIndex((g) => g.length === 1);
+      if (pushIdx < 0) pushIdx = 0;
+
+      const pushed = [...new Set(expr.labels[pushIdx])];
+      const remaining = expr.labels.filter((_, idx) => idx !== pushIdx);
+      return {
+        pushed,
+        residual: {
+          kind: 'LabelPredicate',
+          expression: expr.expression,
+          labels: remaining,
+        },
+      };
+    }
+
+    return null;
+  }
+
+  /**
+   * Extract a flat deduplicated OR-label list when `expr` is a pure disjunction
+   * of label predicates on `varName` (e.g. `n:A`, `n:A|B`, `n:A OR n:B`).
+   */
+  private _extractOrLabels(expr: Expression, varName: string): string[] | null {
+    if (
+      expr.kind === 'LabelPredicate' &&
+      expr.expression.kind === 'Identifier' &&
+      expr.expression.name === varName &&
+      expr.labels.length === 1
+    ) {
+      return [...new Set(expr.labels[0])];
+    }
+
+    if (expr.kind === 'Binary' && expr.op === 'OR') {
+      const left = this._extractOrLabels(expr.left, varName);
+      if (!left) return null;
+      const right = this._extractOrLabels(expr.right, varName);
+      if (!right) return null;
+      return [...new Set([...left, ...right])];
+    }
+
+    return null;
   }
 
   /**
@@ -194,9 +277,38 @@ export class WhereDecomposer {
         case 'IsNull':
           walk(e.expression);
           return;
+        case 'LabelPredicate':
+          walk(e.expression);
+          return;
         case 'List':
           for (const el of e.elements) walk(el);
           return;
+        case 'Map':
+          for (const v of Object.values(e.props)) walk(v);
+          return;
+        case 'Case':
+          if (e.expression) walk(e.expression);
+          for (const b of e.branches) {
+            walk(b.when);
+            walk(b.then);
+          }
+          if (e.else) walk(e.else);
+          return;
+        case 'ListComprehension': {
+          walk(e.list);
+          const hadLoopVar = vars.has(e.variable);
+          if (e.where) walk(e.where);
+          if (e.projection) walk(e.projection);
+          if (!hadLoopVar) vars.delete(e.variable);
+          return;
+        }
+        case 'ListPredicate': {
+          walk(e.list);
+          const hadLoopVar = vars.has(e.variable);
+          walk(e.where);
+          if (!hadLoopVar) vars.delete(e.variable);
+          return;
+        }
         case 'FunctionCall':
           for (const arg of e.args) walk(arg);
           return;

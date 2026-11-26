@@ -499,6 +499,10 @@ export class Semantic {
         this._checkExpressionVars(expr.expression, clause, extraScope, restrictScope);
         return;
 
+      case 'LabelPredicate':
+        this._checkExpressionVars(expr.expression, clause, extraScope, restrictScope);
+        return;
+
       case 'List':
         for (const elem of expr.elements) {
           this._checkExpressionVars(elem, clause, extraScope, restrictScope);
@@ -665,6 +669,10 @@ export class Semantic {
         return;
 
       case 'IsNull':
+        this._checkExpressionVarsWithAllowed(expr.expression, clause, allowed, extraScope);
+        return;
+
+      case 'LabelPredicate':
         this._checkExpressionVarsWithAllowed(expr.expression, clause, allowed, extraScope);
         return;
 
@@ -990,6 +998,9 @@ export class Semantic {
       case 'IsNull':
         return this._collectUnresolvedPostAggIdentifiers(expr.expression, allowed);
 
+      case 'LabelPredicate':
+        return this._collectUnresolvedPostAggIdentifiers(expr.expression, allowed);
+
       case 'List':
         return expr.elements.flatMap((elem) =>
           this._collectUnresolvedPostAggIdentifiers(elem, allowed),
@@ -1101,6 +1112,9 @@ export class Semantic {
       case 'IsNull':
         return this._containsAggregate(expr.expression);
 
+      case 'LabelPredicate':
+        return this._containsAggregate(expr.expression);
+
       case 'List':
         return expr.elements.some(e => this._containsAggregate(e));
 
@@ -1172,6 +1186,8 @@ export class Semantic {
         return `${expr.name}(...)`;
       case 'Map':
         return '{...}';
+      case 'LabelPredicate':
+        return `${this._describeExpr(expr.expression)}:${expr.labels.map(g => g.join('|')).join(':')}`;
       default:
         return 'expression';
     }
@@ -1556,6 +1572,9 @@ export class Semantic {
         );
 
       case 'IsNull':
+        return this._expressionReferencesAny(expr.expression, varNames);
+
+      case 'LabelPredicate':
         return this._expressionReferencesAny(expr.expression, varNames);
 
       case 'List':

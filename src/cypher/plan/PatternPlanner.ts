@@ -59,6 +59,7 @@ export class PatternPlanner {
     idLookups?: Map<string, unknown>,
     consumed?: Set<string>,
     knownVars?: ReadonlySet<string>,
+    perVarLabels?: Map<string, string[]>,
   ): void {
     const segments = getPatternSegments(pattern);
     if (segments.length === 0) return;
@@ -80,6 +81,7 @@ export class PatternPlanner {
       });
       consumed?.add(firstNode.variable);
       this._planTrailingSegments(segments, steps, ast, pattern);
+      this._emitPerVarLabelFilter(firstNode.variable, perVarLabels, steps);
       this._emitPerVarFilters(firstNode.variable, perVar, steps);
       return;
     }
@@ -112,6 +114,7 @@ export class PatternPlanner {
 
       consumed?.add(firstNode.variable);
       this._planTrailingSegments(segments, steps, ast, pattern);
+      this._emitPerVarLabelFilter(firstNode.variable, perVarLabels, steps);
       return;
     }
 
@@ -149,13 +152,15 @@ export class PatternPlanner {
           const nextNode = segments[i + 1] as NodePattern;
           this.planEdgeExpand(edge, nextNode, steps, ast, pathVar);
         }
+        this._emitPerVarLabelFilter(firstNode.variable, perVarLabels, steps);
         this._emitPerVarFilters(firstNode.variable, perVar, steps);
         return;
       }
     }
 
     const extraFilters = perVar.get(firstVar) ?? [];
-    this.planNodeScan(firstNode, steps, extraFilters);
+    const pushedLabels = firstNode.variable ? perVarLabels?.get(firstNode.variable) : undefined;
+    this.planNodeScan(firstNode, steps, extraFilters, pushedLabels);
 
     // Walk alternating edge → node pairs.
     for (let i = 1; i < segments.length; i += 2) {
@@ -172,8 +177,11 @@ export class PatternPlanner {
     node: NodePattern,
     steps: PlanStep[],
     extraFilters?: PropertyFilter[],
+    pushedLabels?: string[],
   ): void {
-    const label = node.labels.length > 0 ? node.labels[0] : '';
+    const effectiveLabels =
+      node.labels.length > 0 ? node.labels : (pushedLabels ?? []);
+    const label = effectiveLabels.length > 0 ? effectiveLabels[0] : '';
     const variable = node.variable ?? this._syntheticVar('node', steps.length);
 
     const inlineFilters: PropertyFilter[] =
@@ -192,7 +200,7 @@ export class PatternPlanner {
     steps.push({
       kind: 'NodeScanStep',
       label,
-      types: node.labels.length > 0 ? node.labels : undefined,
+      types: effectiveLabels.length > 0 ? effectiveLabels : undefined,
       variable,
       propertyFilters,
     });
@@ -321,6 +329,24 @@ export class PatternPlanner {
    * root is reached via a reversed edge in the id-lookup reversal
    * branch, or when the root itself is sought via NodeSeekStep).
    */
+  private _emitPerVarLabelFilter(
+    varName: string | undefined,
+    perVarLabels: Map<string, string[]> | undefined,
+    steps: PlanStep[],
+  ): void {
+    if (!varName || !perVarLabels) return;
+    const pushed = perVarLabels.get(varName);
+    if (!pushed || pushed.length === 0) return;
+    steps.push({
+      kind: 'FilterStep',
+      predicate: {
+        kind: 'LabelPredicate',
+        expression: { kind: 'Identifier', name: varName },
+        labels: [pushed],
+      },
+    });
+  }
+
   private _emitPerVarFilters(
     varName: string | undefined,
     perVar: Map<string, PropertyFilter[]>,

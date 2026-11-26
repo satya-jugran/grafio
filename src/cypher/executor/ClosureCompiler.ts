@@ -246,6 +246,25 @@ export function compileExpression(
       };
     }
 
+    case 'LabelPredicate': {
+      const matcher = compileLabelMatcher(expr.labels);
+      if (expr.expression.kind === 'Identifier') {
+        const varName = expr.expression.name;
+        const slot = slotTable.getOrAdd(varName);
+        return (row) => {
+          const val = row[slot];
+          if (val === UNBOUND) {
+            throw new CypherRuntimeError(
+              `Variable '${varName}' is not bound in the current row`,
+            );
+          }
+          return matcher(val);
+        };
+      }
+      const targetFn = compileExpression(expr.expression, slotTable);
+      return (r, p, k) => matcher(targetFn(r, p, k));
+    }
+
     case 'List': {
       const elemFns = expr.elements.map((e) => compileExpression(e, slotTable));
       return (r, p, k) => {
@@ -599,4 +618,90 @@ export function cypherEq(a: unknown, b: unknown): boolean {
     return (a as { id: string }).id === (b as { id: string }).id;
   }
   return a === b;
+}
+
+/**
+ * Compile a CNF label/type predicate (`string[][]`) into a zero-allocation
+ * matcher supporting both {@link Node} (`labels`) and {@link Edge} (`type`).
+ */
+function compileLabelMatcher(groups: string[][]): (val: unknown) => boolean {
+  if (groups.length === 1 && groups[0].length === 1) {
+    const req = groups[0][0];
+    return (val) => {
+      if (val instanceof Node) return val.labels.includes(req);
+      if (val instanceof Edge) return val.type === req;
+      return false;
+    };
+  }
+
+  if (groups.length === 1) {
+    const orGroup = groups[0];
+    const len = orGroup.length;
+    return (val) => {
+      if (val instanceof Node) {
+        const labels = val.labels;
+        for (let i = 0; i < len; i++) {
+          if (labels.includes(orGroup[i])) return true;
+        }
+        return false;
+      }
+      if (val instanceof Edge) {
+        const t = val.type;
+        for (let i = 0; i < len; i++) {
+          if (t === orGroup[i]) return true;
+        }
+        return false;
+      }
+      return false;
+    };
+  }
+
+  if (groups.every((g) => g.length === 1)) {
+    const andLabels = groups.map((g) => g[0]);
+    const len = andLabels.length;
+    return (val) => {
+      if (val instanceof Node) {
+        const labels = val.labels;
+        for (let i = 0; i < len; i++) {
+          if (!labels.includes(andLabels[i])) return false;
+        }
+        return true;
+      }
+      if (val instanceof Edge) {
+        const t = val.type;
+        for (let i = 0; i < len; i++) {
+          if (t !== andLabels[i]) return false;
+        }
+        return true;
+      }
+      return false;
+    };
+  }
+
+  const groupCount = groups.length;
+  return (val) => {
+    if (val instanceof Node) {
+      const labels = val.labels;
+      for (let g = 0; g < groupCount; g++) {
+        const orGroup = groups[g];
+        let matched = false;
+        for (let i = 0; i < orGroup.length; i++) {
+          if (labels.includes(orGroup[i])) {
+            matched = true;
+            break;
+          }
+        }
+        if (!matched) return false;
+      }
+      return true;
+    }
+    if (val instanceof Edge) {
+      const t = val.type;
+      for (let g = 0; g < groupCount; g++) {
+        if (!groups[g].includes(t)) return false;
+      }
+      return true;
+    }
+    return false;
+  };
 }

@@ -429,6 +429,12 @@ export class PlanFormatter {
       case 'IsNull':
         const nullOp = expr.not ? 'IS NOT NULL' : 'IS NULL';
         return this.getExpressionDescription(expr.expression) + ' ' + nullOp;
+      case 'LabelPredicate':
+        return (
+          this.getExpressionDescription(expr.expression) +
+          ':' +
+          expr.labels.map((g) => g.join('|')).join(':')
+        );
       case 'List':
         return '[' + expr.elements.map(e => this.getExpressionDescription(e)).join(', ') + ']';
       case 'Parameter':

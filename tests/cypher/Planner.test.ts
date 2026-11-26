@@ -608,3 +608,64 @@ describe('Aggregate expression plan shape', () => {
     expect(agg.aggregates[0].function).toBe('COUNT');
   });
 });
+
+// ── Postfix label predicate pushdown ──────────────────────────────
+describe('Postfix label predicate pushdown', () => {
+  it('pushes WHERE n:Person, n:A|B, and n:Preference OR n:Invariant into NodeScanStep.types with no FilterStep', async () => {
+    for (const [query, expectedTypes] of [
+      ['MATCH (n) WHERE n:Person RETURN n', ['Person']],
+      ['MATCH (n) WHERE n:A|B RETURN n', ['A', 'B']],
+      ['MATCH (n) WHERE n:Preference OR n:Invariant RETURN n', ['Preference', 'Invariant']],
+      ['MATCH (n) WHERE (n:Preference OR n:Invariant) AND n.active = true RETURN n', ['Preference', 'Invariant']],
+    ] as const) {
+      const p = await plan(query);
+      const scan = p.steps.find((s) => s.kind === 'NodeScanStep') as any;
+      expect(scan).toBeDefined();
+      expect(scan.types).toEqual(expectedTypes);
+      expect(p.steps.some((s) => s.kind === 'FilterStep')).toBe(false);
+    }
+  });
+
+  it('pushes first label of n:A:B or n:A AND n:B to NodeScanStep and keeps second as FilterStep', async () => {
+    for (const query of [
+      'MATCH (n) WHERE n:A:B RETURN n',
+      'MATCH (n) WHERE n:A AND n:B RETURN n',
+    ]) {
+      const p = await plan(query);
+      const scan = p.steps.find((s) => s.kind === 'NodeScanStep') as any;
+      expect(scan.types).toEqual(['A']);
+      const filters = p.steps.filter((s) => s.kind === 'FilterStep') as FilterStep[];
+      expect(filters).toHaveLength(1);
+      expect((filters[0].predicate as any).kind).toBe('LabelPredicate');
+      expect((filters[0].predicate as any).labels).toEqual([['B']]);
+    }
+  });
+
+  it('keeps pre-typed MATCH labels, negated labels, and edge type predicates as FilterStep', async () => {
+    const preTyped = await plan('MATCH (n:Rule) WHERE n:Preference RETURN n');
+    const preScan = preTyped.steps.find((s) => s.kind === 'NodeScanStep') as any;
+    expect(preScan.types).toEqual(['Rule']);
+    expect(preTyped.steps.some((s) => s.kind === 'FilterStep')).toBe(true);
+
+    const negated = await plan('MATCH (n:Item) WHERE NOT n:Archived RETURN n');
+    expect(negated.steps.some((s) => s.kind === 'FilterStep')).toBe(true);
+
+    const edgePred = await plan('MATCH ()-[r]->() WHERE r:KNOWS RETURN r');
+    expect(edgePred.steps.some((s) => s.kind === 'FilterStep')).toBe(true);
+  });
+
+  it('emits FilterStep for pushed label alongside NodeSeekStep on id(n)', async () => {
+    const p = await plan("MATCH (n) WHERE id(n) = '42' AND n:Admin RETURN n");
+    const seeks = p.steps.filter((s) => s.kind === 'NodeSeekStep');
+    expect(seeks).toHaveLength(1);
+    const filters = p.steps.filter((s) => s.kind === 'FilterStep') as FilterStep[];
+    expect(filters.some((f) => (f.predicate as any).kind === 'LabelPredicate')).toBe(true);
+  });
+
+  it('uses pushed WHERE labels in JoinReorderer selectivity estimation', async () => {
+    const p = await plan('MATCH (a), (b) WHERE b:Person RETURN a, b');
+    const scans = p.steps.filter((s) => s.kind === 'NodeScanStep') as any[];
+    expect(scans[0].variable).toBe('b');
+    expect(scans[0].types).toEqual(['Person']);
+  });
+});

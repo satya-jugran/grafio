@@ -604,4 +604,27 @@ describe('Async Storage Provider Integration', () => {
     expect(await customGraph.traverse('nA', 'nC', { method: 'bfs', nodeTypes: ['Vip'] })).toBeNull();
     expect(traverseShortestPathSpy).toHaveBeenCalledTimes(2);
   });
+
+  it('executes postfix node label and edge type predicates over async storage', async () => {
+    await graph.addNode(['Preference'], { name: 'prefA' });
+    await graph.addNode(['Invariant'], { name: 'invA' });
+    const arch = await graph.addNode(['Preference', 'Archived'], { name: 'archA' });
+    const tgt = await graph.addNode(['Target'], { name: 'tgtA' });
+    await graph.addEdge(arch.id, tgt.id, 'REL_A', { w: 1 });
+
+    const nodeRes = await graph.query(`
+      MATCH (n)
+      WHERE (n:Preference OR n:Invariant) AND NOT n:Archived
+      RETURN n.name AS name
+      ORDER BY name ASC
+    `);
+    expect(nodeRes.rows).toEqual([{ name: 'invA' }, { name: 'prefA' }]);
+
+    const edgeRes = await graph.query(`
+      MATCH (a)-[r]->(b)
+      WHERE r:REL_A|REL_B AND NOT b:Archived
+      RETURN a.name AS src, type(r) AS relType, b.name AS dst
+    `);
+    expect(edgeRes.rows).toEqual([{ src: 'archA', relType: 'REL_A', dst: 'tgtA' }]);
+  });
 });

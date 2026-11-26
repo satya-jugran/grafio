@@ -258,6 +258,9 @@ function collectExprVars(expr: Expression, slotTable: VarSlotTable): void {
     case 'IsNull':
       collectExprVars(expr.expression, slotTable);
       return;
+    case 'LabelPredicate':
+      collectExprVars(expr.expression, slotTable);
+      return;
     case 'List':
       for (const el of expr.elements) collectExprVars(el, slotTable);
       return;

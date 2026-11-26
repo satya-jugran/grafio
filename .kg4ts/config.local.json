@@ -1,0 +1,9 @@
+{
+  "profile": "standard",
+  "storage": {
+    "type": "mongo",
+    "uri": "mongodb://localhost:27017",
+    "database": "kg4ts",
+    "graphId": "grafio-e80dd726"
+  }
+}
