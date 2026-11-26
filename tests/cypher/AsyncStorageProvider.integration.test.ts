@@ -73,6 +73,8 @@ describe('Async Storage Provider Integration', () => {
     await graph.setNodeProperties(b.id, { age: 26 }, { merge: false });
     await graph.removeNodeLabels(a.id, ['Vip']);
     expect((await graph.getNode(a.id))?.labels).toEqual(['Person']);
+    await graph.addNodeLabels(a.id, ['LTM', 'Pinned']);
+    expect((await graph.getNode(a.id))?.labels).toEqual(['Person', 'LTM', 'Pinned']);
     expect((await graph.getNode(b.id))?.properties).toEqual({ age: 26 });
 
     await graph.setEdgeProperties(e1.id, { extra: true });
@@ -536,6 +538,7 @@ describe('Async Storage Provider Integration', () => {
         return m;
       },
       removeNodeLabels: (id, labels, tx) => base.removeNodeLabels(id, labels, tx),
+      addNodeLabels: (id, labels, tx) => base.addNodeLabels(id, labels, tx),
       patchProperties: (t, id, p, tx) => base.patchProperties(t, id, p, tx),
       createIndex: (n, t, k, o) => base.createIndex(n, t, k, o),
       hasIndex: (t, k, l) => base.hasIndex(t, k, l),

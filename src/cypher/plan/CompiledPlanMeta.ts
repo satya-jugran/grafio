@@ -166,6 +166,7 @@ export function buildCompiledPlanMeta(plan: QueryPlan): CompiledPlanMeta {
         case 'DeleteEntityStep':
         case 'RemovePropertyStep':
         case 'RemoveLabelStep':
+        case 'SetLabelStep':
           hasWrites = true;
           slotTable.getOrAdd(step.variable);
           break;

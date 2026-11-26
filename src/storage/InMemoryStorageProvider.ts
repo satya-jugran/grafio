@@ -1477,6 +1477,43 @@ export class InMemoryStorageProvider implements IStorageProvider, ISyncGraphKern
     return removed.length;
   }
 
+  async addNodeLabels(
+    nodeId: string,
+    labels: string[],
+    transaction?: ITransactionHandle,
+  ): Promise<void> {
+    this.addNodeLabelsSync(nodeId, labels, transaction);
+  }
+
+  addNodeLabelsSync(
+    nodeId: string,
+    labels: readonly string[],
+    transaction?: ITransactionHandle,
+  ): number {
+    const ctx = this._txnManager.getContext(transaction);
+    if (ctx) {
+      return this._txnManager.stageAddNodeLabels(ctx, nodeId, labels, this.arena);
+    }
+
+    const slot = this.arena.resolveNodeSlot(nodeId);
+    if (slot < 0) throw new NodeNotFoundError(nodeId);
+
+    const oldLabels = this._undoStack !== null ? this.arena.nodeLabelStrings[slot] : undefined;
+    const added = this.arena.addNodeLabelsBySlot(slot, labels);
+    if (added.length > 0) {
+      if (this._undoStack !== null && oldLabels) {
+        this._undoStack.push({ kind: 'restoreNodeLabels', id: nodeId, labels: oldLabels });
+      }
+      if (this.propertyIndexes.hasAnyNodeIndexes) {
+        const addedIds = added.map((l) => this.arena.labelDict.lookup(l)).filter((id) => id >= 0);
+        const props = this.arena.nodeColumns.materializeRecord(slot);
+        this.propertyIndexes.onNodeLabelsAdded(slot, addedIds, props);
+      }
+      this._txnManager.recordLiveNodeLabelWrite(nodeId);
+    }
+    return added.length;
+  }
+
   // ---------------------------------------------------------------------------
   // Index Management
   // ---------------------------------------------------------------------------
@@ -2273,9 +2310,16 @@ export class InMemoryStorageProvider implements IStorageProvider, ISyncGraphKern
     const delta = ctx.nodeDeltas.get(id);
     if (!delta) return base;
 
-    const labels = delta.removedLabels.size > 0
-      ? Object.freeze(base.labels.filter((l) => !delta.removedLabels.has(l)))
-      : base.labels;
+    let labels: readonly string[] = base.labels;
+    if (delta.removedLabels.size > 0 || delta.addedLabels.size > 0) {
+      const next = delta.removedLabels.size > 0
+        ? base.labels.filter((l) => !delta.removedLabels.has(l))
+        : [...base.labels];
+      for (const lbl of delta.addedLabels) {
+        if (!next.includes(lbl)) next.push(lbl);
+      }
+      labels = Object.freeze(next);
+    }
     const properties = this._txnManager.applyNodeDeltaToProps(base.properties, delta);
     return {
       ...base,

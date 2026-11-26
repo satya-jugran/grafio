@@ -583,7 +583,7 @@ export class Parser {
     return { kind: 'Set', items };
   }
 
-  /** SET item: IDENT '.' IDENT '=' expression | IDENT '=' expression | IDENT '+=' expression */
+  /** SET item: IDENT '.' IDENT '=' expression | IDENT ':' IDENT (':' IDENT)* | IDENT '=' expression | IDENT '+=' expression */
   private _parseSetItem(): SetItem {
     const varToken = this._consumeIdentifier('Expected variable name in SET');
     const variable: IdentifierExpr = { kind: 'Identifier', name: varToken.value };
@@ -595,6 +595,13 @@ export class Parser {
       this._consume(TokenKind.EQ, "Expected '=' in SET assignment");
       const value = this._parseExpression();
       return { kind: 'SetItem', variable, property: propToken.value, operator: '=', value };
+    } else if (this._check(TokenKind.COLON)) {
+      const labels: string[] = [];
+      do {
+        this._advance(); // consume ':'
+        labels.push(this._consumeIdentifier('Expected label name').value);
+      } while (this._check(TokenKind.COLON));
+      return { kind: 'SetItem', variable, labels };
     } else if (this._check(TokenKind.EQ)) {
       // IDENT '=' expr (replace all properties)
       this._advance();
@@ -608,7 +615,7 @@ export class Parser {
     } else {
       const token = this._peek();
       throw new CypherSyntaxError(
-        `Expected '.', '=', or '+=' after variable name in SET, found '${token.value}'`,
+        `Expected '.', ':', '=', or '+=' after variable name in SET, found '${token.value}'`,
         token.line,
         token.col
       );

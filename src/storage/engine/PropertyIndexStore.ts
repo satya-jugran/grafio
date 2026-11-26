@@ -531,6 +531,16 @@ export class PropertyIndexStore {
     }
   }
 
+  onNodeLabelsAdded(slot: number, addedLabelIds: readonly number[], props: Readonly<Record<string, unknown>>): void {
+    if (this._nodeIndexesByPropKey.size === 0 || addedLabelIds.length === 0) return;
+    for (const idx of this._namedIndexes.values()) {
+      if (idx.target !== 'node' || idx.labelOrTypeId === undefined) continue;
+      if (addedLabelIds.includes(idx.labelOrTypeId)) {
+        idx.addSlot(slot, props);
+      }
+    }
+  }
+
   onNodePropertiesUpdated(
     slot: number,
     labelIds: readonly number[],

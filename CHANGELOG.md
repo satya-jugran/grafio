@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [8.4.0] - 2026-11-26
+
+### New Features
+
+- **Symmetric `addNodeLabels()` API & Cypher `SET n:Label`:** Added `Graph.addNodeLabels()`, `IStorageProvider.addNodeLabels()`, `ISyncGraphKernel.addNodeLabelsSync()`, `CachedStorageProvider.addNodeLabels()`, `SlotArena.addNodeLabelsBySlot()`, `PropertyIndexStore.onNodeLabelsAdded()`, and `TransactionManager.stageAddNodeLabels()` with intra-transaction add/remove delta composition and undo-checkpoint support. Extended Cypher `SET` and `MERGE ... ON CREATE/MATCH SET` (`SetItem.labels`, `SetLabelStep`, `WriteStepExecutor.executeSetLabel` / `executeSetLabelSync`) to support `SET n:Label` and `SET n:L1:L2`, plus `CypherSummary.labelsAdded`.
+- **Native `readOnly: true` Option on `CypherQueryOptions`:** Added `readOnly?: boolean` to `CypherQueryOptions` (supported across `CypherEngine.execute` / `executeSync` and `Graph.query` / `querySync`, including 2-argument options overloads). Rejects `CREATE`, `MERGE`, `SET`, `DELETE`, `REMOVE`, `CREATE INDEX`, and `DROP INDEX` across single-query, `WITH`-segmented, `UNION`, and `PlanCache`-hit paths with a typed `ReadOnlyQueryError` (exported from `grafio`, `grafio/cypher`, and `@grafio/browser`).
+
+### Bug Fixes
+
+- **Dangling-Edge Stub Nodes (`@grafio/visualizer`):** Updated `CypherVisualizer.extractGraphData()` to synthesize minimal stub nodes (`{ id, label: id }`) for any edge `source` or `target` missing from the projected result set so edge-only projections (e.g., `MATCH ()-[r:SYNAPSE]->() RETURN r`) render cleanly in 2D and 3D force-graph views.
+
 ## [8.3.0] - 2026-11-26
 
 ### New Features

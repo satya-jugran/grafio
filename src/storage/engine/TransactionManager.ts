@@ -33,6 +33,8 @@ export interface NodeDelta {
   unsetProps: Set<string>;
   /** Labels removed in this transaction */
   removedLabels: Set<string>;
+  /** Labels added in this transaction */
+  addedLabels: Set<string>;
 }
 
 export interface EdgeDelta {
@@ -313,6 +315,7 @@ export class TransactionManager {
           setProps: new Map(),
           unsetProps: new Set(),
           removedLabels: new Set(),
+          addedLabels: new Set(),
         };
         ctx.nodeDeltas.set(id, delta);
       }
@@ -412,18 +415,70 @@ export class TransactionManager {
         setProps: new Map(),
         unsetProps: new Set(),
         removedLabels: new Set(),
+        addedLabels: new Set(),
       };
       ctx.nodeDeltas.set(nodeId, delta);
     }
     let removedCount = 0;
     const currentLabels = arena.nodeLabelStrings[slot];
     for (const lbl of labels) {
-      if (currentLabels.includes(lbl) && !delta.removedLabels.has(lbl)) {
+      if (delta.addedLabels.has(lbl)) {
+        delta.addedLabels.delete(lbl);
+        removedCount++;
+      } else if (currentLabels.includes(lbl) && !delta.removedLabels.has(lbl)) {
         delta.removedLabels.add(lbl);
         removedCount++;
       }
     }
     return removedCount;
+  }
+
+  stageAddNodeLabels(ctx: TransactionContext, nodeId: string, labels: readonly string[], arena: SlotArena): number {
+    const created = ctx.createdNodes.get(nodeId);
+    if (created) {
+      const added: string[] = [];
+      for (const lbl of labels) {
+        if (!created.labels.includes(lbl) && !added.includes(lbl)) {
+          added.push(lbl);
+        }
+      }
+      if (added.length > 0) {
+        ctx.createdNodes.set(nodeId, {
+          ...created,
+          labels: Object.freeze([...created.labels, ...added]),
+          updatedOn: Date.now(),
+        });
+      }
+      return added.length;
+    }
+    if (ctx.deletedNodes.has(nodeId)) throw new NodeNotFoundError(nodeId);
+
+    const slot = arena.resolveNodeSlot(nodeId);
+    if (slot < 0) throw new NodeNotFoundError(nodeId);
+
+    let delta = ctx.nodeDeltas.get(nodeId);
+    if (!delta) {
+      delta = {
+        replacedProps: false,
+        setProps: new Map(),
+        unsetProps: new Set(),
+        removedLabels: new Set(),
+        addedLabels: new Set(),
+      };
+      ctx.nodeDeltas.set(nodeId, delta);
+    }
+    let addedCount = 0;
+    const currentLabels = arena.nodeLabelStrings[slot];
+    for (const lbl of labels) {
+      if (delta.removedLabels.has(lbl)) {
+        delta.removedLabels.delete(lbl);
+        addedCount++;
+      } else if (!currentLabels.includes(lbl) && !delta.addedLabels.has(lbl)) {
+        delta.addedLabels.add(lbl);
+        addedCount++;
+      }
+    }
+    return addedCount;
   }
 
   // ── View Materialization (Reads Inside Transaction) ───────────────────────
@@ -509,6 +564,19 @@ export class TransactionManager {
         const actualRemoved = arena.removeNodeLabelsBySlot(slot, removed);
         propIndex.onNodeLabelsRemoved(slot, removedIds, curProps);
         if (actualRemoved.length > 0) {
+          this._nodeLabelSeq.set(id, newSeq);
+        }
+      }
+
+      if (delta.addedLabels.size > 0) {
+        const added = Array.from(delta.addedLabels);
+        const curProps = propIndex.hasAnyNodeIndexes ? arena.nodeColumns.materializeRecord(slot) : {};
+        const actualAdded = arena.addNodeLabelsBySlot(slot, added);
+        if (actualAdded.length > 0) {
+          const addedIds = actualAdded
+            .map((l) => arena.labelDict.lookup(l))
+            .filter((lid) => lid >= 0);
+          propIndex.onNodeLabelsAdded(slot, addedIds, curProps);
           this._nodeLabelSeq.set(id, newSeq);
         }
       }
@@ -650,7 +718,7 @@ export class TransactionManager {
       if (delSeq > ctx.startSeq) {
         throw new TransactionConflictError(`Node '${id}' was deleted concurrently`);
       }
-      if (delta.removedLabels.size > 0) {
+      if (delta.removedLabels.size > 0 || delta.addedLabels.size > 0) {
         if ((this._nodeLabelSeq.get(id) ?? 0) > ctx.startSeq) {
           throw new TransactionConflictError(`Node '${id}' labels were modified concurrently`);
         }

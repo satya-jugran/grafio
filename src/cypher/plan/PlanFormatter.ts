@@ -195,6 +195,8 @@ export class PlanFormatter {
         return 'RemovePropertyStep ' + step.variable + '.' + step.entityKind + ' ' + step.property;
       case 'RemoveLabelStep':
         return 'RemoveLabelStep ' + step.variable + ':' + step.labels.join(':');
+      case 'SetLabelStep':
+        return 'SetLabelStep ' + step.variable + ':' + step.labels.join(':');
 
       case 'CreateIndexStep':
         return 'CreateIndexStep ' + step.name + ' target=' + step.target + ' keys=[' + step.propertyKeys.join(', ') + ']';
@@ -213,13 +215,17 @@ export class PlanFormatter {
       case 'MergeStep': {
         const readDesc = step.readSteps.map(s => this.describeStepForMermaid(s, _params)).join(', ');
         const createDesc = step.createSteps.map(s => this.describeStepForMermaid(s, _params)).join(', ');
+        const fmtMergeItem = (a: typeof step.onMatchItems[number]) =>
+          a.labels && a.labels.length > 0
+            ? a.variable + ':' + a.labels.join(':')
+            : (a.property ? a.variable + '.' + a.property : a.variable) + ' ' + a.operator + ' ' + this.getExpressionDescription(a.value!);
         let onMatch = '';
         if (step.onMatchItems && step.onMatchItems.length > 0) {
-          onMatch = ' ON MATCH SET ' + step.onMatchItems.map(a => (a.property ? a.variable + '.' + a.property : a.variable) + ' ' + a.operator + ' ' + this.getExpressionDescription(a.value)).join(', ');
+          onMatch = ' ON MATCH SET ' + step.onMatchItems.map(fmtMergeItem).join(', ');
         }
         let onCreate = '';
         if (step.onCreateItems && step.onCreateItems.length > 0) {
-          onCreate = ' ON CREATE SET ' + step.onCreateItems.map(a => (a.property ? a.variable + '.' + a.property : a.variable) + ' ' + a.operator + ' ' + this.getExpressionDescription(a.value)).join(', ');
+          onCreate = ' ON CREATE SET ' + step.onCreateItems.map(fmtMergeItem).join(', ');
         }
         return 'MergeStep { read: [' + readDesc + '], create: [' + createDesc + '] }' + onMatch + onCreate;
       }
@@ -334,6 +340,8 @@ export class PlanFormatter {
         return 'RemovePropertyStep [' + step.variable + '.' + step.entityKind + ' ' + step.property + ']';
       case 'RemoveLabelStep':
         return 'RemoveLabelStep [' + step.variable + ':' + step.labels.join(':') + ']';
+      case 'SetLabelStep':
+        return 'SetLabelStep [' + step.variable + ':' + step.labels.join(':') + ']';
 
       case 'CreateIndexStep':
         return 'CreateIndexStep [' + step.name + ' target=' + step.target + ' keys=(' + step.propertyKeys.join(', ') + ')]';
@@ -352,13 +360,17 @@ export class PlanFormatter {
       case 'MergeStep': {
         const readDesc = step.readSteps.map(s => this.describeStep(s, params)).join(', ');
         const createDesc = step.createSteps.map(s => this.describeStep(s, params)).join(', ');
+        const fmtMergeItem = (a: typeof step.onMatchItems[number]) =>
+          a.labels && a.labels.length > 0
+            ? a.variable + ':' + a.labels.join(':')
+            : (a.property ? a.variable + '.' + a.property : a.variable) + ' ' + a.operator + ' ' + this.getExpressionDescription(a.value!);
         let onMatch = '';
         if (step.onMatchItems && step.onMatchItems.length > 0) {
-          onMatch = ' ON MATCH SET ' + step.onMatchItems.map(a => (a.property ? a.variable + '.' + a.property : a.variable) + ' ' + a.operator + ' ' + this.getExpressionDescription(a.value)).join(', ');
+          onMatch = ' ON MATCH SET ' + step.onMatchItems.map(fmtMergeItem).join(', ');
         }
         let onCreate = '';
         if (step.onCreateItems && step.onCreateItems.length > 0) {
-          onCreate = ' ON CREATE SET ' + step.onCreateItems.map(a => (a.property ? a.variable + '.' + a.property : a.variable) + ' ' + a.operator + ' ' + this.getExpressionDescription(a.value)).join(', ');
+          onCreate = ' ON CREATE SET ' + step.onCreateItems.map(fmtMergeItem).join(', ');
         }
         return 'MergeStep { read: [' + readDesc + '], create: [' + createDesc + '] }' + onMatch + onCreate;
       }

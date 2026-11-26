@@ -120,6 +120,14 @@ describe('Semantic', () => {
       expect(() => analyse('MATCH (n) SET n += { tags: ["a", "b"] } RETURN n'))
         .toThrow(CypherSemanticError);
     });
+
+    it('allows SET n:Label and rejects SET r:Label on edges or deleted variables', () => {
+      expect(() => analyse('MATCH (n:STM) SET n:LTM:Pinned RETURN n')).not.toThrow();
+      expect(() => analyse('MERGE (n:Node { id: 1 }) ON CREATE SET n:STM ON MATCH SET n:LTM')).not.toThrow();
+      expect(() => analyse('MATCH ()-[r:KNOWS]->() SET r:VIP RETURN r')).toThrow(CypherSemanticError);
+      expect(() => analyse('MATCH ()-[r:KNOWS]->() MERGE (n:Node) ON MATCH SET r:VIP')).toThrow(CypherSemanticError);
+      expect(() => analyse('MATCH (n) SET n:LTM DELETE n')).toThrow(CypherSemanticError);
+    });
   });
 
   // ── Pattern Comprehensions and Expressions ─────────────────────

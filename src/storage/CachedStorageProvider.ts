@@ -519,6 +519,17 @@ export class CachedStorageProvider implements IStorageProvider {
     }
   }
 
+  async addNodeLabels(
+    nodeId: string,
+    labels: string[],
+    transaction?: ITransactionHandle,
+  ): Promise<void> {
+    await this._underlying.addNodeLabels(nodeId, labels, transaction);
+    if (!transaction) {
+      await this._invalidate('node', nodeId);
+    }
+  }
+
   // ─── Index management ───────────────────────────────────────────────────────
 
   async createIndex(

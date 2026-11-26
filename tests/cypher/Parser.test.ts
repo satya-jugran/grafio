@@ -618,7 +618,7 @@ describe('Parser', () => {
       expect((item.variable as any).kind).toBe('Identifier');
       expect(item.property).toBeUndefined();
       expect(item.operator).toBe('=');
-      expect(item.value.kind).toBe('Map');
+      expect(item.value!.kind).toBe('Map');
 
       expect(ast.return.kind).toBe('Return');
     });
@@ -635,9 +635,25 @@ describe('Parser', () => {
       expect((item.variable as any).kind).toBe('Identifier');
       expect(item.property).toBeUndefined();
       expect(item.operator).toBe('+=');
-      expect(item.value.kind).toBe('Map');
+      expect(item.value!.kind).toBe('Map');
 
       expect(ast.return.kind).toBe('Return');
+    });
+
+    it('parses SET single, multiple, and mixed label/property items', () => {
+      const single = parse('MATCH (n:STM) SET n:LTM RETURN n');
+      expect(single.set!.items).toEqual([
+        { kind: 'SetItem', variable: { kind: 'Identifier', name: 'n' }, labels: ['LTM'] },
+      ]);
+
+      const multi = parse('MATCH (n) SET n:LTM:Pinned, n.promoted = true RETURN n');
+      expect(multi.set!.items).toHaveLength(2);
+      expect(multi.set!.items[0].labels).toEqual(['LTM', 'Pinned']);
+      expect(multi.set!.items[1].property).toBe('promoted');
+
+      const merged = parse('MERGE (n:Node { id: 1 }) ON CREATE SET n:STM ON MATCH SET n:LTM:Pinned');
+      expect(merged.merge![0].actions[0].items[0].labels).toEqual(['STM']);
+      expect(merged.merge![0].actions[1].items[0].labels).toEqual(['LTM', 'Pinned']);
     });
 
     it('parses DELETE node', () => {

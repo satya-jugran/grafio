@@ -398,7 +398,9 @@ export class Semantic {
       for (const merge of ast.merge) {
         for (const action of merge.actions) {
           for (const item of action.items) {
-            this._checkExpressionVars(item.value, 'MERGE SET', extraScope);
+            if (item.value) {
+              this._checkExpressionVars(item.value, 'MERGE SET', extraScope);
+            }
           }
         }
       }
@@ -1293,6 +1295,14 @@ export class Semantic {
         for (const action of merge.actions) {
           for (const item of action.items) {
             this._checkExpressionVarsBound(item.variable, 'MERGE SET', knownVars);
+            if (item.labels && item.labels.length > 0 && item.variable.kind === 'Identifier') {
+              const binding = knownBindings.get(item.variable.name);
+              if (binding === 'edge') {
+                throw new CypherSemanticError(
+                  `Cannot set labels on edge '${item.variable.name}'. Labels can only be set on nodes.`
+                );
+              }
+            }
           }
         }
       }
@@ -1302,6 +1312,14 @@ export class Semantic {
     if (ast.set) {
       for (const item of ast.set.items) {
         this._checkExpressionVarsBound(item.variable, 'SET', knownVars);
+        if (item.labels && item.labels.length > 0 && item.variable.kind === 'Identifier') {
+          const binding = knownBindings.get(item.variable.name);
+          if (binding === 'edge') {
+            throw new CypherSemanticError(
+              `Cannot set labels on edge '${item.variable.name}'. Labels can only be set on nodes.`
+            );
+          }
+        }
       }
     }
 
@@ -1363,7 +1381,7 @@ export class Semantic {
     // variable in the value expression of a SET, makes no sense.
     if (ast.set) {
       for (const item of ast.set.items) {
-        if (this._expressionReferencesAny(item.variable, deletedVars) || this._expressionReferencesAny(item.value, deletedVars)
+        if (this._expressionReferencesAny(item.variable, deletedVars) || (item.value && this._expressionReferencesAny(item.value, deletedVars))
         ) {
           throw new CypherSemanticError(
             `Cannot SET property on deleted variable. ` +
@@ -1378,7 +1396,7 @@ export class Semantic {
       for (const merge of ast.merge) {
         for (const action of merge.actions) {
           for (const item of action.items) {
-            if ( this._expressionReferencesAny(item.variable, deletedVars) || this._expressionReferencesAny(item.value, deletedVars)
+            if (this._expressionReferencesAny(item.variable, deletedVars) || (item.value && this._expressionReferencesAny(item.value, deletedVars))
             ) {
               throw new CypherSemanticError(
                 `Cannot SET property on deleted variable. ` +
@@ -1407,20 +1425,22 @@ export class Semantic {
    */
   private _checkSetTypes(ast: QueryAst): QueryAst {
     const checkItem = (item: import('./ast/AstNode').SetItem) => {
+      if (item.labels && item.labels.length > 0) return;
+      const valExpr = item.value!;
       if (item.property !== undefined) {
-        if (!this._isPrimitiveExpression(item.value)) {
+        if (!this._isPrimitiveExpression(valExpr)) {
           throw new CypherSemanticError(
             'Property value must be a primitive type (string, number, boolean, or null)',
           );
         }
       } else {
-        if (item.value.kind !== 'Map' && item.value.kind !== 'Parameter') {
+        if (valExpr.kind !== 'Map' && valExpr.kind !== 'Parameter') {
           throw new CypherSemanticError(
             'SET map replacement or mutation requires a map expression or parameter',
           );
         }
-        if (item.value.kind === 'Map') {
-          for (const val of Object.values((item.value as import('./ast/AstNode').MapExpr).props)) {
+        if (valExpr.kind === 'Map') {
+          for (const val of Object.values((valExpr as import('./ast/AstNode').MapExpr).props)) {
             if (!this._isPrimitiveExpression(val)) {
               throw new CypherSemanticError(
                 'Map property values must be a primitive type (string, number, boolean, or null)',

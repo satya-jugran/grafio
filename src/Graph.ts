@@ -340,6 +340,14 @@ export class Graph {
     return this._index.removeNodeLabels(nodeId, labels, transaction);
   }
 
+  async addNodeLabels(
+    nodeId: string,
+    labels: string[],
+    transaction?: GraphTransaction,
+  ): Promise<void> {
+    return this._index.addNodeLabels(nodeId, labels, transaction);
+  }
+
   async setEdgeProperties(
     edgeId: string,
     properties: Record<string, unknown>,

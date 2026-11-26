@@ -12,9 +12,14 @@
  */
 import { describe, expect, it, beforeAll, beforeEach, afterEach, jest } from '@jest/globals';
 import { Graph } from '../../src/Graph';
-import { CypherEngine, CypherNotSupportedError, CypherRuntimeError, CypherSemanticError, PlanFormat } from '../../src/cypher';
+import { CypherEngine, CypherError, CypherNotSupportedError, CypherRuntimeError, CypherSemanticError, PlanFormat, ReadOnlyQueryError } from '../../src/cypher';
 import { PlanCache } from '../../src/cypher/PlanCache';
 import { Edge, Node } from '../../src';
+import { GraphError } from '../../src/errors';
+import { InMemoryStorageProvider } from '../../src/storage/InMemoryStorageProvider';
+import { CachedStorageProvider } from '../../src/storage/CachedStorageProvider';
+import { CacheManager } from '../../src/storage/cache/CacheManager';
+import type { CacheConfig } from '../../src/storage/cache/CacheConfig';
 
 /** Build a social graph using Cypher CREATE queries. */
 async function buildSocialGraph(graph: Graph): Promise<void> {
@@ -1726,6 +1731,7 @@ describe('CypherEngine Integration', () => {
         },
         paramNames: [],
         indexEpoch: 0,
+        mutatingClause: null,
       };
       disabled.set('q1', dummyEntry);
       expect(disabled.get('q1', 0)).toBeUndefined();
@@ -2140,6 +2146,85 @@ describe('CypherEngine Integration', () => {
       );
       expect(planText).toContain('NodeScanStep (n:Preference|Invariant)');
       expect(planText).not.toContain('FilterStep');
+    });
+  });
+
+  describe('CypherQueryOptions.readOnly guard', () => {
+    it('rejects all write and DDL clauses in sync, async, 2-arg, 3-arg, WITH, UNION, and PlanCache-hit paths', async () => {
+      const g = new Graph();
+      await g.addNode(['Item'], { name: 'seed' });
+
+      const disallowed: Array<[string, string]> = [
+        ["CREATE (n:Item { name: 'x' }) RETURN n", 'CREATE'],
+        ["MERGE (n:Item { name: 'seed' }) RETURN n", 'MERGE'],
+        ["MATCH (n:Item) SET n.flag = true RETURN n", 'SET'],
+        ["MATCH (n:Item) SET n:Tagged RETURN n", 'SET'],
+        ["MATCH (n:Item) DELETE n", 'DELETE'],
+        ["MATCH (n:Item) DETACH DELETE n", 'DELETE'],
+        ["MATCH (n:Item) REMOVE n.name RETURN n", 'REMOVE'],
+        ["MATCH (n:Item) REMOVE n:Item RETURN n", 'REMOVE'],
+        ['CREATE INDEX idx_ro FOR (n:Item) ON (n.name)', 'CREATE INDEX'],
+        ['DROP INDEX idx_ro', 'DROP INDEX'],
+        ["MATCH (n:Item) WITH n SET n.x = 1 RETURN n", 'SET'],
+        ["MATCH (n:Item) RETURN n.name AS v UNION MATCH (m:Item) CREATE (z:Item { name: 'bad' }) RETURN z.name AS v", 'CREATE'],
+      ];
+
+      for (const [query, expectedClause] of disallowed) {
+        // 2-arg Graph.querySync / Graph.query
+        let syncErr: unknown;
+        try {
+          g.querySync(query, { readOnly: true });
+        } catch (e) {
+          syncErr = e;
+        }
+        expect(syncErr).toBeInstanceOf(ReadOnlyQueryError);
+        expect(syncErr).toBeInstanceOf(CypherError);
+        expect(syncErr).toBeInstanceOf(GraphError);
+        expect((syncErr as ReadOnlyQueryError).clause).toBe(expectedClause);
+
+        // 3-arg Graph.query with params
+        await expect(g.query(query, {}, { readOnly: true })).rejects.toThrow(ReadOnlyQueryError);
+      }
+
+      // PlanCache safety: compile & execute a write query without readOnly first,
+      // then execute the exact same query string with { readOnly: true }
+      const cachedWriteQuery = "CREATE (n:Item { name: 'cached-write' }) RETURN n";
+      const firstRun = g.querySync(cachedWriteQuery);
+      expect(firstRun.summary.nodesCreated).toBe(1);
+      expect(() => g.querySync(cachedWriteQuery, { readOnly: true })).toThrow(ReadOnlyQueryError);
+      expect(await g.getNodeCount()).toBe(2);
+
+      // Read-only queries and SHOW INDEXES succeed with readOnly: true
+      const readRes = g.querySync('MATCH (n:Item) RETURN n.name AS name ORDER BY name ASC', { readOnly: true });
+      expect(readRes.rows).toEqual([{ name: 'cached-write' }, { name: 'seed' }]);
+      const showRes = await g.query('SHOW INDEXES', { readOnly: true });
+      expect(showRes.rows).toEqual([]);
+
+      // Async non-kernel provider path (CachedStorageProvider)
+      const cfg: CacheConfig = {
+        maxNodesCount: 100,
+        maxEdgesCount: 200,
+        cacheStore: 'in-memory',
+        evictionStrategy: 'LRU',
+        preloadStrategy: 'none',
+      };
+      const cm = new CacheManager(cfg);
+      const cachedStore = new CachedStorageProvider(new InMemoryStorageProvider(), 'ro-async', cm, cfg);
+      const asyncGraph = new Graph(cachedStore);
+      const asyncEngine = new CypherEngine(asyncGraph);
+      await asyncGraph.addNode(['Item'], { name: 'async-seed' });
+
+      // Populate cache via write, then reject on cache hit with readOnly: true
+      await asyncEngine.execute("MATCH (n:Item) SET n.v = 1 RETURN n");
+      await expect(
+        asyncEngine.execute("MATCH (n:Item) SET n.v = 1 RETURN n", { readOnly: true }),
+      ).rejects.toThrow(ReadOnlyQueryError);
+      await expect(
+        asyncEngine.execute("CREATE (n:Item { name: 'nope' })", {}, { readOnly: true }),
+      ).rejects.toThrow(ReadOnlyQueryError);
+      const asyncRead = await asyncEngine.execute('MATCH (n:Item) RETURN n.name AS name', { readOnly: true });
+      expect(asyncRead.rows).toEqual([{ name: 'async-seed' }]);
+      await cm.invalidateAll();
     });
   });
 });

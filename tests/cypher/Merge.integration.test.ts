@@ -82,4 +82,20 @@ describe('CypherEngine MERGE Integration', () => {
     const edgeRes = await engine.execute('MATCH (a:Person {name: "Alice"})-[r:KNOWS]->(b:Person {name: "Bob"}) RETURN r');
     expect(edgeRes.rows).toHaveLength(1);
   });
+
+  it('applies ON CREATE SET n:Label and ON MATCH SET n:Label', async () => {
+    const first = await engine.execute(
+      "MERGE (m:Memory { key: 'k1' }) ON CREATE SET m:STM ON MATCH SET m:LTM:Pinned RETURN labels(m) AS lbls",
+    );
+    expect(first.summary.nodesCreated).toBe(1);
+    expect(first.summary.labelsAdded).toBe(1);
+    expect(first.rows[0].lbls).toEqual(['Memory', 'STM']);
+
+    const second = await engine.execute(
+      "MERGE (m:Memory { key: 'k1' }) ON CREATE SET m:STM ON MATCH SET m:LTM:Pinned RETURN labels(m) AS lbls",
+    );
+    expect(second.summary.nodesCreated).toBe(0);
+    expect(second.summary.labelsAdded).toBe(2);
+    expect(second.rows[0].lbls).toEqual(['Memory', 'STM', 'LTM', 'Pinned']);
+  });
 });

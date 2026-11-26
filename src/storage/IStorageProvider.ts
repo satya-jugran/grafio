@@ -126,6 +126,11 @@ export interface ISyncGraphKernel {
     labels: readonly string[],
     transaction?: ITransactionHandle,
   ): number;
+  addNodeLabelsSync(
+    nodeId: string,
+    labels: readonly string[],
+    transaction?: ITransactionHandle,
+  ): number;
 
   createIndexSync(
     name: string,
@@ -308,6 +313,12 @@ export interface IStorageProvider {
   // ---------------------------------------------------------------------------
 
   removeNodeLabels(
+    nodeId: string,
+    labels: string[],
+    transaction?: ITransactionHandle,
+  ): Promise<void>;
+
+  addNodeLabels(
     nodeId: string,
     labels: string[],
     transaction?: ITransactionHandle,

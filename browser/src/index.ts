@@ -63,6 +63,7 @@ export {
   CypherError,
   CypherSyntaxError,
   CypherNotSupportedError,
+  ReadOnlyQueryError,
   CypherSemanticError,
   CypherRuntimeError,
   UnboundParameterError,

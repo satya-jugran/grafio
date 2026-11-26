@@ -111,6 +111,7 @@ export interface StepResult {
   edgesCreated?: number;
   edgesDeleted?: number;
   propertiesSet?: number;
+  labelsAdded?: number;
   labelsRemoved?: number;
   indexesCreated?: number;
   indexesDeleted?: number;

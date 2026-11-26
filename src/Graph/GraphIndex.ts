@@ -740,6 +740,24 @@ export class GraphIndex {
     }
   }
 
+  async addNodeLabels(
+    nodeId: string,
+    labels: string[],
+    transaction?: GraphTransaction,
+  ): Promise<void> {
+    const handle = transaction?._getHandle();
+    try {
+      if (this._kernel) {
+        this._kernel.addNodeLabelsSync(nodeId, labels, handle);
+      } else {
+        await this._store.addNodeLabels(nodeId, labels, handle);
+      }
+    } catch (error) {
+      transaction?.markFailed();
+      throw error;
+    }
+  }
+
   async setEdgeProperties(
     edgeId: string,
     properties: Record<string, unknown>,

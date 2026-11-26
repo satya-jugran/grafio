@@ -16,11 +16,13 @@ import {
   CreateNodeStep,
   CreateEdgeStep,
   SetPropertyStep,
+  SetLabelStep,
 } from '../../plan/QueryPlan';
 import { Expression } from '../../ast/AstNode';
 import {
   UNBOUND,
   type CompiledPlanMeta,
+  type VarSlotTable,
 } from '../../plan/CompiledPlanMeta';
 import { CypherRuntimeError } from '../../errors';
 import { compileExpression, type CompiledExprFn } from '../ClosureCompiler';
@@ -382,6 +384,83 @@ export class WriteStepExecutor {
     }
 
     return { rows: result, propertiesSet };
+  }
+
+  // ── SetLabelStep ───────────────────────────────────────────────
+
+  async executeSetLabel(
+    step: SetLabelStep,
+    rows: Row[],
+    slotTable: VarSlotTable,
+    transaction?: GraphTransaction,
+  ): Promise<StepResult> {
+    let labelsAdded = 0;
+    const varSlot = slotTable.getOrAdd(step.variable);
+    const outRows: Row[] = new Array(rows.length);
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const entity = row[varSlot];
+      if (entity === UNBOUND || !entity) {
+        outRows[i] = row;
+        continue;
+      }
+      const nodeId = (entity as Node).id;
+      const before = await this._graph.getNode(nodeId, transaction);
+      await this._graph.addNodeLabels(nodeId, step.labels, transaction);
+      const refreshed = await this._graph.getNode(nodeId, transaction);
+      outRows[i] = refreshed
+        ? refreshEntityInRow(row, 'node', nodeId, refreshed)
+        : row.slice();
+      if (before) {
+        const beforeSet = new Set(before.labels);
+        const seenNew = new Set<string>();
+        for (let k = 0; k < step.labels.length; k++) {
+          const lbl = step.labels[k];
+          if (!beforeSet.has(lbl) && !seenNew.has(lbl)) {
+            seenNew.add(lbl);
+            labelsAdded++;
+          }
+        }
+      }
+    }
+    return { rows: outRows, labelsAdded };
+  }
+
+  executeSetLabelSync(
+    kernel: ISyncGraphKernel,
+    step: SetLabelStep,
+    rows: Row[],
+    slotTable: VarSlotTable,
+    transaction?: GraphTransaction,
+  ): StepResult {
+    let labelsAdded = 0;
+    const varSlot = slotTable.getOrAdd(step.variable);
+    const txHandle = transaction?._getHandle();
+    const outRows: Row[] = new Array(rows.length);
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const entity = row[varSlot];
+      if (entity === UNBOUND || !entity) {
+        outRows[i] = row;
+        continue;
+      }
+      const nodeId = (entity as Node).id;
+      let addedCount: number;
+      try {
+        addedCount = kernel.addNodeLabelsSync(nodeId, step.labels, txHandle);
+      } catch (err) {
+        transaction?.markFailed();
+        throw err;
+      }
+      const refreshed = kernel.getNodeSync(nodeId, txHandle);
+      outRows[i] = refreshed
+        ? refreshEntityInRow(row, 'node', nodeId, refreshed)
+        : row.slice();
+      labelsAdded += addedCount;
+    }
+    return { rows: outRows, labelsAdded };
   }
 
   private _validateMapAssignment(evaluatedValue: unknown): Record<string, unknown> {

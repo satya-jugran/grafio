@@ -37,6 +37,7 @@ import {
   PatternComprehensionStep,
   PatternExprStep,
   RemoveLabelStep,
+  SetLabelStep,
   PropertyFilter,
 } from './plan/QueryPlan';
 import { WhereDecomposer, VarInfo } from './plan/WhereDecomposer';
@@ -131,14 +132,18 @@ export class Planner {
           for (const m of seg.merge) {
             for (const a of m.actions) {
               for (const it of a.items) {
-                await this._collectExprMatchesAsync(it.value, out);
+                if (it.value) {
+                  await this._collectExprMatchesAsync(it.value, out);
+                }
               }
             }
           }
         }
         if (seg.set) {
           for (const it of seg.set.items) {
-            await this._collectExprMatchesAsync(it.value, out);
+            if (it.value) {
+              await this._collectExprMatchesAsync(it.value, out);
+            }
           }
         }
         for (const it of seg.with.items) {
@@ -161,14 +166,18 @@ export class Planner {
       for (const m of stmt.merge) {
         for (const a of m.actions) {
           for (const it of a.items) {
-            await this._collectExprMatchesAsync(it.value, out);
+            if (it.value) {
+              await this._collectExprMatchesAsync(it.value, out);
+            }
           }
         }
       }
     }
     if (stmt.set) {
       for (const it of stmt.set.items) {
-        await this._collectExprMatchesAsync(it.value, out);
+        if (it.value) {
+          await this._collectExprMatchesAsync(it.value, out);
+        }
       }
     }
     if (stmt.orderBy) {
@@ -728,36 +737,46 @@ export class Planner {
         const onCreateItems: Array<{
           variable: string;
           property?: string;
-          operator: '=' | '+=';
-          value: Expression;
+          operator?: '=' | '+=';
+          value?: Expression;
+          labels?: string[];
           entityKind: 'node' | 'edge';
         }> = [];
         const onMatchItems: Array<{
           variable: string;
           property?: string;
-          operator: '=' | '+=';
-          value: Expression;
+          operator?: '=' | '+=';
+          value?: Expression;
+          labels?: string[];
           entityKind: 'node' | 'edge';
         }> = [];
         for (const action of mergeClause.actions) {
           const arr = action.onMatch ? onMatchItems : onCreateItems;
           for (const item of action.items) {
-            const valExpr = this._extractSubqueriesSync(
-              item.value,
-              steps,
-              knownVars,
-              undefined,
-              preparedMatches,
-            );
             const varName = (item.variable as IdentifierExpr).name;
             const entityKind = this._resolveEntityKind(varName, ast);
-            arr.push({
-              variable: varName,
-              property: item.property,
-              operator: item.operator,
-              value: valExpr,
-              entityKind,
-            });
+            if (item.labels && item.labels.length > 0) {
+              arr.push({
+                variable: varName,
+                labels: item.labels,
+                entityKind,
+              });
+            } else {
+              const valExpr = this._extractSubqueriesSync(
+                item.value!,
+                steps,
+                knownVars,
+                undefined,
+                preparedMatches,
+              );
+              arr.push({
+                variable: varName,
+                property: item.property,
+                operator: item.operator!,
+                value: valExpr,
+                entityKind,
+              });
+            }
           }
         }
         const readSteps: PlanStep[] = [];
@@ -796,25 +815,33 @@ export class Planner {
     // ── Emit SET steps ──────────────────────────────────────────────
     if (ast.set) {
       for (const item of ast.set.items) {
-        const valExpr = this._extractSubqueriesSync(
-          item.value,
-          steps,
-          knownVars,
-          undefined,
-          preparedMatches,
-        );
         const varName =
           item.variable.kind === 'Identifier'
             ? (item.variable as IdentifierExpr).name
             : '';
         if (!varName) continue;
-        const entityKind = this._resolveEntityKind(varName, ast);
-        steps.push({
-          kind: 'SetPropertyStep',
-          variable: varName,
-          entityKind,
-          assignments: [{ key: item.property, operator: item.operator, value: valExpr }],
-        });
+        if (item.labels && item.labels.length > 0) {
+          steps.push({
+            kind: 'SetLabelStep',
+            variable: varName,
+            labels: item.labels,
+          } as SetLabelStep);
+        } else {
+          const valExpr = this._extractSubqueriesSync(
+            item.value!,
+            steps,
+            knownVars,
+            undefined,
+            preparedMatches,
+          );
+          const entityKind = this._resolveEntityKind(varName, ast);
+          steps.push({
+            kind: 'SetPropertyStep',
+            variable: varName,
+            entityKind,
+            assignments: [{ key: item.property, operator: item.operator!, value: valExpr }],
+          });
+        }
       }
     }
 

@@ -13,6 +13,7 @@ export interface CachedPlanEntry {
   readonly meta: CompiledPlanMeta;
   readonly paramNames: readonly string[];
   readonly indexEpoch: number;
+  readonly mutatingClause: string | null;
 }
 
 export class PlanCache {

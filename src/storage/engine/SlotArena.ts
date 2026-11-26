@@ -595,6 +595,35 @@ export class SlotArena {
     return removed;
   }
 
+  addNodeLabelsBySlot(slot: number, labelsToAdd: readonly string[]): string[] {
+    const current = this.nodeLabelStrings[slot];
+    const added: string[] = [];
+
+    for (let i = 0; i < labelsToAdd.length; i++) {
+      const lbl = labelsToAdd[i];
+      if (!current.includes(lbl) && !added.includes(lbl)) {
+        added.push(lbl);
+      }
+    }
+
+    if (added.length === 0) return added;
+
+    this.invalidateNodeEntity(slot);
+    const merged = [...current, ...added];
+    const { frozenLabels, labelIds, maskLo, maskHi } = this.internLabels(merged);
+    this.nodeLabelIds[slot] = labelIds;
+    this.nodeLabelStrings[slot] = frozenLabels;
+    this.nodeLabelMaskLo[slot] = maskLo;
+    this.nodeLabelMaskHi[slot] = maskHi;
+    for (let i = 0; i < added.length; i++) {
+      const lid = this.labelDict.lookup(added[i]);
+      if (lid >= 0) this._addNodeToLabelSet(lid, slot);
+    }
+    this.nodeUpdatedOn[slot] = Date.now();
+    this.nodeVersion[slot] = (this.nodeVersion[slot] + 1) >>> 0;
+    return added;
+  }
+
   invalidateNodeEntity(slot: number): void {
     const ent = this.nodeEntities[slot];
     if (ent) {

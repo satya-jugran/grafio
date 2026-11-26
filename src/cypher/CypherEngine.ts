@@ -18,11 +18,11 @@ import { Semantic } from './Semantic';
 import { Planner } from './Planner';
 import { Executor } from './executor/Executor';
 import { CypherResult } from './Result';
-import { CypherNotSupportedError, CypherRuntimeError, UnboundParameterError } from './errors';
+import { CypherNotSupportedError, CypherRuntimeError, ReadOnlyQueryError, UnboundParameterError } from './errors';
 import { PlanFormatter, PlanFormat } from './plan/PlanFormatter';
 import { getOrBuildCompiledPlanMeta } from './plan/CompiledPlanMeta';
 import { PlanCache, type CachedPlanEntry } from './PlanCache';
-import type { Statement } from './ast/AstNode';
+import type { QueryAst, Statement } from './ast/AstNode';
 
 /**
  * Options for configuring the {@link CypherEngine} instance itself.
@@ -52,10 +52,17 @@ export interface CypherQueryOptions {
     /** The output format for the execution plan. */
     format: PlanFormat;
   };
+
+  /**
+   * When `true`, rejects any query containing write or index DDL clauses
+   * (`CREATE`, `MERGE`, `SET`, `DELETE`, `REMOVE`, `CREATE INDEX`, `DROP INDEX`)
+   * with a {@link ReadOnlyQueryError} before planning or execution.
+   */
+  readOnly?: boolean;
 }
 
 const GATED_TOKENS: ReadonlySet<TokenKind> = new Set([]);
-const OPTION_KEYS: ReadonlyArray<keyof CypherQueryOptions> = ['transaction', 'executionPlan'];
+const OPTION_KEYS: ReadonlyArray<keyof CypherQueryOptions> = ['transaction', 'executionPlan', 'readOnly'];
 
 /**
  * Main entry point for executing Cypher queries against a {@link Graph}.
@@ -102,18 +109,27 @@ export class CypherEngine {
     }
 
     const { resolvedParams, resolvedOptions } = this._resolveParamsAndOptions(params, options);
+    const readOnly = resolvedOptions?.readOnly === true;
     const epoch = this._graph.indexEpoch;
     let entry = this._planCache.get(query, epoch);
 
-    if (!entry) {
+    if (entry) {
+      if (readOnly && entry.mutatingClause) {
+        throw new ReadOnlyQueryError(entry.mutatingClause);
+      }
+    } else {
       const tokens = new Lexer(query).tokenise();
       this._validateTokens(tokens);
       const rawAst = new Parser(tokens).parse();
+      const mutatingClause = this._findMutatingClause(rawAst);
+      if (readOnly && mutatingClause) {
+        throw new ReadOnlyQueryError(mutatingClause);
+      }
       new Semantic().analyseStatement(rawAst);
       const plan = await this._planner.plan(rawAst);
       const meta = getOrBuildCompiledPlanMeta(plan);
       const paramNames = this._collectParameterNames(rawAst);
-      entry = { plan, meta, paramNames, indexEpoch: epoch };
+      entry = { plan, meta, paramNames, indexEpoch: epoch, mutatingClause };
       this._planCache.set(query, entry);
     }
 
@@ -174,11 +190,16 @@ export class CypherEngine {
     }
 
     const { resolvedParams, resolvedOptions } = this._resolveParamsAndOptions(params, options);
+    const readOnly = resolvedOptions?.readOnly === true;
     const epoch = this._graph.indexEpoch;
     let entry = this._planCache.get(query, epoch);
 
-    if (!entry) {
-      entry = this._compileSync(query, epoch);
+    if (entry) {
+      if (readOnly && entry.mutatingClause) {
+        throw new ReadOnlyQueryError(entry.mutatingClause);
+      }
+    } else {
+      entry = this._compileSync(query, epoch, readOnly);
       this._planCache.set(query, entry);
     }
 
@@ -223,11 +244,12 @@ export class CypherEngine {
         const tokens = new Lexer(query).tokenise();
         this._validateTokens(tokens);
         const rawAst = new Parser(tokens).parse();
+        const mutatingClause = this._findMutatingClause(rawAst);
         new Semantic().analyseStatement(rawAst);
         const plan = await this._planner.plan(rawAst);
         const meta = getOrBuildCompiledPlanMeta(plan);
         const paramNames = this._collectParameterNames(rawAst);
-        entry = { plan, meta, paramNames, indexEpoch: epoch };
+        entry = { plan, meta, paramNames, indexEpoch: epoch, mutatingClause };
       }
       this._planCache.set(query, entry);
     }
@@ -252,15 +274,19 @@ export class CypherEngine {
     return this._planCache.size;
   }
 
-  private _compileSync(query: string, indexEpoch: number): CachedPlanEntry {
+  private _compileSync(query: string, indexEpoch: number, readOnly = false): CachedPlanEntry {
     const tokens = new Lexer(query).tokenise();
     this._validateTokens(tokens);
     const rawAst = new Parser(tokens).parse();
+    const mutatingClause = this._findMutatingClause(rawAst);
+    if (readOnly && mutatingClause) {
+      throw new ReadOnlyQueryError(mutatingClause);
+    }
     new Semantic().analyseStatement(rawAst);
     const plan = this._planner.planSync(rawAst);
     const meta = getOrBuildCompiledPlanMeta(plan);
     const paramNames = this._collectParameterNames(rawAst);
-    return { plan, meta, paramNames, indexEpoch };
+    return { plan, meta, paramNames, indexEpoch, mutatingClause };
   }
 
   private _resolveParamsAndOptions(
@@ -312,7 +338,41 @@ export class CypherEngine {
         if (fmt !== 'json' && fmt !== 'text' && fmt !== 'mermaid') return false;
       }
     }
+    if ('readOnly' in rec) {
+      if (rec.readOnly !== undefined && typeof rec.readOnly !== 'boolean') {
+        return false;
+      }
+    }
     return true;
+  }
+
+  private _findMutatingClause(stmt: Statement): string | null {
+    if (stmt.kind === 'Union') {
+      for (const q of stmt.queries) {
+        const found = this._findMutatingClauseInQuery(q);
+        if (found) return found;
+      }
+      return null;
+    }
+    return this._findMutatingClauseInQuery(stmt);
+  }
+
+  private _findMutatingClauseInQuery(ast: QueryAst): string | null {
+    for (const seg of ast.segments) {
+      if (seg.create) return 'CREATE';
+      if (seg.merge && seg.merge.length > 0) return 'MERGE';
+      if (seg.set) return 'SET';
+      if (seg.delete) return 'DELETE';
+      if (seg.remove) return 'REMOVE';
+    }
+    if (ast.create) return 'CREATE';
+    if (ast.merge && ast.merge.length > 0) return 'MERGE';
+    if (ast.set) return 'SET';
+    if (ast.delete) return 'DELETE';
+    if (ast.remove) return 'REMOVE';
+    if (ast.createIndex) return 'CREATE INDEX';
+    if (ast.dropIndex) return 'DROP INDEX';
+    return null;
   }
 
   private _validateTokens(tokens: Token[]): void {

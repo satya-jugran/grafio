@@ -1229,6 +1229,20 @@ describe('CachedStorageProvider', () => {
       ).toEqual([{ groupValues: ['NYC'], aggValues: { c: 3 } }]);
       expect(await delegating.traverseShortestPath('n1', 'n2', ['T'])).toEqual(['n1', 'n2']);
     });
+
+    it('invalidates cached node on addNodeLabels outside a transaction and skips invalidation inside a transaction', async () => {
+      await provider.insertNode({ id: 'lbl-1', labels: ['STM'], properties: { k: 1 } });
+      expect(await cacheManager.getNode('graph-test', 'lbl-1')).toBeDefined();
+
+      const tx = await provider.beginTransaction();
+      await provider.addNodeLabels('lbl-1', ['LTM'], tx);
+      expect(await cacheManager.getNode('graph-test', 'lbl-1')).toBeDefined();
+      await provider.commitTransaction(tx);
+
+      await provider.addNodeLabels('lbl-1', ['Pinned']);
+      expect(await cacheManager.getNode('graph-test', 'lbl-1')).toBeUndefined();
+      expect((await provider.getNode('lbl-1'))?.labels).toEqual(['STM', 'LTM', 'Pinned']);
+    });
   });
 });
 

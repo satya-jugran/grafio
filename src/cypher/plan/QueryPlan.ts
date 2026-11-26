@@ -58,6 +58,7 @@ export type PlanStep =
   | DeleteEntityStep
   | RemovePropertyStep
   | RemoveLabelStep
+  | SetLabelStep
   | CreateIndexStep
   | DropIndexStep
   | ShowIndexesStep
@@ -331,8 +332,8 @@ export interface MergeStep {
   pattern: MatchPattern;
   readSteps: PlanStep[];
   createSteps: PlanStep[];
-  onCreateItems: Array<{ variable: string; property?: string; operator: '=' | '+='; value: Expression; entityKind: 'node' | 'edge' }>;
-  onMatchItems: Array<{ variable: string; property?: string; operator: '=' | '+='; value: Expression; entityKind: 'node' | 'edge' }>;
+  onCreateItems: Array<{ variable: string; property?: string; operator?: '=' | '+='; value?: Expression; labels?: string[]; entityKind: 'node' | 'edge' }>;
+  onMatchItems: Array<{ variable: string; property?: string; operator?: '=' | '+='; value?: Expression; labels?: string[]; entityKind: 'node' | 'edge' }>;
 }
 
 /**
@@ -416,6 +417,15 @@ export interface RemoveLabelStep {
   /** The variable name of the node. */
   variable: string;
   /** Labels to remove. */
+  labels: string[];
+}
+
+/** Add labels to a matched or created node. */
+export interface SetLabelStep {
+  kind: 'SetLabelStep';
+  /** The variable name of the node. */
+  variable: string;
+  /** Labels to add. */
   labels: string[];
 }
 

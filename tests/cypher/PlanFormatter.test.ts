@@ -573,8 +573,8 @@ describe('PlanFormatter', () => {
     it('formats write, OPTIONAL MATCH, MERGE, and index DDL plans via Graph.getQueryPlan in text and mermaid formats', async () => {
       const graph = new Graph();
       const planQueries = [
-        'MATCH (a:Item) OPTIONAL MATCH (a)-[r:REL]->(b:Item) CREATE (c:Item { x: 1 })-[e:REL { w: 2 }]->(a) SET a.x = 2, a += { y: 3 } DETACH DELETE b REMOVE a:Item, e.w RETURN a',
-        'MERGE (m:Item { x: 1 }) ON CREATE SET m.y = 2 ON MATCH SET m.y = 3 RETURN m',
+        'MATCH (a:Item) OPTIONAL MATCH (a)-[r:REL]->(b:Item) CREATE (c:Item { x: 1 })-[e:REL { w: 2 }]->(a) SET a.x = 2, a += { y: 3 }, a:Promoted DETACH DELETE b REMOVE a:Item, e.w RETURN a',
+        'MERGE (m:Item { x: 1 }) ON CREATE SET m.y = 2, m:Fresh ON MATCH SET m.y = 3, m:Seen RETURN m',
         'CREATE INDEX idx_pf FOR (n:Item) ON (n.x)',
         'DROP INDEX idx_pf',
         'SHOW INDEXES',

@@ -59,6 +59,22 @@ export class CypherNotSupportedError extends CypherError {
   }
 }
 
+/**
+ * Thrown when a query containing mutating or index DDL clauses is executed
+ * with `CypherQueryOptions.readOnly === true`.
+ */
+export class ReadOnlyQueryError extends CypherError {
+  /** The first disallowed write/DDL clause encountered (e.g. 'CREATE', 'SET', 'DROP INDEX'). */
+  public readonly clause: string;
+
+  constructor(clause: string) {
+    super(`Write clause '${clause}' is not allowed in read-only query mode`);
+    this.name = 'ReadOnlyQueryError';
+    this.clause = clause;
+    Object.setPrototypeOf(this, ReadOnlyQueryError.prototype);
+  }
+}
+
 // ── Semantic errors ───────────────────────────────────────────────
 
 /**

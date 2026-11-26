@@ -1,41 +1,20 @@
-export interface VisualizerNodeData {
-  id: string;
-  labels: readonly string[];
-  properties?: Readonly<Record<string, unknown>>;
-  [key: string]: unknown;
-}
+import {
+  extractGraphData,
+  type VisualizerNodeData,
+  type VisualizerEdgeData,
+  type VisualizerNode,
+  type VisualizerLink,
+  type VisualizerGraphData,
+} from './extractGraphData';
 
-export interface VisualizerEdgeData {
-  id: string;
-  sourceId: string;
-  targetId: string;
-  type: string;
-  properties?: Readonly<Record<string, unknown>>;
-  [key: string]: unknown;
-}
-
-export interface VisualizerNode {
-  id: string;
-  label?: string;
-  data?: VisualizerNodeData;
-  x?: number;
-  y?: number;
-  z?: number;
-  __bckgDimensions?: [number, number];
-}
-
-export interface VisualizerLink {
-  id?: string;
-  source: string | VisualizerNode;
-  target: string | VisualizerNode;
-  name?: string;
-  data?: VisualizerEdgeData;
-}
-
-export interface VisualizerGraphData {
-  nodes: VisualizerNode[];
-  links: VisualizerLink[];
-}
+export {
+  extractGraphData,
+  type VisualizerNodeData,
+  type VisualizerEdgeData,
+  type VisualizerNode,
+  type VisualizerLink,
+  type VisualizerGraphData,
+};
 
 export interface CypherVisualizerResult {
   rows?: ReadonlyArray<Readonly<Record<string, unknown>>>;
@@ -87,21 +66,6 @@ function resolveDefault<T>(module: unknown): T {
     if (candidate.default) return candidate.default as T;
   }
   return module as T;
-}
-
-function isVisualizerEdgeData(value: object): value is VisualizerEdgeData {
-  const candidate = value as Partial<VisualizerEdgeData>;
-  return typeof candidate.id === 'string'
-    && typeof candidate.sourceId === 'string'
-    && typeof candidate.targetId === 'string'
-    && typeof candidate.type === 'string';
-}
-
-function isVisualizerNodeData(value: object): value is VisualizerNodeData {
-  const candidate = value as Partial<VisualizerNodeData>;
-  return typeof candidate.id === 'string'
-    && Array.isArray(candidate.labels)
-    && !('sourceId' in value);
 }
 
 export interface VisualizerOptions {
@@ -211,7 +175,8 @@ export class CypherVisualizer {
       if (this.options.showPermanentLabels) {
         this.graphInstance.nodeThreeObject?.((node: VisualizerNode) => {
           const label = node.label || node.id;
-          const sprite = new SpriteText(`${label}\n${node.id}`);
+          const text = label === node.id ? node.id : `${label}\n${node.id}`;
+          const sprite = new SpriteText(text);
           sprite.color = '#ffffff';
           sprite.textHeight = 4;
           sprite.backgroundColor = this.getNodeColor(node);
@@ -262,7 +227,7 @@ export class CypherVisualizer {
       if (this.options.showPermanentLabels) {
         this.graphInstance.nodeCanvasObject?.((node: VisualizerNode, ctx: CanvasRenderingContext2D, globalScale: number) => {
           const label = node.label || node.id;
-          const text = `${label}\n${node.id}`;
+          const text = label === node.id ? node.id : `${label}\n${node.id}`;
           const fontSize = 12/globalScale;
           const x = node.x ?? 0;
           const y = node.y ?? 0;
@@ -384,56 +349,8 @@ export class CypherVisualizer {
     this.graphInstance.graphData(data);
   }
 
-  private extractGraphData(rows: ReadonlyArray<Readonly<Record<string, unknown>>>): VisualizerGraphData {
-    const nodesMap = new Map<string, VisualizerNode>();
-    const edgesMap = new Map<string, VisualizerLink>();
-
-    const processValue = (val: unknown): void => {
-      if (!val || typeof val !== 'object') return;
-
-      if (Array.isArray(val)) {
-        val.forEach(processValue);
-        return;
-      }
-
-      // Check if Edge: must have id, sourceId, targetId, type
-      if (isVisualizerEdgeData(val)) {
-        if (!edgesMap.has(val.id)) {
-          edgesMap.set(val.id, {
-            id: val.id,
-            source: val.sourceId,
-            target: val.targetId,
-            name: val.type,
-            data: val
-          });
-        }
-        return;
-      }
-
-      // Check if Node: must have id, labels (and no sourceId to be safe)
-      if (isVisualizerNodeData(val)) {
-        if (!nodesMap.has(val.id)) {
-          nodesMap.set(val.id, {
-            id: val.id,
-            label: val.labels[0] || 'Node',
-            data: val
-          });
-        }
-        return;
-      }
-
-      // For any other object, recurse into its values (might be nested)
-      Object.values(val).forEach(processValue);
-    };
-
-    rows.forEach(row => {
-      Object.values(row).forEach(processValue);
-    });
-
-    return {
-      nodes: Array.from(nodesMap.values()),
-      links: Array.from(edgesMap.values())
-    };
+  public extractGraphData(rows: ReadonlyArray<Readonly<Record<string, unknown>>>): VisualizerGraphData {
+    return extractGraphData(rows);
   }
 
   private escapeHtml(unsafe: string): string {

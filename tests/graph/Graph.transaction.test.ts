@@ -162,6 +162,56 @@ describe('GraphTransaction concurrent conflict detection & isolation', () => {
     }
   });
 
+  it('composes addNodeLabels and removeNodeLabels within transactions, merges with disjoint property writes, and detects conflicts', async () => {
+    const graph = new Graph();
+    const node = await graph.addNode(['Memory', 'STM'], { weight: 1 });
+
+    // 1. Rollback discards staged addNodeLabels
+    const txRb = graph.createTransaction();
+    await txRb.begin();
+    await graph.addNodeLabels(node.id, ['LTM', 'Pinned'], txRb);
+    expect((await graph.getNode(node.id, txRb))?.labels).toEqual(['Memory', 'STM', 'LTM', 'Pinned']);
+    await txRb.rollback();
+    expect((await graph.getNode(node.id))?.labels).toEqual(['Memory', 'STM']);
+
+    // 2. Intra-transaction composition: remove STM -> add LTM + Pinned -> remove Pinned -> re-add STM, plus created node
+    const txCompose = graph.createTransaction();
+    await txCompose.begin();
+    const created = await graph.addNode('Draft', { v: 1 }, txCompose);
+    await graph.addNodeLabels(created.id, ['Reviewed', 'Reviewed'], txCompose);
+    await graph.removeNodeLabels(node.id, ['STM'], txCompose);
+    await graph.addNodeLabels(node.id, ['LTM', 'Pinned'], txCompose);
+    await graph.removeNodeLabels(node.id, ['Pinned'], txCompose);
+    expect((await graph.getNode(node.id, txCompose))?.labels).toEqual(['Memory', 'LTM']);
+    await graph.addNodeLabels(node.id, ['STM'], txCompose);
+    expect((await graph.getNode(node.id, txCompose))?.labels).toEqual(['Memory', 'STM', 'LTM']);
+    await txCompose.commit();
+
+    expect((await graph.getNode(created.id))?.labels).toEqual(['Draft', 'Reviewed']);
+    expect((await graph.getNode(node.id))?.labels).toEqual(['Memory', 'STM', 'LTM']);
+
+    // 3. Disjoint addNodeLabels + property update + concurrent label conflict
+    const tAdd = graph.createTransaction();
+    const tProp = graph.createTransaction();
+    const tConflict = graph.createTransaction();
+    await tAdd.begin();
+    await tProp.begin();
+    await tConflict.begin();
+
+    await graph.addNodeLabels(node.id, ['Pinned'], tAdd);
+    await graph.setNodeProperties(node.id, { weight: 2 }, { merge: true, transaction: tProp });
+    await graph.addNodeLabels(node.id, ['Archived'], tConflict);
+
+    await tAdd.commit();
+    await tProp.commit();
+    await expect(tConflict.commit()).rejects.toThrow(TransactionConflictError);
+    await tConflict.rollback();
+
+    const finalNode = await graph.getNode(node.id);
+    expect(finalNode?.labels).toEqual(['Memory', 'STM', 'LTM', 'Pinned']);
+    expect(finalNode?.properties.weight).toBe(2);
+  });
+
   it('detects concurrent edge property, edge delete-vs-update, and node replace conflicts', async () => {
     const graph = new Graph();
     const a = await graph.addNode('N', { name: 'Alice' });
@@ -230,6 +280,7 @@ describe('GraphTransaction concurrent conflict detection & isolation', () => {
     await expectFailedTx((tx) => graph.setNodeProperties('missing-node', { k: 1 }, { transaction: tx }));
     await expectFailedTx((tx) => graph.unsetNodeProperties('missing-node', ['k'], tx));
     await expectFailedTx((tx) => graph.removeNodeLabels('missing-node', ['Removable'], tx));
+    await expectFailedTx((tx) => graph.addNodeLabels('missing-node', ['LTM'], tx));
     await expectFailedTx((tx) => graph.setEdgeProperties('missing-edge', { k: 1 }, { transaction: tx }));
     await expectFailedTx((tx) => graph.unsetEdgeProperties('missing-edge', ['k'], tx));
 

@@ -44,6 +44,7 @@ export { InMemoryCache } from './storage/cache/InMemoryCache';
 export { CypherEngine } from './cypher/CypherEngine';
 export type { CypherEngineOptions, CypherQueryOptions } from './cypher/CypherEngine';
 export type { CypherResult, CypherRow, CypherSummary } from './cypher/Result';
+export { ReadOnlyQueryError } from './cypher/errors';
 
 export { isPrimitive } from './utils';
 export { TransactionNotActiveError, TransactionFailedError } from './Graph/GraphTransaction';

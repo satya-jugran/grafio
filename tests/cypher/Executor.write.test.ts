@@ -393,6 +393,56 @@ describe('Executor – Write Operations', () => {
       expect(asyncRem.summary.labelsRemoved).toBe(1);
       await cm.invalidateAll();
     });
+
+    it('SET single and multiple labels, promotes :STM -> :LTM, refreshes aliases, and counts summary.labelsAdded across sync and async providers', async () => {
+      const syncGraph = new Graph();
+      await syncGraph.createIndex('idx_ltm_topic', 'node', ['topic'], { labelOrType: 'LTM' });
+      const stm = await syncGraph.addNode(['Memory', 'STM'], { topic: 'cypher' });
+      const other = await syncGraph.addNode(['Memory'], { topic: 'other' });
+      await syncGraph.addEdge(stm.id, other.id, 'LINKS');
+
+      // Promote :STM -> :LTM:Pinned and verify alias/path refresh + labelsAdded idempotency
+      const promo = syncGraph.querySync(
+        `MATCH p = (n:STM)-[:LINKS]->(m), (alias:STM)
+         WHERE id(n) = $nid AND id(alias) = $nid
+         SET n:LTM:Pinned:LTM, n.promoted = true
+         REMOVE n:STM
+         RETURN alias, labels(alias) AS aliasLabels, p`,
+        { nid: stm.id },
+      );
+      expect(promo.summary.labelsRemoved).toBe(1);
+      expect(promo.summary.labelsAdded).toBe(2);
+      expect(promo.summary.propertiesSet).toBe(1);
+      expect(promo.rows[0].aliasLabels).toEqual(['Memory', 'LTM', 'Pinned']);
+      expect((promo.rows[0].alias as { labels: string[] }).labels).toEqual(['Memory', 'LTM', 'Pinned']);
+      const pathArr = promo.rows[0].p as Array<{ labels?: string[] }>;
+      expect(pathArr[0].labels).toEqual(['Memory', 'LTM', 'Pinned']);
+
+      // Re-adding an existing label is idempotent (labelsAdded === 0)
+      const noop = syncGraph.querySync(`MATCH (n:LTM) SET n:LTM RETURN n`);
+      expect(noop.summary.labelsAdded).toBe(0);
+
+      // Secondary label-scoped index now finds the promoted node
+      const indexedMatch = syncGraph.querySync(`MATCH (n:LTM { topic: 'cypher' }) RETURN n.topic AS topic`);
+      expect(indexedMatch.rows).toEqual([{ topic: 'cypher' }]);
+
+      // Async provider path via CachedStorageProvider
+      const cfg: CacheConfig = {
+        maxNodesCount: 200,
+        maxEdgesCount: 400,
+        cacheStore: 'in-memory',
+        evictionStrategy: 'LRU',
+        preloadStrategy: 'none',
+      };
+      const cm = new CacheManager(cfg);
+      const cached = new CachedStorageProvider(new InMemoryStorageProvider(), 'set-label-async', cm, cfg);
+      const asyncGraph = new Graph(cached);
+      await asyncGraph.addNode(['STM'], { name: 'AsyncMem' });
+      const asyncSet = await asyncGraph.query(`MATCH (n:STM) SET n:STM:LTM:Pinned RETURN labels(n) AS lbls`);
+      expect(asyncSet.summary.labelsAdded).toBe(2);
+      expect(asyncSet.rows[0].lbls).toEqual(['STM', 'LTM', 'Pinned']);
+      await cm.invalidateAll();
+    });
   });
 
   // ── Index DDL ───────────────────────────────────────────────────

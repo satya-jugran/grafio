@@ -341,4 +341,36 @@ export function runGraphPropertiesScenarios(
       await expect(graph.unsetEdgeProperties('non-existent', ['prop'])).rejects.toThrow();
     });
   });
+
+  describe('Graph.addNodeLabels', () => {
+    let graph: Graph;
+
+    beforeEach(async () => {
+      graph = new Graph(provider);
+    });
+
+    it('should add single and multiple labels idempotently without duplicating existing labels', async () => {
+      const node = await graph.addNode(['Memory', 'STM'], { topic: 'graph' });
+      await graph.addNodeLabels(node.id, ['LTM']);
+      expect((await graph.getNode(node.id))?.labels).toEqual(['Memory', 'STM', 'LTM']);
+
+      // Re-adding existing labels + duplicate in argument is a clean set-union
+      await graph.addNodeLabels(node.id, ['LTM', 'Pinned', 'Pinned']);
+      expect((await graph.getNode(node.id))?.labels).toEqual(['Memory', 'STM', 'LTM', 'Pinned']);
+    });
+
+    it('should update label-scoped secondary property indexes when adding a label', async () => {
+      await graph.createIndex('idx_ltm_topic', 'node', ['topic'], { labelOrType: 'LTM' });
+      const node = await graph.addNode(['STM'], { topic: 'synapse' });
+      expect(await graph.getNodes({ filter: { types: ['LTM'], properties: [{ key: 'topic', value: 'synapse' }] } })).toHaveLength(0);
+
+      await graph.addNodeLabels(node.id, ['LTM']);
+      const matched = await graph.getNodes({ filter: { types: ['LTM'], properties: [{ key: 'topic', value: 'synapse' }] } });
+      expect(matched.map((n) => n.id)).toEqual([node.id]);
+    });
+
+    it('should throw NodeNotFoundError for non-existent node', async () => {
+      await expect(graph.addNodeLabels('non-existent', ['LTM'])).rejects.toThrow();
+    });
+  });
 }

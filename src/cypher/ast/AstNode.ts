@@ -57,14 +57,16 @@ export interface SetClause {
 
 export interface SetItem {
   kind: 'SetItem';
-  /** The entity variable being modified (e.g., `n` in `SET n.prop = val`). */
+  /** The entity variable being modified (e.g., `n` in `SET n.prop = val` or `SET n:Label`). */
   variable: Expression;
-  /** The property key. Optional for map replacement/mutation. */
+  /** The property key. Optional for map replacement/mutation or label assignment. */
   property?: string;
   /** Operator '=' for property assignment/map replace, '+=' for map mutation */
-  operator: '=' | '+=';
-  /** The value expression. */
-  value: Expression;
+  operator?: '=' | '+=';
+  /** The value expression (present when setting properties/maps). */
+  value?: Expression;
+  /** Labels to add to a node (e.g., `['LTM', 'Pinned']` in `SET n:LTM:Pinned`). */
+  labels?: string[];
 }
 
 export interface DeleteClause {

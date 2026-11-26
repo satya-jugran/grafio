@@ -21,6 +21,7 @@ import {
   MergeStep,
   OptionalMatchStep,
   SetPropertyStep,
+  SetLabelStep,
   CreateNodeStep,
   CreateEdgeStep,
   RemoveLabelStep,
@@ -55,6 +56,7 @@ interface ExecCounters {
   edgesCreated: number;
   edgesDeleted: number;
   propertiesSet: number;
+  labelsAdded: number;
   labelsRemoved: number;
   indexesCreated: number;
   indexesDeleted: number;
@@ -67,6 +69,7 @@ function createCounters(): ExecCounters {
     edgesCreated: 0,
     edgesDeleted: 0,
     propertiesSet: 0,
+    labelsAdded: 0,
     labelsRemoved: 0,
     indexesCreated: 0,
     indexesDeleted: 0,
@@ -470,6 +473,17 @@ export class Executor {
         counters.labelsRemoved += result.labelsRemoved ?? 0;
         return result.rows;
       }
+      case 'SetLabelStep': {
+        const result = this._writeExecutor.executeSetLabelSync(
+          kernel,
+          step as SetLabelStep,
+          rows,
+          meta.slotTable,
+          transaction,
+        );
+        counters.labelsAdded += result.labelsAdded ?? 0;
+        return result.rows;
+      }
 
       case 'CreateIndexStep': {
         const result = this._indexExecutor.executeCreateIndexSync(kernel, step, rows);
@@ -506,22 +520,39 @@ export class Executor {
           if (matchRows.length > 0) {
             let currentRows = matchRows;
             for (const item of stepMerge.onMatchItems) {
-              const setStep: SetPropertyStep = {
-                kind: 'SetPropertyStep',
-                variable: item.variable,
-                entityKind: item.entityKind,
-                assignments: [{ key: item.property, operator: item.operator, value: item.value }],
-              };
-              const res = this._writeExecutor.executeSetPropertySync(
-                kernel,
-                setStep,
-                currentRows,
-                params,
-                meta,
-                transaction,
-              );
-              currentRows = res.rows;
-              counters.propertiesSet += res.propertiesSet ?? 0;
+              if (item.labels && item.labels.length > 0) {
+                const labelStep: SetLabelStep = {
+                  kind: 'SetLabelStep',
+                  variable: item.variable,
+                  labels: item.labels,
+                };
+                const res = this._writeExecutor.executeSetLabelSync(
+                  kernel,
+                  labelStep,
+                  currentRows,
+                  meta.slotTable,
+                  transaction,
+                );
+                currentRows = res.rows;
+                counters.labelsAdded += res.labelsAdded ?? 0;
+              } else {
+                const setStep: SetPropertyStep = {
+                  kind: 'SetPropertyStep',
+                  variable: item.variable,
+                  entityKind: item.entityKind,
+                  assignments: [{ key: item.property, operator: item.operator!, value: item.value! }],
+                };
+                const res = this._writeExecutor.executeSetPropertySync(
+                  kernel,
+                  setStep,
+                  currentRows,
+                  params,
+                  meta,
+                  transaction,
+                );
+                currentRows = res.rows;
+                counters.propertiesSet += res.propertiesSet ?? 0;
+              }
             }
             for (let m = 0; m < currentRows.length; m++) resultRows.push(currentRows[m]);
           } else {
@@ -564,22 +595,39 @@ export class Executor {
               }
             }
             for (const item of stepMerge.onCreateItems) {
-              const setStep: SetPropertyStep = {
-                kind: 'SetPropertyStep',
-                variable: item.variable,
-                entityKind: item.entityKind,
-                assignments: [{ key: item.property, operator: item.operator, value: item.value }],
-              };
-              const res = this._writeExecutor.executeSetPropertySync(
-                kernel,
-                setStep,
-                currentRows,
-                params,
-                meta,
-                transaction,
-              );
-              currentRows = res.rows;
-              counters.propertiesSet += res.propertiesSet ?? 0;
+              if (item.labels && item.labels.length > 0) {
+                const labelStep: SetLabelStep = {
+                  kind: 'SetLabelStep',
+                  variable: item.variable,
+                  labels: item.labels,
+                };
+                const res = this._writeExecutor.executeSetLabelSync(
+                  kernel,
+                  labelStep,
+                  currentRows,
+                  meta.slotTable,
+                  transaction,
+                );
+                currentRows = res.rows;
+                counters.labelsAdded += res.labelsAdded ?? 0;
+              } else {
+                const setStep: SetPropertyStep = {
+                  kind: 'SetPropertyStep',
+                  variable: item.variable,
+                  entityKind: item.entityKind,
+                  assignments: [{ key: item.property, operator: item.operator!, value: item.value! }],
+                };
+                const res = this._writeExecutor.executeSetPropertySync(
+                  kernel,
+                  setStep,
+                  currentRows,
+                  params,
+                  meta,
+                  transaction,
+                );
+                currentRows = res.rows;
+                counters.propertiesSet += res.propertiesSet ?? 0;
+              }
             }
             for (let c = 0; c < currentRows.length; c++) resultRows.push(currentRows[c]);
           }
@@ -856,6 +904,16 @@ export class Executor {
         counters.labelsRemoved += result.labelsRemoved ?? 0;
         return result.rows;
       }
+      case 'SetLabelStep': {
+        const result = await this._writeExecutor.executeSetLabel(
+          step as SetLabelStep,
+          rows,
+          meta.slotTable,
+          transaction,
+        );
+        counters.labelsAdded += result.labelsAdded ?? 0;
+        return result.rows;
+      }
 
       case 'CreateIndexStep': {
         const result = await this._indexExecutor.executeCreateIndex(step, rows);
@@ -890,21 +948,37 @@ export class Executor {
           if (matchRows.length > 0) {
             let currentRows = matchRows;
             for (const item of stepMerge.onMatchItems) {
-              const setStep: SetPropertyStep = {
-                kind: 'SetPropertyStep',
-                variable: item.variable,
-                entityKind: item.entityKind,
-                assignments: [{ key: item.property, operator: item.operator, value: item.value }],
-              };
-              const res = await this._writeExecutor.executeSetProperty(
-                setStep,
-                currentRows,
-                params,
-                meta,
-                transaction,
-              );
-              currentRows = res.rows;
-              counters.propertiesSet += res.propertiesSet ?? 0;
+              if (item.labels && item.labels.length > 0) {
+                const labelStep: SetLabelStep = {
+                  kind: 'SetLabelStep',
+                  variable: item.variable,
+                  labels: item.labels,
+                };
+                const res = await this._writeExecutor.executeSetLabel(
+                  labelStep,
+                  currentRows,
+                  meta.slotTable,
+                  transaction,
+                );
+                currentRows = res.rows;
+                counters.labelsAdded += res.labelsAdded ?? 0;
+              } else {
+                const setStep: SetPropertyStep = {
+                  kind: 'SetPropertyStep',
+                  variable: item.variable,
+                  entityKind: item.entityKind,
+                  assignments: [{ key: item.property, operator: item.operator!, value: item.value! }],
+                };
+                const res = await this._writeExecutor.executeSetProperty(
+                  setStep,
+                  currentRows,
+                  params,
+                  meta,
+                  transaction,
+                );
+                currentRows = res.rows;
+                counters.propertiesSet += res.propertiesSet ?? 0;
+              }
             }
             resultRows.push(...currentRows);
           } else {
@@ -944,21 +1018,37 @@ export class Executor {
               }
             }
             for (const item of stepMerge.onCreateItems) {
-              const setStep: SetPropertyStep = {
-                kind: 'SetPropertyStep',
-                variable: item.variable,
-                entityKind: item.entityKind,
-                assignments: [{ key: item.property, operator: item.operator, value: item.value }],
-              };
-              const res = await this._writeExecutor.executeSetProperty(
-                setStep,
-                currentRows,
-                params,
-                meta,
-                transaction,
-              );
-              currentRows = res.rows;
-              counters.propertiesSet += res.propertiesSet ?? 0;
+              if (item.labels && item.labels.length > 0) {
+                const labelStep: SetLabelStep = {
+                  kind: 'SetLabelStep',
+                  variable: item.variable,
+                  labels: item.labels,
+                };
+                const res = await this._writeExecutor.executeSetLabel(
+                  labelStep,
+                  currentRows,
+                  meta.slotTable,
+                  transaction,
+                );
+                currentRows = res.rows;
+                counters.labelsAdded += res.labelsAdded ?? 0;
+              } else {
+                const setStep: SetPropertyStep = {
+                  kind: 'SetPropertyStep',
+                  variable: item.variable,
+                  entityKind: item.entityKind,
+                  assignments: [{ key: item.property, operator: item.operator!, value: item.value! }],
+                };
+                const res = await this._writeExecutor.executeSetProperty(
+                  setStep,
+                  currentRows,
+                  params,
+                  meta,
+                  transaction,
+                );
+                currentRows = res.rows;
+                counters.propertiesSet += res.propertiesSet ?? 0;
+              }
             }
             resultRows.push(...currentRows);
           }
@@ -1239,6 +1329,7 @@ export class Executor {
       edgesCreated: counters.edgesCreated,
       edgesDeleted: counters.edgesDeleted,
       propertiesSet: counters.propertiesSet,
+      labelsAdded: counters.labelsAdded,
       labelsRemoved: counters.labelsRemoved,
       indexesCreated: counters.indexesCreated,
       indexesDeleted: counters.indexesDeleted,

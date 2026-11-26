@@ -668,4 +668,14 @@ describe('Postfix label predicate pushdown', () => {
     expect(scans[0].variable).toBe('b');
     expect(scans[0].types).toEqual(['Person']);
   });
+
+  it('plans SET n:Label as SetLabelStep', async () => {
+    const p = await plan('MATCH (n:STM) SET n:LTM:Pinned RETURN n');
+    const step = p.steps.find((s) => s.kind === 'SetLabelStep');
+    expect(step).toEqual({
+      kind: 'SetLabelStep',
+      variable: 'n',
+      labels: ['LTM', 'Pinned'],
+    });
+  });
 });
