@@ -11,7 +11,7 @@ High-performance graph database with **native Cypher support** and **pluggable s
 ## Features
 
 - **In-Memory SoA & Hybrid CSR Engine** - Dense slot arenas, adaptive typed columns, `compact()` CSR adjacency lists, and synchronous `querySync()` execution
-- **Cypher Queries** - OpenCypher-compatible query language with aggregations, variable-length paths, `PlanCache`, and `graph.query()` / `graph.querySync()`
+- **Cypher Queries** - OpenCypher-compatible query language with aggregations, standard scalar functions (strings, casts, collections, math), variable-length paths, `PlanCache`, and `graph.query()` / `graph.querySync()`
 - **Pluggable Storage** - Built-in zero-dependency `InMemoryStorageProvider`, with MongoDB available separately
 - **Multi-Hop Traversal** - BFS/DFS with type and property filtering
 - **Transactions** - Optimistic property-level conflict detection (`TransactionConflictError`) and atomic rollback

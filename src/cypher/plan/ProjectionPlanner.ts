@@ -164,6 +164,16 @@ export class ProjectionPlanner {
         return this._hasAggregateFunction(expr.list) ||
           (expr.where ? this._hasAggregateFunction(expr.where) : false) ||
           (expr.projection ? this._hasAggregateFunction(expr.projection) : false);
+      case 'Case':
+        return (
+          (expr.expression ? this._hasAggregateFunction(expr.expression) : false) ||
+          expr.branches.some(
+            (b) => this._hasAggregateFunction(b.when) || this._hasAggregateFunction(b.then),
+          ) ||
+          (expr.else ? this._hasAggregateFunction(expr.else) : false)
+        );
+      case 'Map':
+        return Object.values(expr.props).some((v) => this._hasAggregateFunction(v));
       default:
         return false;
     }
@@ -344,6 +354,26 @@ export class ProjectionPlanner {
           (expr.where ? this._extractAggregateFunctionCall(expr.where) : null) ??
           (expr.projection ? this._extractAggregateFunctionCall(expr.projection) : null)
         );
+      case 'Case': {
+        if (expr.expression) {
+          const found = this._extractAggregateFunctionCall(expr.expression);
+          if (found) return found;
+        }
+        for (const b of expr.branches) {
+          const found =
+            this._extractAggregateFunctionCall(b.when) ??
+            this._extractAggregateFunctionCall(b.then);
+          if (found) return found;
+        }
+        return expr.else ? this._extractAggregateFunctionCall(expr.else) : null;
+      }
+      case 'Map': {
+        for (const v of Object.values(expr.props)) {
+          const found = this._extractAggregateFunctionCall(v);
+          if (found) return found;
+        }
+        return null;
+      }
       default:
         return null;
     }
@@ -400,8 +430,20 @@ export class ProjectionPlanner {
             });
             return { kind: 'Identifier', name: internalAlias };
           }
-          return e;
+          return { ...e, args: e.args.map(rewrite) };
         }
+        case 'Case':
+          return {
+            ...e,
+            expression: e.expression ? rewrite(e.expression) : undefined,
+            branches: e.branches.map((b) => ({ when: rewrite(b.when), then: rewrite(b.then) })),
+            else: e.else ? rewrite(e.else) : undefined,
+          };
+        case 'Map':
+          return {
+            ...e,
+            props: Object.fromEntries(Object.entries(e.props).map(([k, v]) => [k, rewrite(v)])),
+          };
         case 'Binary':
           return { ...e, left: rewrite(e.left), right: rewrite(e.right) };
         case 'Unary':

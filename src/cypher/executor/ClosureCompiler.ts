@@ -15,6 +15,7 @@ import type { ISyncGraphKernel } from '../../storage/IStorageProvider';
 import { TAG_ABSENT } from '../../storage/engine/ColumnStore';
 import { CypherRuntimeError, TypeMismatchError, UnboundParameterError } from '../errors';
 import { UNBOUND, type SlotRow, type VarSlotTable } from '../plan/CompiledPlanMeta';
+import { compileScalarFunction } from './ScalarFunctions';
 
 export type CompiledExprFn = (
   row: SlotRow,
@@ -179,21 +180,40 @@ export function compileExpression(
             if (l == null || rv == null) return null;
             return typeof l === 'string' && typeof rv === 'string' && l.includes(rv);
           };
-        case '=~':
+        case '=~': {
+          if (expr.right.kind === 'Literal' && typeof expr.right.value === 'string') {
+            try {
+              const compiled = compileCypherRegex(expr.right.value);
+              return (r, p, k) => {
+                const l = leftFn(r, p, k);
+                if (l == null) return null;
+                return typeof l === 'string' && compiled.test(l);
+              };
+            } catch (compileErr) {
+              return (r, p, k) => {
+                const l = leftFn(r, p, k);
+                if (l == null) return null;
+                if (typeof l !== 'string') return false;
+                throw compileErr;
+              };
+            }
+          }
+          let cachedRaw: string | undefined;
+          let cachedRe: RegExp | undefined;
           return (r, p, k) => {
             const l = leftFn(r, p, k);
             const rv = rightFn(r, p, k);
             if (l == null || rv == null) return null;
             if (typeof l !== 'string' || typeof rv !== 'string') return false;
-            try {
-              let pat = rv;
-              if (!pat.startsWith('^')) pat = '^' + pat;
-              if (!pat.endsWith('$')) pat = pat + '$';
-              return new RegExp(pat).test(l);
-            } catch {
-              throw new CypherRuntimeError(`Invalid regular expression: ${rv}`);
+            let re = cachedRaw === rv ? cachedRe : undefined;
+            if (!re) {
+              re = compileCypherRegex(rv);
+              cachedRaw = rv;
+              cachedRe = re;
             }
+            return re.test(l);
           };
+        }
         default:
           throw new CypherRuntimeError(`Unknown operator: ${(expr as { op: string }).op}`);
       }
@@ -369,104 +389,7 @@ export function compileExpression(
     case 'FunctionCall': {
       const fnName = expr.name.toUpperCase();
       const argFns = expr.args.map((a) => compileExpression(a, slotTable));
-      switch (fnName) {
-        case 'ID': {
-          if (argFns.length !== 1) {
-            return () => {
-              throw new CypherRuntimeError(`id() expects exactly 1 argument, got ${argFns.length}`);
-            };
-          }
-          const a0 = argFns[0];
-          return (r, p, k) => {
-            const arg = a0(r, p, k);
-            if (arg && typeof arg === 'object' && 'id' in (arg as object)) {
-              return (arg as { id: string }).id;
-            }
-            if (arg === null || arg === undefined) return null;
-            throw new CypherRuntimeError(`id() requires a node or relationship argument, got ${typeof arg}`);
-          };
-        }
-        case 'NODES': {
-          if (argFns.length !== 1) {
-            return () => {
-              throw new CypherRuntimeError(`nodes() expects exactly 1 argument, got ${argFns.length}`);
-            };
-          }
-          const a0 = argFns[0];
-          return (r, p, k) => {
-            const arg = a0(r, p, k);
-            if (arg === null || arg === undefined) return null;
-            if (!Array.isArray(arg)) {
-              throw new CypherRuntimeError(`nodes() requires a path argument, got ${typeof arg}`);
-            }
-            return arg.filter((_, idx) => idx % 2 === 0);
-          };
-        }
-        case 'RELATIONSHIPS': {
-          if (argFns.length !== 1) {
-            return () => {
-              throw new CypherRuntimeError(`relationships() expects exactly 1 argument, got ${argFns.length}`);
-            };
-          }
-          const a0 = argFns[0];
-          return (r, p, k) => {
-            const arg = a0(r, p, k);
-            if (arg === null || arg === undefined) return null;
-            if (!Array.isArray(arg)) {
-              throw new CypherRuntimeError(`relationships() requires a path argument, got ${typeof arg}`);
-            }
-            return arg.filter((_, idx) => idx % 2 === 1);
-          };
-        }
-        case 'LABELS': {
-          if (argFns.length !== 1) {
-            return () => {
-              throw new CypherRuntimeError(`labels() expects exactly 1 argument, got ${argFns.length}`);
-            };
-          }
-          const a0 = argFns[0];
-          return (r, p, k) => {
-            const arg = a0(r, p, k);
-            if (arg === null || arg === undefined) return null;
-            if (arg instanceof Node) return arg.labels;
-            throw new CypherRuntimeError(`labels() requires a node argument, got ${typeof arg}`);
-          };
-        }
-        case 'TYPE': {
-          if (argFns.length !== 1) {
-            return () => {
-              throw new CypherRuntimeError(`type() expects exactly 1 argument, got ${argFns.length}`);
-            };
-          }
-          const a0 = argFns[0];
-          return (r, p, k) => {
-            const arg = a0(r, p, k);
-            if (arg === null || arg === undefined) return null;
-            if (arg instanceof Edge) return arg.type;
-            throw new CypherRuntimeError(`type() requires a relationship argument, got ${typeof arg}`);
-          };
-        }
-        case 'SIZE': {
-          if (argFns.length !== 1) {
-            return () => {
-              throw new CypherRuntimeError(`size() expects exactly 1 argument, got ${argFns.length}`);
-            };
-          }
-          const a0 = argFns[0];
-          return (r, p, k) => {
-            const arg = a0(r, p, k);
-            if (arg === null || arg === undefined) return null;
-            if (Array.isArray(arg)) return arg.length;
-            throw new CypherRuntimeError(`size() requires a list argument, got ${typeof arg}`);
-          };
-        }
-        default: {
-          const origName = expr.name;
-          return () => {
-            throw new CypherRuntimeError(`Function '${origName}' is not yet supported`);
-          };
-        }
-      }
+      return compileScalarFunction(fnName, expr.name, argFns, expr.distinct);
     }
 
     case 'ExistsSubquery':
@@ -491,6 +414,32 @@ export function compileExpression(
       return () => {
         throw new CypherRuntimeError(`Unsupported expression kind: '${(expr as Expression).kind}'`);
       };
+  }
+}
+
+const LEADING_REGEX_FLAGS_RE = /^\(\?([ims]+)\)/;
+
+/**
+ * Compile an openCypher regex pattern string into a stateless JS {@link RegExp}.
+ * Extracts leading inline flags (`(?i)`, `(?m)`, `(?s)`) and anchors the full
+ * pattern as `^(?:...)$` so top-level alternations match the entire string.
+ */
+function compileCypherRegex(raw: string): RegExp {
+  let body = raw;
+  let flagSet: Set<string> | undefined;
+  let match = LEADING_REGEX_FLAGS_RE.exec(body);
+  while (match) {
+    if (!flagSet) flagSet = new Set<string>();
+    const grp = match[1];
+    for (let i = 0; i < grp.length; i++) flagSet.add(grp[i]);
+    body = body.slice(match[0].length);
+    match = LEADING_REGEX_FLAGS_RE.exec(body);
+  }
+  const flags = flagSet ? Array.from(flagSet).join('') : '';
+  try {
+    return new RegExp(`^(?:${body})$`, flags);
+  } catch {
+    throw new CypherRuntimeError(`Invalid regular expression: ${raw}`);
   }
 }
 

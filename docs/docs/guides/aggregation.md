@@ -71,6 +71,17 @@ RETURN p.city, COUNT(p) AS count, AVG(p.age) AS avgAge
 ORDER BY count DESC
 ```
 
+You can also group by scalar function expressions and wrap aggregate results in scalar functions:
+
+```cypher
+MATCH (p:Person)
+RETURN toLower(p.city) AS city,
+       COUNT(p) AS count,
+       round(AVG(p.age), 1) AS avgAge,
+       coalesce(SUM(p.bonus), 0) AS totalBonus
+ORDER BY count DESC
+```
+
 ## Using DISTINCT
 
 ```cypher

@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [8.3.0] - 2026-11-26
+
+### New Features
+
+- **Standard openCypher Scalar Functions (`ScalarFunctions` / `ClosureCompiler`):** Added CSP-safe monomorphic closures for `coalesce` (lazy with 1/2-arg unrolled fast paths), string functions (`toLower`/`lower`, `toUpper`/`upper`, `trim`, `lTrim`, `rTrim`, `substring`, `replace`, `split`, plus `size()` extended to strings), type casts (`toString`, `toInteger`/`toInt`, `toFloat`, `toBoolean`), collection/map/path helpers (`keys`, `properties`, `head`, `last`, `tail`, `range`, `length(path)`), math (`abs`, `round` with optional precision, `ceil`, `floor`, `sqrt`), and execution-time `timestamp()`, along with `DISTINCT` rejection on scalar functions.
+- **Regex `=~` Inline Flags & Pre-Compilation (`ClosureCompiler`):** Extracted leading `(?i)`, `(?m)`, and `(?s)` flags before full-string `^(?:...)$` anchoring, pre-compiled literal regexes once at closure-compile time, and added a 1-slot inline cache for parameterized patterns.
+- **Scalar `GROUP BY` Keys (`Semantic`):** Allowed non-aggregate `FunctionCall` expressions as grouping keys in `RETURN` (e.g. `RETURN toLower(p.city) AS city, COUNT(p)`).
+
+### Bug Fixes
+
+- **Nested Aggregate Rewriting (`ProjectionPlanner`):** Fixed `_extractAndRewriteAggregates` to recurse into non-aggregate `FunctionCall` arguments (as well as `Case` and `Map` expressions), enabling queries such as `coalesce(SUM(n.x), 0)` and `round(AVG(n.age), 1)`.
+
 ## [8.2.0] - 2026-11-26
 
 ### New Features

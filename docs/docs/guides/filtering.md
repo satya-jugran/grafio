@@ -33,6 +33,7 @@ RETURN p.name, p.age
 | `CONTAINS` | `p.name CONTAINS 'John'` | Substring match |
 | `STARTS WITH` | `p.name STARTS WITH 'J'` | Prefix match |
 | `ENDS WITH` | `p.name ENDS WITH 'n'` | Suffix match |
+| `=~` | `p.name =~ '(?i)ali.*'` | Full-string regex match (supports `(?i)`, `(?m)`, `(?s)`) |
 | `IN` | `p.city IN ['NYC', 'LA']` | In list |
 | `NOT IN` | `p.city NOT IN ['SF']` | Not in list |
 | `IS NULL` | `p.email IS NULL` | Null check |

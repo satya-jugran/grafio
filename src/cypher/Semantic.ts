@@ -1161,6 +1161,7 @@ export class Semantic {
     switch (expr.kind) {
       case 'Identifier':
       case 'PropertyAccess':
+      case 'FunctionCall':
         return true;
 
       default:

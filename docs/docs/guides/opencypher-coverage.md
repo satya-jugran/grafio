@@ -30,6 +30,7 @@ Grafio's Cypher engine supports a comprehensive subset of openCypher.
 - `DROP INDEX`
 - `SHOW INDEXES`
 - Postfix label & relationship-type predicates in expressions (`n:Label`, `n:A|B`, `n:A:B`, `NOT n:Archived`, `r:TYPE_A|TYPE_B`)
+- Standard openCypher scalar functions (`coalesce`, string functions, type conversions, list/map helpers, math functions, `length(path)`, `timestamp()`) — see [Functions](./functions)
 
 ## Not supported
 
